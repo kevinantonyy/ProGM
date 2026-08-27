@@ -88,9 +88,10 @@ export default function Login() {
         sessionStorage.removeItem('yahooClaim');
         navigate('/yahoo?yahoo=connected');
       } else if (espnPending) {
-        await api.post('/espn/connect', JSON.parse(espnPending), { headers: { Authorization: `Bearer ${authResult.token}` } });
+        const pendingEspn = JSON.parse(espnPending);
+        await api.post('/espn/connect', pendingEspn, { headers: { Authorization: `Bearer ${authResult.token}` } });
         sessionStorage.removeItem('espnPending');
-        navigate('/espn');
+        navigate(pendingEspn.sport === 'football' ? '/football' : '/espn');
       } else {
         navigate('/');
       }

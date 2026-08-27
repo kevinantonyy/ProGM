@@ -8,6 +8,7 @@ const navItems = [
   { to: '/trades', label: 'AI Trades', icon: '🤖' },
   { to: '/yahoo', label: 'Yahoo Fantasy', icon: 'Y!' },
   { to: '/espn', label: 'ESPN Fantasy', icon: 'E' },
+  { to: '/football', label: 'Fantasy Football', icon: '🏈' },
 ];
 
 export default function Layout() {
