@@ -853,7 +853,6 @@ async function getFootballExternalData(scoringFormat = "std", teamCount = 12) {
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 app.get("/auth/yahoo", (req, res) => {
-  const nonce = crypto.randomBytes(16).toString("hex");
   const state = crypto.randomBytes(24).toString("hex");
   req.session.yahooOAuthState = state;
 
@@ -862,10 +861,9 @@ app.get("/auth/yahoo", (req, res) => {
     `?client_id=${encodeURIComponent(YAHOO_CLIENT_ID)}` +
     `&redirect_uri=${encodeURIComponent(YAHOO_REDIRECT_URI)}` +
     `&response_type=code` +
-    `&scope=${encodeURIComponent("openid")}` +
-    `&nonce=${encodeURIComponent(nonce)}` +
     `&state=${encodeURIComponent(state)}` +
     `&language=en-us`;
+
   res.redirect(authUrl);
 });
 
