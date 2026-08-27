@@ -19,6 +19,10 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('yahoo') === 'connected') setError('Yahoo account linked successfully.');
+    if (params.get('yahoo') === 'pending' && params.get('claim')) {
+      sessionStorage.setItem('yahooClaim', params.get('claim'));
+      setError('Yahoo authorized successfully. Sign in or register to finish linking your fantasy account.');
+    }
     if (params.get('yahoo') === 'error') setError(params.get('message') || 'Yahoo connection failed');
     if (localStorage.getItem('token')) {
       api.get('/yahoo/status').then(res => setYahooStatus(res.data)).catch(() => {});
@@ -26,10 +30,6 @@ export default function Login() {
   }, []);
 
   async function connectYahoo() {
-    if (!localStorage.getItem('token')) {
-      setError('Sign in to FantasyProGM first, then link your Yahoo Fantasy account.');
-      return;
-    }
     setYahooLoading(true);
     setError('');
     try {
@@ -47,14 +47,24 @@ export default function Login() {
     setLoading(true);
 
     try {
+      let authResult;
       if (isRegister) {
         const res = await api.post('/auth/register', { username, email, password, teamName });
+        authResult = res.data;
         login(res.data.token, res.data.user);
       } else {
         const res = await api.post('/auth/login', { username, password });
+        authResult = res.data;
         login(res.data.token, res.data.user);
       }
-      navigate('/');
+      const yahooClaim = sessionStorage.getItem('yahooClaim');
+      if (yahooClaim) {
+        await api.post('/yahoo/claim', { claim: yahooClaim }, { headers: { Authorization: `Bearer ${authResult.token}` } });
+        sessionStorage.removeItem('yahooClaim');
+        navigate('/yahoo?yahoo=connected');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Something went wrong');
     } finally {
@@ -93,7 +103,7 @@ export default function Login() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#6001d2] text-xl font-black text-white">Y!</div>
                 <div>
                   <p className="font-semibold text-white">Bring in your Yahoo Fantasy team</p>
-                  <p className="mt-1 text-xs leading-5 text-dark-300">Link Yahoo to securely view your NBA leagues and teams in FantasyProGM.</p>
+                  <p className="mt-1 text-xs leading-5 text-dark-300">Connect Yahoo first, then sign in or create an account to securely attach your NBA leagues and teams.</p>
                 </div>
               </div>
               <button type="button" onClick={connectYahoo} disabled={yahooLoading || yahooStatus?.connected} className="mt-4 w-full rounded-lg bg-[#6001d2] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#7b20e8] disabled:opacity-60">

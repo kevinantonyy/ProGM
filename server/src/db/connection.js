@@ -56,8 +56,13 @@ export async function initDatabase() {
     refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, yahoo_guid VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
   await postgres.query(`CREATE TABLE IF NOT EXISTS yahoo_oauth_states (
-    state_hash CHAR(64) PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    state_hash CHAR(64) PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
+  await postgres.query('ALTER TABLE yahoo_oauth_states ALTER COLUMN user_id DROP NOT NULL');
+  await postgres.query(`CREATE TABLE IF NOT EXISTS yahoo_pending_connections (
+    claim_hash CHAR(64) PRIMARY KEY, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL, yahoo_guid VARCHAR(100),
+    claim_expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
   console.log('Database initialized successfully');
 }
 

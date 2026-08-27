@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import pool from '../db/connection.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, optionalAuthenticate } from '../middleware/auth.js';
 
 const router = Router();
 const AUTH_URL = 'https://api.login.yahoo.com/oauth2/request_auth';
@@ -96,14 +96,15 @@ router.get('/status', authenticate, async (req, res) => {
   res.json({ configured: configured(), connected: rows.length > 0, updatedAt: rows[0]?.updated_at || null });
 });
 
-router.post('/auth-url', authenticate, async (req, res) => {
+router.post('/auth-url', optionalAuthenticate, async (req, res) => {
   try {
     if (!configured()) return res.status(503).json({ error: 'Yahoo integration is not configured yet' });
     const state = crypto.randomBytes(32).toString('base64url');
     await pool.execute('DELETE FROM yahoo_oauth_states WHERE expires_at < NOW()');
+    await pool.execute('DELETE FROM yahoo_pending_connections WHERE claim_expires_at < NOW()');
     await pool.execute(
       'INSERT INTO yahoo_oauth_states (state_hash, user_id, expires_at) VALUES (?, ?, CURRENT_TIMESTAMP + INTERVAL \'10 minutes\')',
-      [stateHash(state), req.userId]
+      [stateHash(state), req.userId || null]
     );
     const params = new URLSearchParams({ client_id: config().clientId, redirect_uri: config().redirectUri, response_type: 'code', state });
     res.json({ url: `${AUTH_URL}?${params}` });
@@ -126,13 +127,51 @@ router.get('/callback', async (req, res) => {
     const userId = states[0].user_id;
     await pool.execute('DELETE FROM yahoo_oauth_states WHERE state_hash = ?', [stateHash(String(req.query.state))]);
     const tokens = await exchangeToken({ grant_type: 'authorization_code', redirect_uri: config().redirectUri, code: String(req.query.code) });
-    await saveTokens(userId, tokens);
-    redirect.searchParams.set('yahoo', 'connected');
+    if (userId) {
+      await saveTokens(userId, tokens);
+      redirect.searchParams.set('yahoo', 'connected');
+    } else {
+      const claim = crypto.randomBytes(32).toString('base64url');
+      const tokenExpiresAt = new Date(Date.now() + Math.max(60, Number(tokens.expires_in || 3600) - 60) * 1000);
+      await pool.execute(
+        `INSERT INTO yahoo_pending_connections
+         (claim_hash, access_token, refresh_token, expires_at, yahoo_guid, claim_expires_at)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP + INTERVAL '15 minutes')`,
+        [stateHash(claim), tokens.access_token, tokens.refresh_token, tokenExpiresAt, tokens.xoauth_yahoo_guid || null]
+      );
+      redirect.pathname = '/login';
+      redirect.searchParams.set('yahoo', 'pending');
+      redirect.searchParams.set('claim', claim);
+    }
   } catch (error) {
     redirect.searchParams.set('yahoo', 'error');
     redirect.searchParams.set('message', error.message);
   }
   res.redirect(redirect.toString());
+});
+
+router.post('/claim', authenticate, async (req, res) => {
+  try {
+    if (!req.body?.claim) return res.status(400).json({ error: 'Yahoo connection claim is required' });
+    const claimHash = stateHash(String(req.body.claim));
+    const [rows] = await pool.execute(
+      'SELECT * FROM yahoo_pending_connections WHERE claim_hash = ? AND claim_expires_at > NOW()',
+      [claimHash]
+    );
+    if (!rows.length) return res.status(410).json({ error: 'Yahoo connection expired; please connect again' });
+    const pending = rows[0];
+    await saveTokens(req.userId, {
+      access_token: pending.access_token,
+      refresh_token: pending.refresh_token,
+      expires_in: Math.max(60, Math.floor((new Date(pending.expires_at).getTime() - Date.now()) / 1000)),
+      xoauth_yahoo_guid: pending.yahoo_guid,
+    });
+    await pool.execute('DELETE FROM yahoo_pending_connections WHERE claim_hash = ?', [claimHash]);
+    res.json({ connected: true });
+  } catch (error) {
+    console.error('Failed to claim Yahoo connection:', error);
+    res.status(500).json({ error: 'Could not attach Yahoo connection to this account' });
+  }
 });
 
 router.get('/fantasy', authenticate, async (req, res) => {
