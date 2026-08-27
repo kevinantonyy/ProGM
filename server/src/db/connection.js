@@ -21,8 +21,7 @@ function postgresParams(query) {
 
 const pool = {
   async execute(query, params = []) {
-    let sql = postgresParams(query);
-    if (/^\s*INSERT\s+/i.test(sql) && !/\bRETURNING\b/i.test(sql)) sql += ' RETURNING id';
+    const sql = postgresParams(query);
     const result = await postgres.query(sql, params);
     if (/^\s*(SELECT|WITH)\s+/i.test(sql)) return [result.rows];
     return [{ insertId: result.rows[0]?.id, affectedRows: result.rowCount, rows: result.rows }];

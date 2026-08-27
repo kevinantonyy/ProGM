@@ -97,15 +97,20 @@ router.get('/status', authenticate, async (req, res) => {
 });
 
 router.post('/auth-url', authenticate, async (req, res) => {
-  if (!configured()) return res.status(503).json({ error: 'Yahoo integration is not configured yet' });
-  const state = crypto.randomBytes(32).toString('base64url');
-  await pool.execute('DELETE FROM yahoo_oauth_states WHERE expires_at < NOW()');
-  await pool.execute(
-    'INSERT INTO yahoo_oauth_states (state_hash, user_id, expires_at) VALUES (?, ?, CURRENT_TIMESTAMP + INTERVAL \'10 minutes\')',
-    [stateHash(state), req.userId]
-  );
-  const params = new URLSearchParams({ client_id: config().clientId, redirect_uri: config().redirectUri, response_type: 'code', state });
-  res.json({ url: `${AUTH_URL}?${params}` });
+  try {
+    if (!configured()) return res.status(503).json({ error: 'Yahoo integration is not configured yet' });
+    const state = crypto.randomBytes(32).toString('base64url');
+    await pool.execute('DELETE FROM yahoo_oauth_states WHERE expires_at < NOW()');
+    await pool.execute(
+      'INSERT INTO yahoo_oauth_states (state_hash, user_id, expires_at) VALUES (?, ?, CURRENT_TIMESTAMP + INTERVAL \'10 minutes\')',
+      [stateHash(state), req.userId]
+    );
+    const params = new URLSearchParams({ client_id: config().clientId, redirect_uri: config().redirectUri, response_type: 'code', state });
+    res.json({ url: `${AUTH_URL}?${params}` });
+  } catch (error) {
+    console.error('Failed to create Yahoo authorization request:', error);
+    res.status(500).json({ error: 'Could not start Yahoo connection' });
+  }
 });
 
 router.get('/callback', async (req, res) => {
