@@ -15,6 +15,7 @@ export default function Login() {
   const [yahooLoading, setYahooLoading] = useState(false);
   const [espnLeagueId, setEspnLeagueId] = useState('');
   const [espnSeason, setEspnSeason] = useState(String(new Date().getFullYear()));
+  const [espnSport, setEspnSport] = useState('football');
   const [espnPreview, setEspnPreview] = useState(null);
   const [espnTeamId, setEspnTeamId] = useState('');
   const [espnLoading, setEspnLoading] = useState(false);
@@ -49,16 +50,18 @@ export default function Login() {
   async function previewEspn() {
     setEspnLoading(true); setError('');
     try {
-      const res = await api.post('/espn/preview', { leagueId: espnLeagueId, season: espnSeason });
+      const res = await api.post('/espn/preview', { leagueId: espnLeagueId, season: espnSeason, sport: espnSport });
       setEspnPreview(res.data);
-      setEspnTeamId(String(res.data.teams[0]?.id || ''));
+      setEspnSport(res.data.sport);
+      setEspnSeason(String(res.data.season));
+      setEspnTeamId(String(res.data.suggestedTeamId || res.data.teams[0]?.id || ''));
     } catch (err) { setError(err.response?.data?.error || 'Could not load ESPN league'); }
     finally { setEspnLoading(false); }
   }
 
   function saveEspnTeam() {
     if (!espnTeamId) return setError('Select your ESPN team');
-    sessionStorage.setItem('espnPending', JSON.stringify({ leagueId: espnPreview.leagueId, season: espnPreview.season, teamId: Number(espnTeamId) }));
+    sessionStorage.setItem('espnPending', JSON.stringify({ leagueId: espnPreview.leagueId, season: espnPreview.season, sport: espnPreview.sport, teamId: Number(espnTeamId) }));
     setError('ESPN team selected successfully. Sign in or register to attach it to your ProGM account.');
   }
 
@@ -142,7 +145,8 @@ export default function Login() {
           {!isRegister && (
             <div className="mb-6 rounded-xl border border-red-700/40 bg-red-950/20 p-4">
               <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-white">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Enter the league ID from your ESPN Fantasy Basketball URL. Private leagues can use safe manual import after sign-in.</p></div></div>
-              <div className="mt-4 grid grid-cols-3 gap-2"><input className="input-field col-span-2" value={espnLeagueId} onChange={e => setEspnLeagueId(e.target.value)} placeholder="League ID" /><input className="input-field" value={espnSeason} onChange={e => setEspnSeason(e.target.value)} placeholder="Season" /></div>
+              <input className="input-field mt-4" value={espnLeagueId} onChange={e => { setEspnLeagueId(e.target.value); setEspnPreview(null); }} placeholder="Paste ESPN team URL or league ID" />
+              <div className="mt-2 grid grid-cols-2 gap-2"><select className="input-field" value={espnSport} onChange={e => setEspnSport(e.target.value)}><option value="football">Football</option><option value="basketball">Basketball</option></select><input className="input-field" value={espnSeason} onChange={e => setEspnSeason(e.target.value)} placeholder="Season" /></div>
               {!espnPreview ? <button type="button" onClick={previewEspn} disabled={espnLoading || !espnLeagueId} className="mt-3 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50">{espnLoading ? 'Loading ESPN…' : 'Find ESPN league'}</button> : <div className="mt-3"><p className="mb-2 text-sm font-medium text-white">{espnPreview.leagueName}</p><select className="input-field" value={espnTeamId} onChange={e => setEspnTeamId(e.target.value)}>{espnPreview.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select><button type="button" onClick={saveEspnTeam} className="mt-2 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500">Use this ESPN team</button></div>}
             </div>
           )}

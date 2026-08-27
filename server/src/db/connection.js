@@ -68,6 +68,7 @@ export async function initDatabase() {
     league_id VARCHAR(30) NOT NULL, season INTEGER NOT NULL, team_id INTEGER NOT NULL,
     league_name VARCHAR(150), team_name VARCHAR(150), roster_names JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
+  await postgres.query("ALTER TABLE espn_connections ADD COLUMN IF NOT EXISTS sport VARCHAR(20) NOT NULL DEFAULT 'basketball'");
   console.log('Database initialized successfully');
 }
 
