@@ -13,6 +13,11 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [yahooStatus, setYahooStatus] = useState(null);
   const [yahooLoading, setYahooLoading] = useState(false);
+  const [espnLeagueId, setEspnLeagueId] = useState('');
+  const [espnSeason, setEspnSeason] = useState(String(new Date().getFullYear()));
+  const [espnPreview, setEspnPreview] = useState(null);
+  const [espnTeamId, setEspnTeamId] = useState('');
+  const [espnLoading, setEspnLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -41,6 +46,22 @@ export default function Login() {
     }
   }
 
+  async function previewEspn() {
+    setEspnLoading(true); setError('');
+    try {
+      const res = await api.post('/espn/preview', { leagueId: espnLeagueId, season: espnSeason });
+      setEspnPreview(res.data);
+      setEspnTeamId(String(res.data.teams[0]?.id || ''));
+    } catch (err) { setError(err.response?.data?.error || 'Could not load ESPN league'); }
+    finally { setEspnLoading(false); }
+  }
+
+  function saveEspnTeam() {
+    if (!espnTeamId) return setError('Select your ESPN team');
+    sessionStorage.setItem('espnPending', JSON.stringify({ leagueId: espnPreview.leagueId, season: espnPreview.season, teamId: Number(espnTeamId) }));
+    setError('ESPN team selected successfully. Sign in or register to attach it to your ProGM account.');
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
@@ -58,10 +79,15 @@ export default function Login() {
         login(res.data.token, res.data.user);
       }
       const yahooClaim = sessionStorage.getItem('yahooClaim');
+      const espnPending = sessionStorage.getItem('espnPending');
       if (yahooClaim) {
         await api.post('/yahoo/claim', { claim: yahooClaim }, { headers: { Authorization: `Bearer ${authResult.token}` } });
         sessionStorage.removeItem('yahooClaim');
         navigate('/yahoo?yahoo=connected');
+      } else if (espnPending) {
+        await api.post('/espn/connect', JSON.parse(espnPending), { headers: { Authorization: `Bearer ${authResult.token}` } });
+        sessionStorage.removeItem('espnPending');
+        navigate('/espn');
       } else {
         navigate('/');
       }
@@ -110,6 +136,14 @@ export default function Login() {
                 {yahooStatus?.connected ? 'Yahoo account connected' : yahooLoading ? 'Opening Yahoo…' : 'Connect Yahoo Fantasy'}
               </button>
               {yahooStatus && !yahooStatus.configured && <p className="mt-2 text-center text-xs text-amber-400">Yahoo developer credentials still need to be added by the app owner.</p>}
+            </div>
+          )}
+
+          {!isRegister && (
+            <div className="mb-6 rounded-xl border border-red-700/40 bg-red-950/20 p-4">
+              <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-white">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Enter the league ID from your ESPN Fantasy Basketball URL. Private leagues can use safe manual import after sign-in.</p></div></div>
+              <div className="mt-4 grid grid-cols-3 gap-2"><input className="input-field col-span-2" value={espnLeagueId} onChange={e => setEspnLeagueId(e.target.value)} placeholder="League ID" /><input className="input-field" value={espnSeason} onChange={e => setEspnSeason(e.target.value)} placeholder="Season" /></div>
+              {!espnPreview ? <button type="button" onClick={previewEspn} disabled={espnLoading || !espnLeagueId} className="mt-3 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50">{espnLoading ? 'Loading ESPN…' : 'Find ESPN league'}</button> : <div className="mt-3"><p className="mb-2 text-sm font-medium text-white">{espnPreview.leagueName}</p><select className="input-field" value={espnTeamId} onChange={e => setEspnTeamId(e.target.value)}>{espnPreview.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select><button type="button" onClick={saveEspnTeam} className="mt-2 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500">Use this ESPN team</button></div>}
             </div>
           )}
 

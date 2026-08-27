@@ -8,6 +8,7 @@ import playerRoutes from './routes/players.js';
 import rosterRoutes from './routes/roster.js';
 import tradeRoutes from './routes/trades.js';
 import yahooRoutes from './routes/yahoo.js';
+import espnRoutes from './routes/espn.js';
 import { initDatabase } from './db/connection.js';
 
 dotenv.config();
@@ -26,6 +27,7 @@ app.use('/api/players', playerRoutes);
 app.use('/api/roster', rosterRoutes);
 app.use('/api/trades', tradeRoutes);
 app.use('/api/yahoo', yahooRoutes);
+app.use('/api/espn', espnRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

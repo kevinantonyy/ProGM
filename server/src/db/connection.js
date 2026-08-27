@@ -63,6 +63,11 @@ export async function initDatabase() {
     claim_hash CHAR(64) PRIMARY KEY, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL, yahoo_guid VARCHAR(100),
     claim_expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
+  await postgres.query(`CREATE TABLE IF NOT EXISTS espn_connections (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    league_id VARCHAR(30) NOT NULL, season INTEGER NOT NULL, team_id INTEGER NOT NULL,
+    league_name VARCHAR(150), team_name VARCHAR(150), roster_names JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
   console.log('Database initialized successfully');
 }
 
