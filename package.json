@@ -1,16 +1,13 @@
 {
-  "name": "progm",
-  "version": "1.0.0",
-  "description": "Yahoo + FantasyNerds fantasy football and basketball optimizer",
-  "main": "server.js",
-  "type": "commonjs",
+  "name": "fantasyprogm",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
   "scripts": {
+    "postinstall": "npm install --prefix server && npm ci --prefix client && npm run build --prefix client",
     "start": "node server.js"
   },
-  "dependencies": {
-    "axios": "^1.14.0",
-    "dotenv": "^17.4.1",
-    "express": "^5.2.1",
-    "express-session": "^1.18.1"
+  "engines": {
+    "node": ">=20"
   }
 }
