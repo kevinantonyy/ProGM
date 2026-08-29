@@ -6,8 +6,7 @@ const navItems = [
   { to: '/roster', label: 'My Roster', icon: '🏀' },
   { to: '/players', label: 'Players', icon: '👥' },
   { to: '/trades', label: 'AI Trades', icon: '🤖' },
-  { to: '/yahoo', label: 'Yahoo Fantasy', icon: 'Y!' },
-  { to: '/espn', label: 'ESPN Fantasy', icon: 'E' },
+  { to: '/sync', label: 'Sync Your League', icon: '🔗' },
   { to: '/football', label: 'Fantasy Football', icon: '🏈' },
 ];
 

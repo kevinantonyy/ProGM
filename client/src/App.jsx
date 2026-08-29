@@ -9,6 +9,7 @@ import TradeSuggestions from './pages/TradeSuggestions';
 import YahooFantasy from './pages/YahooFantasy';
 import EspnFantasy from './pages/EspnFantasy';
 import FantasyFootball from './pages/FantasyFootball';
+import LeagueSync from './pages/LeagueSync';
 
 function ProtectedRoute({ children }) {
   const { token, loading } = useAuth();
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="yahoo" element={<YahooFantasy />} />
         <Route path="espn" element={<EspnFantasy />} />
         <Route path="football" element={<FantasyFootball />} />
+        <Route path="sync" element={<LeagueSync />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
