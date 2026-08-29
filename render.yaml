@@ -21,3 +21,5 @@ services:
         sync: false
       - key: YAHOO_REDIRECT_URI
         value: https://progm.onrender.com/api/yahoo/callback
+      - key: GEMINI_API_KEY
+        sync: false

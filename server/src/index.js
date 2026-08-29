@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import yahooRoutes from './routes/yahoo.js';
 import espnRoutes from './routes/espn.js';
+import gmRoutes from './routes/gm.js';
 import { initDatabase } from './db/connection.js';
 
 dotenv.config();
@@ -22,6 +23,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/yahoo', yahooRoutes);
 app.use('/api/espn', espnRoutes);
+app.use('/api/gm', gmRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
