@@ -7,7 +7,7 @@ function leagueContext(data) {
 }
 
 export default function AIManager({ data }) {
-  const key = `progm-chat-${data.connection?.leagueId || data.connection?.leagueName || 'league'}`;
+  const key = `progm-gemini-chat-${data.connection?.leagueId || data.connection?.leagueName || 'league'}`;
   const initial = useMemo(() => ({ role: 'gm', text: `I’m your AI General Manager for ${data.connection?.teamName}. I can reason through trades, waivers, lineups, players, standings, and draft strategy using your synced league. What move are you considering?` }), [data.connection?.teamName]);
   const [messages, setMessages] = useState(() => { try { return JSON.parse(localStorage.getItem(key)) || [initial]; } catch { return [initial]; } });
   const [text, setText] = useState(''); const [sending, setSending] = useState(false); const [error, setError] = useState(''); const endRef = useRef(null);
