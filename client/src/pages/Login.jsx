@@ -91,7 +91,7 @@ export default function Login() {
         const pendingEspn = JSON.parse(espnPending);
         await api.post('/espn/connect', pendingEspn, { headers: { Authorization: `Bearer ${authResult.token}` } });
         sessionStorage.removeItem('espnPending');
-        navigate(pendingEspn.sport === 'football' ? '/football' : '/espn');
+        navigate(`/${pendingEspn.sport}`);
       } else {
         navigate('/');
       }
@@ -112,7 +112,7 @@ export default function Login() {
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>
-          <p className="text-dark-400">NBA AI-Powered Trade Advisor</p>
+          <p className="text-dark-400">Personalized Football & Basketball Assistant</p>
         </div>
 
         {/* Form Card */}
@@ -133,7 +133,7 @@ export default function Login() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#6001d2] text-xl font-black text-white">Y!</div>
                 <div>
                   <p className="font-semibold text-white">Bring in your Yahoo Fantasy team</p>
-                  <p className="mt-1 text-xs leading-5 text-dark-300">Connect Yahoo first, then sign in or create an account to securely attach your NBA leagues and teams.</p>
+                  <p className="mt-1 text-xs leading-5 text-dark-300">Connect Yahoo first, then sign in or create an account to securely attach your fantasy leagues and teams.</p>
                 </div>
               </div>
               <button type="button" onClick={connectYahoo} disabled={yahooLoading || yahooStatus?.connected} className="mt-4 w-full rounded-lg bg-[#6001d2] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#7b20e8] disabled:opacity-60">
@@ -145,7 +145,7 @@ export default function Login() {
 
           {!isRegister && (
             <div className="mb-6 rounded-xl border border-red-700/40 bg-red-950/20 p-4">
-              <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-white">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Enter the league ID from your ESPN Fantasy Basketball URL. Private leagues can use safe manual import after sign-in.</p></div></div>
+              <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-white">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Paste a football or basketball team URL. ProGM uses the league settings and real player pool to personalize every tool.</p></div></div>
               <input className="input-field mt-4" value={espnLeagueId} onChange={e => { setEspnLeagueId(e.target.value); setEspnPreview(null); }} placeholder="Paste ESPN team URL or league ID" />
               <div className="mt-2 grid grid-cols-2 gap-2"><select className="input-field" value={espnSport} onChange={e => setEspnSport(e.target.value)}><option value="football">Football</option><option value="basketball">Basketball</option></select><input className="input-field" value={espnSeason} onChange={e => setEspnSeason(e.target.value)} placeholder="Season" /></div>
               {!espnPreview ? <button type="button" onClick={previewEspn} disabled={espnLoading || !espnLeagueId} className="mt-3 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50">{espnLoading ? 'Loading ESPN…' : 'Find ESPN league'}</button> : <div className="mt-3"><p className="mb-2 text-sm font-medium text-white">{espnPreview.leagueName}</p><select className="input-field" value={espnTeamId} onChange={e => setEspnTeamId(e.target.value)}>{espnPreview.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}</select><button type="button" onClick={saveEspnTeam} className="mt-2 w-full rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-500">Use this ESPN team</button></div>}

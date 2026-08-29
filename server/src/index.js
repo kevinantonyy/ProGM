@@ -4,9 +4,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
-import playerRoutes from './routes/players.js';
-import rosterRoutes from './routes/roster.js';
-import tradeRoutes from './routes/trades.js';
 import yahooRoutes from './routes/yahoo.js';
 import espnRoutes from './routes/espn.js';
 import { initDatabase } from './db/connection.js';
@@ -23,9 +20,6 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/players', playerRoutes);
-app.use('/api/roster', rosterRoutes);
-app.use('/api/trades', tradeRoutes);
 app.use('/api/yahoo', yahooRoutes);
 app.use('/api/espn', espnRoutes);
 

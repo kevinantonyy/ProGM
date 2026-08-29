@@ -34,23 +34,6 @@ export async function initDatabase() {
   await postgres.query(`CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY, username VARCHAR(50) UNIQUE NOT NULL, email VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL, team_name VARCHAR(100) DEFAULT 'My Team', created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
-  await postgres.query(`CREATE TABLE IF NOT EXISTS players (
-    id SERIAL PRIMARY KEY, name VARCHAR(100) NOT NULL, team VARCHAR(50) NOT NULL, position VARCHAR(10) NOT NULL,
-    points_per_game NUMERIC(4,1) DEFAULT 0, rebounds_per_game NUMERIC(4,1) DEFAULT 0,
-    assists_per_game NUMERIC(4,1) DEFAULT 0, steals_per_game NUMERIC(3,1) DEFAULT 0,
-    blocks_per_game NUMERIC(3,1) DEFAULT 0, fg_percentage NUMERIC(4,1) DEFAULT 0,
-    three_pt_percentage NUMERIC(4,1) DEFAULT 0, fantasy_points NUMERIC(5,1) DEFAULT 0,
-    injury_status VARCHAR(50) DEFAULT 'Healthy', image_url VARCHAR(255), created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
-  await postgres.query(`CREATE TABLE IF NOT EXISTS rosters (
-    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-    acquired_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, UNIQUE (user_id, player_id))`);
-  await postgres.query(`CREATE TABLE IF NOT EXISTS trade_suggestions (
-    id SERIAL PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    give_player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-    receive_player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-    reasoning TEXT NOT NULL, confidence_score INTEGER DEFAULT 0, category VARCHAR(50) DEFAULT 'general',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
   await postgres.query(`CREATE TABLE IF NOT EXISTS yahoo_connections (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, access_token TEXT NOT NULL,
     refresh_token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, yahoo_guid VARCHAR(100),
@@ -70,6 +53,12 @@ export async function initDatabase() {
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
   await postgres.query("ALTER TABLE espn_connections ADD COLUMN IF NOT EXISTS sport VARCHAR(20) NOT NULL DEFAULT 'basketball'");
   await postgres.query("ALTER TABLE espn_connections ADD COLUMN IF NOT EXISTS league_data JSONB NOT NULL DEFAULT '{}'::jsonb");
+  await postgres.query(`DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'espn_connections'::regclass AND conname = 'espn_connections_pkey' AND array_length(conkey, 1) = 1) THEN
+      ALTER TABLE espn_connections DROP CONSTRAINT espn_connections_pkey;
+    END IF;
+  END $$`);
+  await postgres.query('CREATE UNIQUE INDEX IF NOT EXISTS espn_connections_user_sport_idx ON espn_connections(user_id, sport)');
   console.log('Database initialized successfully');
 }
 

@@ -2,12 +2,9 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: '📊' },
-  { to: '/roster', label: 'My Roster', icon: '🏀' },
-  { to: '/players', label: 'Players', icon: '👥' },
-  { to: '/trades', label: 'AI Trades', icon: '🤖' },
-  { to: '/sync', label: 'Sync Your League', icon: '🔗' },
   { to: '/football', label: 'Fantasy Football', icon: '🏈' },
+  { to: '/basketball', label: 'Fantasy Basketball', icon: '🏀' },
+  { to: '/sync', label: 'Sync Your League', icon: '🔗' },
 ];
 
 export default function Layout() {
@@ -30,7 +27,7 @@ export default function Layout() {
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>
-          <p className="text-xs text-dark-400 mt-1">NBA AI Trade Advisor</p>
+          <p className="text-xs text-dark-400 mt-1">Your personalized fantasy front office</p>
         </div>
 
         {/* Navigation */}

@@ -2,14 +2,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Roster from './pages/Roster';
-import Players from './pages/Players';
-import TradeSuggestions from './pages/TradeSuggestions';
 import YahooFantasy from './pages/YahooFantasy';
 import EspnFantasy from './pages/EspnFantasy';
-import FantasyFootball from './pages/FantasyFootball';
 import LeagueSync from './pages/LeagueSync';
+import SportWorkspace from './pages/SportWorkspace';
 
 function ProtectedRoute({ children }) {
   const { token, loading } = useAuth();
@@ -23,13 +19,10 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Dashboard />} />
-        <Route path="roster" element={<Roster />} />
-        <Route path="players" element={<Players />} />
-        <Route path="trades" element={<TradeSuggestions />} />
+        <Route index element={<Navigate to="/football" replace />} />
         <Route path="yahoo" element={<YahooFantasy />} />
         <Route path="espn" element={<EspnFantasy />} />
-        <Route path="football" element={<FantasyFootball />} />
+        <Route path=":sport/:section?" element={<SportWorkspace />} />
         <Route path="sync" element={<LeagueSync />} />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
