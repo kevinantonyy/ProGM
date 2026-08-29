@@ -23,7 +23,7 @@ router.post('/chat', authenticate, async (req, res) => {
   const context = JSON.stringify(req.body.league || {}).slice(0, 60000);
   const contents = [{ role: 'user', parts: [{ text: `${system}\n\nCURRENT SYNCED LEAGUE DATA:\n${context}` }] }, { role: 'model', parts: [{ text: 'Understood. I will use this league data and conversation to provide specific fantasy advice.' }] }, ...messages.map(message => ({ role: message.role === 'gm' ? 'model' : 'user', parts: [{ text: String(message.text).slice(0, 1200) }] }))];
   try {
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.45, maxOutputTokens: 700, thinkingConfig: { thinkingBudget: 0 } } }) });
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY }, body: JSON.stringify({ contents, generationConfig: { temperature: 0.45, maxOutputTokens: 700 } }) });
     const result = await response.json();
     if (!response.ok) { console.error('Gemini error:', response.status, result?.error?.message); return res.status(response.status === 429 ? 429 : 502).json({ error: response.status === 429 ? 'The free AI quota is temporarily exhausted. Please try again later.' : 'The AI service could not answer right now.' }); }
     const text = result.candidates?.[0]?.content?.parts?.map(part => part.text).join('').trim();
