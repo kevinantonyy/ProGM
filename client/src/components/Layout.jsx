@@ -17,27 +17,27 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen flex">
+    <div className="flex min-h-screen flex-col md:flex-row">
       {/* Sidebar */}
-      <aside className="w-64 bg-dark-900 border-r border-dark-700 flex flex-col">
+      <aside className="flex w-full shrink-0 flex-col border-b border-dark-700 bg-dark-900 md:min-h-screen md:w-64 md:border-b-0 md:border-r">
         {/* Logo */}
-        <div className="p-6 border-b border-dark-700">
+        <div className="border-b border-dark-700 px-4 py-3 md:p-6">
           <h1 className="text-xl font-bold">
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>
-          <p className="text-xs text-dark-400 mt-1">Your personalized fantasy front office</p>
+          <p className="mt-1 hidden text-xs text-dark-400 md:block">Your personalized fantasy front office</p>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex flex-1 gap-2 overflow-x-auto p-2 md:block md:space-y-1 md:p-4">
           {navItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                `flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors md:gap-3 md:px-4 md:py-3 ${
                   isActive
                     ? 'bg-primary-600/20 text-primary-400 border border-primary-500/30'
                     : 'text-dark-300 hover:bg-dark-800 hover:text-white'
@@ -51,8 +51,8 @@ export default function Layout() {
         </nav>
 
         {/* User section */}
-        <div className="p-4 border-t border-dark-700">
-          <div className="flex items-center gap-3 mb-3">
+        <div className="border-t border-dark-700 p-2 md:p-4">
+          <div className="mb-3 hidden items-center gap-3 md:flex">
             <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center text-sm font-bold">
               {user?.username?.[0]?.toUpperCase()}
             </div>
@@ -61,15 +61,15 @@ export default function Layout() {
               <p className="text-xs text-dark-400 truncate">{user?.teamName}</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="w-full text-sm text-dark-400 hover:text-red-400 transition-colors text-left">
+          <button onClick={handleLogout} className="w-full text-center text-xs text-dark-400 transition-colors hover:text-red-400 md:text-left md:text-sm">
             Sign Out
           </button>
         </div>
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="p-8">
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1600px] p-4 md:p-8">
           <Outlet />
         </div>
       </main>
