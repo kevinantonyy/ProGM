@@ -4,6 +4,7 @@ import api from '../services/api';
 import TradeBuilder from '../components/TradeBuilder';
 import LeagueHub from '../components/LeagueHub';
 import NewsFeed from '../components/NewsFeed';
+import MatchupDetails from '../components/MatchupDetails';
 
 const SECTIONS = [
   ['overview', 'My Team'], ['league', 'League Hub'], ['news', 'News'], ['players', 'Players'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
@@ -17,7 +18,7 @@ function PlayerRow({ player, detail }) {
 }
 
 export default function SportWorkspace() {
-  const { sport, section = 'overview' } = useParams();
+  const { sport, section = 'overview', matchupId } = useParams();
   const navigate = useNavigate();
   const active = SECTIONS.some(([key]) => key === section) ? section : 'overview';
   const [data, setData] = useState(null);
@@ -33,6 +34,7 @@ export default function SportWorkspace() {
   const filteredPlayers = useMemo(() => data?.players || [], [data]);
   if (loading) return <div className="text-primary-400 animate-pulse">Loading your real league data…</div>;
   if (error) return <div className="card max-w-2xl"><p className="text-4xl">{icon}</p><h1 className="mt-3 text-2xl font-bold">{label}</h1><p className="mt-3 text-dark-300">{error}</p><p className="mt-2 text-sm text-dark-400">Sync the matching ESPN league to unlock your roster, players, personalized trades, waivers, and draft board.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Sync your league</Link></div>;
+  if (matchupId) return <MatchupDetails data={data} matchupId={matchupId} />;
   return <div className="space-y-7">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-semibold uppercase tracking-widest text-primary-400">{icon} {label}</p><h1 className="mt-1 text-3xl font-bold">{data.connection.teamName}</h1><p className="mt-1 text-dark-400">{data.connection.leagueName} · {data.connection.season}</p></div><button onClick={() => load(true)} className="btn-secondary">↻ Refresh ESPN data</button></header>
     <nav className="flex gap-2 overflow-x-auto border-b border-dark-700 pb-3">{SECTIONS.map(([key, text]) => <button key={key} onClick={() => navigate(`/${sport}/${key}`)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold ${active === key ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-white'}`}>{text}</button>)}</nav>

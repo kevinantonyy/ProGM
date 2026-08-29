@@ -21,12 +21,12 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className="flex w-full shrink-0 flex-col border-b border-dark-700 bg-dark-900 md:min-h-screen md:w-64 md:border-b-0 md:border-r">
         {/* Logo */}
-        <div className="border-b border-dark-700 px-4 py-3 md:p-6">
+        <div className="flex items-center justify-between border-b border-dark-700 px-4 py-3 md:block md:p-6">
           <h1 className="text-xl font-bold">
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>
-          <p className="mt-1 hidden text-xs text-dark-400 md:block">Your personalized fantasy front office</p>
+          <p className="mt-1 hidden text-xs text-dark-400 md:block">Your personalized fantasy front office</p><button onClick={handleLogout} className="text-xs text-dark-400 hover:text-red-400 md:hidden">Sign Out</button>
         </div>
 
         {/* Navigation */}
@@ -51,7 +51,7 @@ export default function Layout() {
         </nav>
 
         {/* User section */}
-        <div className="border-t border-dark-700 p-2 md:p-4">
+        <div className="hidden border-t border-dark-700 p-2 md:block md:p-4">
           <div className="mb-3 hidden items-center gap-3 md:flex">
             <div className="w-8 h-8 bg-primary-600 rounded-full flex items-center justify-center text-sm font-bold">
               {user?.username?.[0]?.toUpperCase()}

@@ -22,6 +22,7 @@ export default function App() {
         <Route index element={<Navigate to="/football" replace />} />
         <Route path="yahoo" element={<YahooFantasy />} />
         <Route path="espn" element={<EspnFantasy />} />
+        <Route path=":sport/matchup/:matchupId" element={<SportWorkspace />} />
         <Route path=":sport/:section?" element={<SportWorkspace />} />
         <Route path="sync" element={<LeagueSync />} />
       </Route>
