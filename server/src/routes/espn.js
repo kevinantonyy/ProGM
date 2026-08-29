@@ -80,8 +80,10 @@ function buildTradePackages(myTeam, opponents, sport) {
   const myNeeds = positionNeeds(myTeam.roster, sport).slice(0, 3);
   const myPackages = packages(myTeam.roster);
   const results = [];
+  const seen = new Set();
   for (const opponent of opponents) {
     const theirNeeds = positionNeeds(opponent.roster, sport).slice(0, 3);
+    const teamResults = [];
     for (const send of myPackages) for (const receive of packages(opponent.roster)) {
       if (send.length === 1 && receive.length === 1) continue;
       const sentValue = send.reduce((sum, player) => sum + playerValue(player), 0);
@@ -91,10 +93,14 @@ function buildTradePackages(myTeam, opponents, sport) {
       const helpsMe = receive.some(player => myNeeds.includes(player.position));
       const helpsThem = send.some(player => theirNeeds.includes(player.position));
       if (!helpsMe || !helpsThem) continue;
-      results.push({ send, receive, opponentTeam: opponent.name, sentValue: Math.round(sentValue * 10) / 10, receivedValue: Math.round(receivedValue * 10) / 10, valueDifferencePercent: Math.round(difference * 1000) / 10, confidence: Math.round(92 - difference * 200), reasoning: `You address ${receive.find(player => myNeeds.includes(player.position))?.position || 'depth'}, while ${opponent.name} receives help at ${send.find(player => theirNeeds.includes(player.position))?.position || 'a need'}. The projected package values are within ${Math.round(difference * 1000) / 10}%.` });
+      const key = `${send.map(player => player.id).sort().join('-')}|${receive.map(player => player.id).sort().join('-')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      teamResults.push({ send, receive, opponentTeam: opponent.name, sentValue: Math.round(sentValue * 10) / 10, receivedValue: Math.round(receivedValue * 10) / 10, valueDifferencePercent: Math.round(difference * 1000) / 10, confidence: Math.round(92 - difference * 200), reasoning: `You address ${receive.find(player => myNeeds.includes(player.position))?.position || 'depth'}, while ${opponent.name} receives help at ${send.find(player => theirNeeds.includes(player.position))?.position || 'a need'}. The projected package values are within ${Math.round(difference * 1000) / 10}%.` });
     }
+    results.push(...teamResults.sort((a, b) => b.confidence - a.confidence).slice(0, 3));
   }
-  return results.sort((a, b) => b.confidence - a.confidence).filter((trade, index, all) => all.findIndex(item => item.send.map(p => p.id).sort().join('-') === trade.send.map(p => p.id).sort().join('-') && item.receive.map(p => p.id).sort().join('-') === trade.receive.map(p => p.id).sort().join('-')) === index).slice(0, 12);
+  return results.sort((a, b) => b.confidence - a.confidence).slice(0, 12);
 }
 
 function buildWorkspace(connection, league) {
@@ -133,9 +139,11 @@ router.get('/workspace/:sport', authenticate, async (req, res) => {
     const [rows] = await pool.execute('SELECT * FROM espn_connections WHERE user_id = ? AND sport = ?', [req.userId, sport]);
     if (!rows.length) return res.status(404).json({ error: `Connect an ESPN ${sport} league first` });
     const connection = rows[0];
-    let league;
-    try { league = await fetchLeague(connection.league_id, connection.season, sport); await pool.execute('UPDATE espn_connections SET league_data = ?::jsonb, updated_at=CURRENT_TIMESTAMP WHERE user_id = ? AND sport = ?', [JSON.stringify(league), req.userId, sport]); }
-    catch (refreshError) { league = connection.league_data; if (!league?.teams?.length) throw refreshError; }
+    let league = connection.league_data;
+    if (req.query.refresh === 'true' || !league?.teams?.length) {
+      try { league = await fetchLeague(connection.league_id, connection.season, sport); await pool.execute('UPDATE espn_connections SET league_data = ?::jsonb, updated_at=CURRENT_TIMESTAMP WHERE user_id = ? AND sport = ?', [JSON.stringify(league), req.userId, sport]); }
+      catch (refreshError) { if (!league?.teams?.length) throw refreshError; }
+    }
     res.json(buildWorkspace(connection, league));
   } catch (error) { console.error('Failed to load ESPN workspace:', error); res.status(/Connect an ESPN|not found/.test(error.message) ? 404 : 500).json({ error: error.message || 'Could not load ESPN league data' }); }
 });
