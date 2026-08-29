@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { PlayerButton } from './EntityModal';
 
 function tradeValue(player) {
   return Math.max(1, Number(player.projectedPoints) || 0) + Math.max(0, Number(player.percentOwned) || 0) * 0.12 + (player.proRank ? Math.max(0, 100 - player.proRank) * 0.08 : 0);
@@ -16,7 +17,7 @@ function possiblePackages(players, maxSize = 3) {
 }
 
 function PlayerOption({ player, selected, onToggle }) {
-  return <label className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border p-3 transition ${selected ? 'border-primary-500 bg-primary-600/10' : 'border-dark-700 bg-dark-900 hover:border-dark-600'}`}><div className="flex min-w-0 items-center gap-3"><input type="checkbox" checked={selected} onChange={onToggle} className="h-4 w-4 accent-blue-500" /><div className="min-w-0"><p className="truncate text-sm font-semibold">{player.name}</p><p className="text-xs text-dark-400">{player.position} · {player.projectedPoints.toFixed(1)} pts · {player.percentOwned.toFixed(1)}% owned</p></div></div><span className="shrink-0 text-sm font-bold text-primary-400">{tradeValue(player).toFixed(1)}</span></label>;
+  return <label className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border p-3 transition ${selected ? 'border-primary-500 bg-primary-600/10' : 'border-dark-700 bg-dark-900 hover:border-dark-600'}`}><div className="flex min-w-0 items-center gap-3"><input type="checkbox" checked={selected} onChange={onToggle} className="h-4 w-4 accent-blue-500" /><div className="min-w-0"><PlayerButton player={player} className="block max-w-full truncate text-sm">{player.name}</PlayerButton><p className="text-xs text-dark-400">{player.position} · {player.projectedPoints.toFixed(1)} pts · {player.percentOwned.toFixed(1)}% owned</p></div></div><span className="shrink-0 text-sm font-bold text-primary-400">{tradeValue(player).toFixed(1)}</span></label>;
 }
 
 export default function TradeBuilder({ data }) {
