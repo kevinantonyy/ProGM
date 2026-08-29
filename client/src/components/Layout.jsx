@@ -23,7 +23,6 @@ export default function Layout() {
         {/* Logo */}
         <div className="p-6 border-b border-dark-700">
           <h1 className="text-xl font-bold">
-            <span className="text-primary-400">Fantasy</span>
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>

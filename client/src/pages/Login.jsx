@@ -108,7 +108,6 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-2">
-            <span className="text-primary-400">Fantasy</span>
             <span className="text-accent-orange">Pro</span>
             <span className="text-white">GM</span>
           </h1>

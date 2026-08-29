@@ -60,7 +60,7 @@ export default function YahooFantasy() {
         <div className="card max-w-2xl text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-[#6001d2] text-2xl font-black">Y!</div>
           <h2 className="text-xl font-semibold">Connect Yahoo Fantasy</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-dark-300">Authorize read access so FantasyProGM can display your basketball leagues and teams.</p>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-dark-300">Authorize read access so ProGM can display your basketball leagues and teams.</p>
           <button onClick={connect} className="mt-5 rounded-lg bg-[#6001d2] px-6 py-3 font-semibold text-white hover:bg-[#7b20e8]">Continue with Yahoo</button>
         </div>
       )}

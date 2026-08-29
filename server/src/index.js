@@ -25,7 +25,7 @@ app.use('/api/espn', espnRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'FantasyProGM API' });
+  res.json({ status: 'ok', service: 'ProGM API' });
 });
 
 // In production, serve the built React app from the same stable Render domain.
@@ -40,7 +40,7 @@ async function start() {
   try {
     await initDatabase();
     app.listen(PORT, () => {
-      console.log(`FantasyProGM server running on port ${PORT}`);
+      console.log(`ProGM server running on port ${PORT}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

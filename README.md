@@ -1,4 +1,4 @@
-# FantasyProGM - NBA AI Trade Advisor
+# ProGM - Personalized Fantasy Sports Assistant
 
 A full-stack NBA fantasy sports application with AI-powered trade suggestions personalized for your team.
 
@@ -72,7 +72,7 @@ npm run dev
 ## Project Structure
 
 ```
-FantasyProGM/
+ProGM/
 ├── client/                  # React frontend
 │   ├── src/
 │   │   ├── components/      # Layout, shared components

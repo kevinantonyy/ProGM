@@ -1,5 +1,5 @@
 {
-  "name": "fantasyprogm-server",
+  "name": "progm-server",
   "version": "1.0.0",
   "main": "src/index.js",
   "type": "module",
