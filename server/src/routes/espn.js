@@ -78,6 +78,10 @@ function playerValue(player) {
   return Math.max(1, player.projectedPoints || 0) + Math.max(0, player.percentOwned || 0) * 0.12 + (player.proRank ? Math.max(0, 100 - player.proRank) * 0.08 : 0);
 }
 
+function rosterValue(roster) {
+  return roster.reduce((sum, player) => { const health = ['OUT', 'INJURY_RESERVE'].includes(player.injuryStatus) ? 0.65 : ['QUESTIONABLE', 'DOUBTFUL', 'DAY_TO_DAY'].includes(player.injuryStatus) ? 0.9 : 1; return sum + playerValue(player) * health; }, 0);
+}
+
 function packages(players, sizes = [1, 2]) {
   const pool = [...players].sort((a, b) => playerValue(b) - playerValue(a)).slice(0, 14);
   const result = sizes.includes(1) ? pool.map(player => [player]) : [];
@@ -115,11 +119,17 @@ function buildTradePackages(myTeam, opponents, sport) {
 function buildWorkspace(connection, league) {
   const myTeam = league.teams.find(team => team.id === connection.team_id);
   if (!myTeam) throw new Error('Your ESPN team was not found');
+  const teamValues = league.teams.map(team => rosterValue(team.roster));
+  const maxTeamValue = Math.max(1, ...teamValues);
+  const overallForValue = value => Math.max(0, Math.min(99, Math.round(value / maxTeamValue * 99)));
+  league.teams.forEach((team, index) => { team.overall = overallForValue(teamValues[index]); });
+  const currentTeamValue = rosterValue(myTeam.roster);
+  const currentOverall = overallForValue(currentTeamValue);
   const opponents = league.teams.filter(team => team.id !== myTeam.id);
   const trades = buildTradePackages(myTeam, opponents, league.sport);
   const needs = positionNeeds(myTeam.roster, league.sport);
   const available = [...(league.availablePlayers || [])].filter(player => player.projectedPoints || player.percentOwned || player.proRank);
-  const waivers = available.map(player => { const samePosition = myTeam.roster.filter(item => item.position === player.position).sort((a, b) => playerValue(a) - playerValue(b)); const drop = samePosition[0] || [...myTeam.roster].sort((a, b) => playerValue(a) - playerValue(b))[0] || null; const netGain = drop ? player.projectedPoints - drop.projectedPoints : 0; return { ...player, score: netGain * 3 + player.percentOwned / 5 + Math.max(0, 12 - needs.indexOf(player.position) * 2), drop, netGain: Math.round(netGain * 10) / 10, reasoning: drop ? `Add ${player.name} and drop ${drop.name}. This keeps the roster balanced at ${player.position} and projects a ${netGain >= 0 ? '+' : ''}${netGain.toFixed(1)} point change.` : '' }; }).filter(player => player.drop && player.netGain > 0).sort((a, b) => b.score - a.score).slice(0, 20);
+  const waivers = available.map(player => { const samePosition = myTeam.roster.filter(item => item.position === player.position).sort((a, b) => playerValue(a) - playerValue(b)); const drop = samePosition[0] || [...myTeam.roster].sort((a, b) => playerValue(a) - playerValue(b))[0] || null; const netGain = drop ? player.projectedPoints - drop.projectedPoints : 0; const overallAfter = drop ? overallForValue(currentTeamValue - playerValue(drop) + playerValue(player)) : currentOverall; return { ...player, score: netGain * 3 + player.percentOwned / 5 + Math.max(0, 12 - needs.indexOf(player.position) * 2), drop, netGain: Math.round(netGain * 10) / 10, overallBefore: currentOverall, overallAfter, overallChange: overallAfter - currentOverall, reasoning: drop ? `Add ${player.name} and drop ${drop.name}. This keeps the roster balanced at ${player.position} and projects a ${netGain >= 0 ? '+' : ''}${netGain.toFixed(1)} point change.` : '' }; }).filter(player => player.drop && player.netGain > 0).sort((a, b) => b.score - a.score).slice(0, 20);
   const totalRostered = league.teams.reduce((sum, team) => sum + team.roster.length, 0);
   const draftAvailable = Boolean(league.draft?.inProgress || (!league.draft?.drafted && totalRostered === 0));
   const draft = draftAvailable ? available.map(player => ({ ...player, draftScore: player.projectedPoints + (player.proRank ? Math.max(0, 220 - player.proRank) : 0) + Math.max(0, 45 - needs.indexOf(player.position) * 8), reasoning: `${player.proRank ? `ESPN expert rank #${player.proRank}` : 'Projection and league-value pick'}; adjusted for your league scoring and the live draft board.` })).sort((a, b) => b.draftScore - a.draftScore).slice(0, 30) : [];
@@ -129,7 +139,8 @@ function buildWorkspace(connection, league) {
   const powerRankings = league.teams.map(team => { const games = team.wins + team.losses + team.ties; const winRate = games ? (team.wins + team.ties * 0.5) / games : 0; return { id: team.id, name: team.name, wins: team.wins, losses: team.losses, score: Math.round((winRate * 65 + (team.pointsFor / maxPoints) * 35) * 10) / 10, pointsFor: team.pointsFor }; }).sort((a, b) => b.score - a.score).map((team, index) => ({ ...team, rank: index + 1 }));
   const currentPeriod = league.hub?.currentPeriod || 1;
   const leagueHub = { currentPeriod, weeklyMatchups: (league.hub?.schedule || []).filter(matchup => matchup.period === currentPeriod), schedule: league.hub?.schedule || [], standings, powerRankings, draftRecap: [...(league.draft?.picks || [])].sort((a, b) => a.overallPick - b.overallPick), activity: league.hub?.activity || [], fetchedAt: league.hub?.fetchedAt || null };
-  return { connection: { leagueId: connection.league_id, leagueName: connection.league_name, season: connection.season, teamName: connection.team_name, sport: league.sport }, myTeam, opponents: opponents.map(({ roster, ...team }) => ({ ...team, rosterSize: roster.length })), players: league.teams.flatMap(team => team.roster.map(player => ({ ...player, ownerTeam: team.name }))).sort((a, b) => b.projectedPoints - a.projectedPoints), suggestions: trades, waiverSuggestions: waivers, draftRecommendations: draft, draftAvailable, draftStatus: { inProgress: Boolean(league.draft?.inProgress), completed: !draftAvailable && totalRostered > 0, picks: league.draft?.picks || [] }, leagueHub, needs, settings: league.settings || {}, analysis: { rosterSize: myTeam.roster.length, totalProjected: Math.round(totalProjected * 10) / 10, avgProjected: myTeam.roster.length ? Math.round(totalProjected / myTeam.roster.length * 10) / 10 : 0, injured: myTeam.roster.filter(player => !['ACTIVE', 'NORMAL'].includes(player.injuryStatus)).length } };
+  const ratedTrades = trades.map(trade => { const overallAfter = overallForValue(currentTeamValue - trade.sentValue + trade.receivedValue); return { ...trade, overallBefore: currentOverall, overallAfter, overallChange: overallAfter - currentOverall }; });
+  return { connection: { leagueId: connection.league_id, leagueName: connection.league_name, season: connection.season, teamName: connection.team_name, sport: league.sport }, myTeam, opponents: opponents.map(({ roster, ...team }) => ({ ...team, rosterSize: roster.length })), players: league.teams.flatMap(team => team.roster.map(player => ({ ...player, ownerTeam: team.name }))).sort((a, b) => b.projectedPoints - a.projectedPoints), suggestions: ratedTrades, waiverSuggestions: waivers, draftRecommendations: draft, draftAvailable, draftStatus: { inProgress: Boolean(league.draft?.inProgress), completed: !draftAvailable && totalRostered > 0, picks: league.draft?.picks || [] }, leagueHub, needs, settings: league.settings || {}, rating: { overall: currentOverall, rosterValue: currentTeamValue, maxTeamValue }, analysis: { rosterSize: myTeam.roster.length, totalProjected: Math.round(totalProjected * 10) / 10, avgProjected: myTeam.roster.length ? Math.round(totalProjected / myTeam.roster.length * 10) / 10 : 0, injured: myTeam.roster.filter(player => !['ACTIVE', 'NORMAL'].includes(player.injuryStatus)).length } };
 }
 
 router.post('/preview', async (req, res) => { try { res.json(await fetchLeague(req.body?.leagueId, req.body?.season, req.body?.sport)); } catch (error) { res.status(400).json({ error: error.message }); } });
@@ -145,6 +156,18 @@ router.post('/connect', authenticate, async (req, res) => {
 });
 
 router.get('/status', authenticate, async (req, res) => { const [rows] = await pool.execute('SELECT league_id, season, sport, team_id, league_name, team_name, roster_names, updated_at FROM espn_connections WHERE user_id = ? ORDER BY sport', [req.userId]); res.json({ connected: rows.length > 0, connections: rows, connection: rows[0] || null }); });
+
+router.get('/news/:sport', authenticate, async (req, res) => {
+  try {
+    const sport = req.params.sport === 'football' ? 'football/nfl' : req.params.sport === 'basketball' ? 'basketball/nba' : null;
+    if (!sport) return res.status(400).json({ error: 'Choose football or basketball' });
+    const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/news?limit=30`);
+    if (!response.ok) throw new Error('ESPN news is unavailable');
+    const payload = await response.json();
+    const articles = (payload.articles || []).map(article => ({ id: article.id || article.links?.web?.href, headline: article.headline, description: article.description || '', published: article.published, image: article.images?.[0]?.url || null, url: article.links?.web?.href || null, categories: (article.categories || []).map(category => category.description || category.type).filter(Boolean).slice(0, 3) })).filter(article => article.headline && article.url);
+    res.json({ articles, source: 'ESPN', fetchedAt: new Date().toISOString() });
+  } catch (error) { res.status(502).json({ error: error.message || 'Could not load sports news' }); }
+});
 
 router.get('/workspace/:sport', authenticate, async (req, res) => {
   try {
