@@ -8,9 +8,10 @@ import MatchupDetails from '../components/MatchupDetails';
 import EntityModalProvider, { PlayerButton } from '../components/EntityModal';
 import StartSit from '../components/StartSit';
 import Rankings from '../components/Rankings';
+import AIManager from '../components/AIManager';
 
 const SECTIONS = [
-  ['overview', 'My Team'], ['league', 'League Hub'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
+  ['overview', 'My Team'], ['league', 'League Hub'], ['gm', 'AI General Manager'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
 ];
 
 function PlayerRow({ player, detail }) {
@@ -43,6 +44,7 @@ export default function SportWorkspace() {
     <nav className="flex gap-2 overflow-x-auto border-b border-dark-700 pb-3">{SECTIONS.map(([key, text]) => <button key={key} onClick={() => navigate(`/${sport}/${key}`)} className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold ${active === key ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-white'}`}>{text}</button>)}</nav>
     {active === 'overview' && <div className="space-y-6"><div className="grid grid-cols-2 gap-4 lg:grid-cols-4"><div className="card"><p className="stat-label">Roster Size</p><p className="stat-value mt-1">{data.analysis.rosterSize}</p></div><div className="card"><p className="stat-label">Projected Points</p><p className="stat-value mt-1">{data.analysis.totalProjected}</p></div><div className="card"><p className="stat-label">Average</p><p className="stat-value mt-1">{data.analysis.avgProjected}</p></div><div className="card"><p className="stat-label">Injury Concerns</p><p className={`stat-value mt-1 ${data.analysis.injured ? 'text-red-400' : 'text-green-400'}`}>{data.analysis.injured}</p></div></div><div className="grid gap-6 xl:grid-cols-2"><section className="card"><h2 className="mb-3 text-xl font-bold">My roster</h2>{data.myTeam.roster.sort((a,b)=>b.projectedPoints-a.projectedPoints).map(player => <PlayerRow key={player.id} player={player} />)}</section><section className="card"><h2 className="text-xl font-bold">Personalization profile</h2><p className="mt-2 text-sm leading-6 text-dark-300">Every recommendation uses this league's scoring, available player pool, your roster construction, injuries, ESPN projections, and expert draft ranks.</p><div className="mt-5"><p className="stat-label">Top roster needs</p><div className="mt-2 flex flex-wrap gap-2">{data.needs.slice(0,5).map(need => <span key={need} className="badge-blue">{need}</span>)}</div></div><div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-dark-900 p-3"><p className="text-dark-400">Scoring</p><p className="mt-1 font-semibold">{data.settings.scoringType}</p></div><div className="rounded-lg bg-dark-900 p-3"><p className="text-dark-400">League teams</p><p className="mt-1 font-semibold">{data.settings.teamCount || data.opponents.length + 1}</p></div></div></section></div></div>}
     {active === 'league' && <LeagueHub data={data} onRefresh={() => load(true, true)} />}
+    {active === 'gm' && <AIManager data={data} />}
     {active === 'news' && <NewsFeed sport={sport} />}
     {active === 'start-sit' && <StartSit data={data} onRefresh={() => load(true, true)} />}
     {active === 'rankings' && <Rankings data={data} />}
