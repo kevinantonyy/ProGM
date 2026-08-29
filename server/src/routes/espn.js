@@ -116,6 +116,24 @@ function buildTradePackages(myTeam, opponents, sport) {
   return results.sort((a, b) => b.confidence - a.confidence).slice(0, 12);
 }
 
+function buildStartSit(roster, sport) {
+  const benchSlots = sport === 'football' ? new Set([20, 21]) : new Set([12, 13]);
+  const bench = roster.filter(player => benchSlots.has(player.lineupSlotId));
+  const starters = roster.filter(player => !benchSlots.has(player.lineupSlotId));
+  const recommendations = [];
+  for (const start of bench) {
+    const eligible = starters.filter(sit => sit.position === start.position || ['FLEX', 'UTIL'].includes(sit.position) || ['FLEX', 'UTIL'].includes(start.position));
+    const sit = eligible.sort((a, b) => a.weeklyProjectedPoints - b.weeklyProjectedPoints)[0];
+    if (!sit) continue;
+    const gain = start.weeklyProjectedPoints - sit.weeklyProjectedPoints;
+    const injuryUpgrade = ['OUT', 'DOUBTFUL', 'INJURY_RESERVE'].includes(sit.injuryStatus) && !['OUT', 'DOUBTFUL', 'INJURY_RESERVE'].includes(start.injuryStatus);
+    if (gain < 0.5 && !injuryUpgrade) continue;
+    const proof = [`${start.name}: ${start.weeklyProjectedPoints.toFixed(1)} projected`, `${sit.name}: ${sit.weeklyProjectedPoints.toFixed(1)} projected`, `${gain >= 0 ? '+' : ''}${gain.toFixed(1)} projected-point change`, `${start.percentStarted.toFixed(1)}% vs ${sit.percentStarted.toFixed(1)}% started`];
+    recommendations.push({ start, sit, projectedGain: Math.round(gain * 10) / 10, confidence: Math.max(55, Math.min(95, Math.round(66 + Math.max(0, gain) * 3 + (injuryUpgrade ? 14 : 0)))), proof, reasoning: injuryUpgrade ? `${sit.name} carries a ${sit.injuryStatus.toLowerCase()} designation, while ${start.name} is the healthier eligible option.` : `${start.name} has the stronger Week projection at the same lineup position and provides ${gain.toFixed(1)} more projected points.` });
+  }
+  return recommendations.sort((a, b) => b.projectedGain - a.projectedGain).slice(0, 10);
+}
+
 function buildWorkspace(connection, league) {
   const myTeam = league.teams.find(team => team.id === connection.team_id);
   if (!myTeam) throw new Error('Your ESPN team was not found');
@@ -125,6 +143,7 @@ function buildWorkspace(connection, league) {
   league.teams.forEach((team, index) => { team.overall = overallForValue(teamValues[index]); });
   const currentTeamValue = rosterValue(myTeam.roster);
   const currentOverall = overallForValue(currentTeamValue);
+  const startSitSuggestions = buildStartSit(myTeam.roster, league.sport);
   const opponents = league.teams.filter(team => team.id !== myTeam.id);
   const trades = buildTradePackages(myTeam, opponents, league.sport);
   const needs = positionNeeds(myTeam.roster, league.sport);
@@ -140,7 +159,7 @@ function buildWorkspace(connection, league) {
   const currentPeriod = league.hub?.currentPeriod || 1;
   const leagueHub = { currentPeriod, weeklyMatchups: (league.hub?.schedule || []).filter(matchup => matchup.period === currentPeriod), schedule: league.hub?.schedule || [], standings, powerRankings, draftRecap: [...(league.draft?.picks || [])].sort((a, b) => a.overallPick - b.overallPick), activity: league.hub?.activity || [], fetchedAt: league.hub?.fetchedAt || null };
   const ratedTrades = trades.map(trade => { const overallAfter = overallForValue(currentTeamValue - trade.sentValue + trade.receivedValue); return { ...trade, overallBefore: currentOverall, overallAfter, overallChange: overallAfter - currentOverall }; });
-  return { connection: { leagueId: connection.league_id, leagueName: connection.league_name, season: connection.season, teamName: connection.team_name, sport: league.sport }, myTeam, opponents: opponents.map(({ roster, ...team }) => ({ ...team, rosterSize: roster.length })), players: league.teams.flatMap(team => team.roster.map(player => ({ ...player, ownerTeam: team.name }))).sort((a, b) => b.projectedPoints - a.projectedPoints), suggestions: ratedTrades, waiverSuggestions: waivers, draftRecommendations: draft, draftAvailable, draftStatus: { inProgress: Boolean(league.draft?.inProgress), completed: !draftAvailable && totalRostered > 0, picks: league.draft?.picks || [] }, leagueHub, needs, settings: league.settings || {}, rating: { overall: currentOverall, rosterValue: currentTeamValue, maxTeamValue }, analysis: { rosterSize: myTeam.roster.length, totalProjected: Math.round(totalProjected * 10) / 10, avgProjected: myTeam.roster.length ? Math.round(totalProjected / myTeam.roster.length * 10) / 10 : 0, injured: myTeam.roster.filter(player => !['ACTIVE', 'NORMAL'].includes(player.injuryStatus)).length } };
+  return { connection: { leagueId: connection.league_id, leagueName: connection.league_name, season: connection.season, teamName: connection.team_name, sport: league.sport }, myTeam, opponents: opponents.map(({ roster, ...team }) => ({ ...team, rosterSize: roster.length })), players: league.teams.flatMap(team => team.roster.map(player => ({ ...player, ownerTeam: team.name }))).sort((a, b) => b.projectedPoints - a.projectedPoints), suggestions: ratedTrades, waiverSuggestions: waivers, startSitSuggestions, draftRecommendations: draft, draftAvailable, draftStatus: { inProgress: Boolean(league.draft?.inProgress), completed: !draftAvailable && totalRostered > 0, picks: league.draft?.picks || [] }, leagueHub, needs, settings: league.settings || {}, rating: { overall: currentOverall, rosterValue: currentTeamValue, maxTeamValue }, analysis: { rosterSize: myTeam.roster.length, totalProjected: Math.round(totalProjected * 10) / 10, avgProjected: myTeam.roster.length ? Math.round(totalProjected / myTeam.roster.length * 10) / 10 : 0, injured: myTeam.roster.filter(player => !['ACTIVE', 'NORMAL'].includes(player.injuryStatus)).length } };
 }
 
 router.post('/preview', async (req, res) => { try { res.json(await fetchLeague(req.body?.leagueId, req.body?.season, req.body?.sport)); } catch (error) { res.status(400).json({ error: error.message }); } });
