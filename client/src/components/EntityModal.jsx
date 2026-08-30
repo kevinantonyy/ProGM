@@ -5,7 +5,8 @@ const EntityContext = createContext(null);
 
 export function PlayerButton({ player, children, className = '' }) {
   const context = useContext(EntityContext);
-  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openPlayer(player); }} className={`text-left font-semibold hover:text-primary-300 hover:underline ${className}`}>{children || player?.name}</button>;
+  const fallback = Math.max(40, Math.min(99, Math.round((player?.proRank ? Math.max(25, 100 - (player.proRank - 1) * 0.32) : 42) * 0.55 + Number(player?.percentOwned || 0) * 0.25 + Number(player?.percentStarted || 0) * 0.2)));
+  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openPlayer(player); }} className={`inline-flex max-w-full items-center gap-1.5 text-left font-semibold hover:text-primary-300 ${className}`}><span className="truncate hover:underline">{children || player?.name}</span><span className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md bg-primary-600/20 px-1 text-[10px] font-black text-primary-300" title="ProGM player overall">{player?.overall ?? fallback}</span></button>;
 }
 
 export function TeamButton({ team, children, className = '' }) {
