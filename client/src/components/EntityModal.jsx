@@ -3,15 +3,24 @@ import { Link } from 'react-router-dom';
 
 const EntityContext = createContext(null);
 
+export function PlayerAvatar({ player, size = 'h-7 w-7' }) {
+  return <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-dark-600 bg-dark-700 text-[9px] font-black text-dark-300 ${size}`}><span>{player?.position || '?'}</span>{player?.image && <img src={player.image} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={event => { event.currentTarget.style.display = 'none'; }} />}</span>;
+}
+
+export function TeamLogo({ team, size = 'h-7 w-7' }) {
+  const name = team?.name || team?.teamName || 'Team';
+  return <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dark-600 bg-dark-700 text-[9px] font-black text-dark-300 ${size}`}><span>{name.slice(0, 2).toUpperCase()}</span>{team?.logo && <img src={team.logo} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover" onError={event => { event.currentTarget.style.display = 'none'; }} />}</span>;
+}
+
 export function PlayerButton({ player, children, className = '' }) {
   const context = useContext(EntityContext);
   const fallback = Math.max(40, Math.min(99, Math.round((player?.proRank ? Math.max(25, 100 - (player.proRank - 1) * 0.32) : 42) * 0.55 + Number(player?.percentOwned || 0) * 0.25 + Number(player?.percentStarted || 0) * 0.2)));
-  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openPlayer(player); }} className={`inline-flex max-w-full items-center gap-1.5 text-left font-semibold hover:text-primary-300 ${className}`}><span className="truncate hover:underline">{children || player?.name}</span><span className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md bg-primary-600/20 px-1 text-[10px] font-black text-primary-300" title="ProGM player overall">{player?.overall ?? fallback}</span></button>;
+  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openPlayer(player); }} className={`inline-flex max-w-full items-center gap-1.5 text-left font-semibold hover:text-primary-300 ${className}`}><PlayerAvatar player={player} /><span className="truncate hover:underline">{children || player?.name}</span><span className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-md bg-primary-600/20 px-1 text-[10px] font-black text-primary-300" title="ProGM player overall">{player?.overall ?? fallback}</span></button>;
 }
 
 export function TeamButton({ team, children, className = '' }) {
   const context = useContext(EntityContext);
-  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openTeam(team); }} className={`text-left font-semibold hover:text-primary-300 hover:underline ${className}`}>{children || team?.name || team?.teamName}</button>;
+  return <button type="button" onClick={event => { event.preventDefault(); event.stopPropagation(); context?.openTeam(team); }} className={`inline-flex max-w-full items-center gap-2 text-left font-semibold hover:text-primary-300 hover:underline ${className}`}><TeamLogo team={team} /><span className="truncate">{children || team?.name || team?.teamName}</span></button>;
 }
 
 function PlayerProfile({ player, findTeam }) {
