@@ -1,0 +1,10 @@
+import { useState } from 'react';
+
+const defaults = { adds: true, drops: true, trades: true, injuries: true, lineup: true };
+export default function Settings() {
+  const [prefs, setPrefs] = useState(() => { try { return JSON.parse(localStorage.getItem('progm-notification-prefs')) || defaults; } catch { return defaults; } });
+  const [saved, setSaved] = useState(false);
+  function toggle(key) { setPrefs(current => ({ ...current, [key]: !current[key] })); setSaved(false); }
+  function save() { localStorage.setItem('progm-notification-prefs', JSON.stringify(prefs)); setSaved(true); }
+  return <div className="mx-auto max-w-3xl space-y-6"><header><p className="text-sm font-semibold uppercase tracking-widest text-primary-400">Account</p><h1 className="mt-1 text-3xl font-black">Settings</h1><p className="mt-2 text-dark-400">Choose which league events ProGM should surface. Browser push delivery will be enabled in the notification phase.</p></header><section className="card"><h2 className="text-xl font-bold">Activity preferences</h2><div className="mt-4 divide-y divide-dark-700">{Object.entries({ adds: 'Player additions and waiver claims', drops: 'Player drops', trades: 'Trade offers and completed trades', injuries: 'Injury-status changes', lineup: 'Start/sit opportunities' }).map(([key, label]) => <label key={key} className="flex cursor-pointer items-center justify-between gap-4 py-4"><span>{label}</span><input type="checkbox" checked={prefs[key]} onChange={() => toggle(key)} className="h-5 w-5 accent-blue-500" /></label>)}</div><button onClick={save} className="btn-primary mt-5">Save preferences</button>{saved && <span className="ml-3 text-sm text-green-400">Saved</span>}</section><section className="card"><h2 className="text-xl font-bold">Data and AI</h2><p className="mt-2 text-sm leading-6 text-dark-300">Ask ProGM sends the visible conversation and a compact snapshot of your synced league to Google Gemini’s free API. You can clear chat history from the Ask ProGM screen.</p></section></div>;
+}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { PlayerButton, TeamButton } from './EntityModal';
 
 const SORTS = {
+  progm: { label: 'ProGM Picks', compare: (a, b) => ((b.projectedPoints || 0) * 0.55 + (b.fantasyPoints || 0) * 0.2 + (b.percentStarted || 0) * 0.12 + (b.proRank ? Math.max(0, 250 - b.proRank) * 0.13 : 0)) - ((a.projectedPoints || 0) * 0.55 + (a.fantasyPoints || 0) * 0.2 + (a.percentStarted || 0) * 0.12 + (a.proRank ? Math.max(0, 250 - a.proRank) * 0.13 : 0)) },
   expert: { label: 'ESPN expert ranking', compare: (a, b) => (a.proRank || 9999) - (b.proRank || 9999) },
   points: { label: 'Points scored', compare: (a, b) => b.fantasyPoints - a.fantasyPoints },
   projected: { label: 'Projected points', compare: (a, b) => b.projectedPoints - a.projectedPoints },
@@ -10,7 +11,7 @@ const SORTS = {
 };
 
 export default function Rankings({ data }) {
-  const [sort, setSort] = useState('expert');
+  const [sort, setSort] = useState('progm');
   const [position, setPosition] = useState('ALL');
   const [availability, setAvailability] = useState('ALL');
   const [search, setSearch] = useState('');

@@ -8,20 +8,21 @@ const router = Router();
 // Register
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password, teamName } = req.body;
+    const { email, password } = req.body;
+    const username = `${String(email || '').split('@')[0].replace(/[^a-z0-9_-]/gi, '').slice(0, 28) || 'gm'}-${Math.random().toString(36).slice(2, 7)}`;
 
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'All fields are required' });
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const [result] = await pool.execute(
       'INSERT INTO users (username, email, password_hash, team_name) VALUES (?, ?, ?, ?) RETURNING id',
-      [username, email, passwordHash, teamName || 'My Team']
+      [username, email, passwordHash, 'My Team']
     );
 
     const token = jwt.sign({ userId: result.insertId }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user: { id: result.insertId, username, email, teamName: teamName || 'My Team' } });
+    res.status(201).json({ token, user: { id: result.insertId, username, email, teamName: 'My Team' } });
   } catch (error) {
     if (error.code === '23505') {
       return res.status(409).json({ error: 'Username or email already exists' });
@@ -39,7 +40,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
-    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]);
+    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ? OR email = ?', [username, username]);
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }

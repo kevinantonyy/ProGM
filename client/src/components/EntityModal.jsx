@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const EntityContext = createContext(null);
 
@@ -13,9 +14,12 @@ export function TeamButton({ team, children, className = '' }) {
 }
 
 function PlayerProfile({ player, findTeam }) {
+  const { data } = useContext(EntityContext);
   const team = findTeam(player.ownerTeam);
   const stats = [['Season projection', player.projectedPoints?.toFixed(1)], ['Season points', player.fantasyPoints?.toFixed(1)], ['Weekly projection', player.weeklyProjectedPoints?.toFixed(1)], ['Weekly points', player.weeklyPoints?.toFixed(1)], ['Rostered', `${(player.percentOwned || 0).toFixed(1)}%`], ['Started', `${(player.percentStarted || 0).toFixed(1)}%`]];
-  return <><div className="flex items-start gap-4"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary-600/20 font-black text-primary-300">{player.position}</span><div><h2 className="text-2xl font-black">{player.name}</h2><p className="mt-1 text-dark-400">{player.position} · {player.injuryStatus || 'ACTIVE'}{player.proRank ? ` · Expert rank #${player.proRank}` : ''}</p>{team && <div className="mt-2"><TeamButton team={team} className="text-sm text-primary-400">{team.name}</TeamButton></div>}</div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">{stats.map(([label, value]) => <div key={label} className="rounded-lg bg-dark-900 p-3"><p className="text-xs text-dark-400">{label}</p><p className="mt-1 text-lg font-black">{value ?? '—'}</p></div>)}</div></>;
+  const mine = player.ownerTeam === data.connection.teamName;
+  const tradePath = `/${data.connection.sport}/trades?${mine ? `send=${player.id}` : `receive=${player.id}&opponent=${encodeURIComponent(player.ownerTeam || '')}`}`;
+  return <><div className="flex items-start gap-4"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary-600/20 font-black text-primary-300">{player.position}</span><div><h2 className="text-2xl font-black">{player.name}</h2><p className="mt-1 text-dark-400">{player.position} · {player.injuryStatus || 'ACTIVE'}{player.proRank ? ` · Expert rank #${player.proRank}` : ''}</p>{team && <div className="mt-2"><TeamButton team={team} className="text-sm text-primary-400">{team.name}</TeamButton></div>}</div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">{stats.map(([label, value]) => <div key={label} className="rounded-lg bg-dark-900 p-3"><p className="text-xs text-dark-400">{label}</p><p className="mt-1 text-lg font-black">{value ?? '—'}</p></div>)}</div>{player.ownerTeam && <Link to={tradePath} className="btn-primary mt-5 block w-full text-center">{mine ? 'Trade Away' : 'Trade For'} {player.name} →</Link>}</>;
 }
 
 function TeamProfile({ team, roster }) {
@@ -26,7 +30,7 @@ export default function EntityModalProvider({ data, children }) {
   const [entity, setEntity] = useState(null);
   const teams = useMemo(() => data.leagueHub.standings.map(team => ({ ...team, name: team.name })), [data]);
   const findTeam = name => teams.find(team => team.name === name);
-  const context = { openPlayer: player => setEntity({ type: 'player', value: player }), openTeam: team => setEntity({ type: 'team', value: findTeam(team?.name || team?.teamName) || team }) };
+  const context = { data, openPlayer: player => setEntity({ type: 'player', value: player }), openTeam: team => setEntity({ type: 'team', value: findTeam(team?.name || team?.teamName) || team }) };
   const rosterFor = team => data.players.filter(player => player.ownerTeam === (team.name || team.teamName));
   function openPlainEntity(event) {
     if (event.target.closest('button, a, input, select, label')) return;

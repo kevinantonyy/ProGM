@@ -2,9 +2,11 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
+  { to: '/', label: 'Home', icon: '⌂' },
   { to: '/football', label: 'Fantasy Football', icon: '🏈' },
   { to: '/basketball', label: 'Fantasy Basketball', icon: '🏀' },
   { to: '/sync', label: 'Sync Your League', icon: '🔗' },
+  { to: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function Layout() {

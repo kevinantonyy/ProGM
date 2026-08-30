@@ -73,7 +73,7 @@ export default function Login() {
     try {
       let authResult;
       if (isRegister) {
-        const res = await api.post('/auth/register', { username, email, password, teamName });
+        const res = await api.post('/auth/register', { email, password });
         authResult = res.data;
         login(res.data.token, res.data.user);
       } else {
@@ -152,17 +152,17 @@ export default function Login() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm text-dark-300 mb-1.5">Username</label>
+            {!isRegister && <div>
+              <label className="block text-sm text-dark-300 mb-1.5">Email or username</label>
               <input
                 type="text"
                 className="input-field"
-                placeholder="Enter username"
+                placeholder="Email or username"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 required
               />
-            </div>
+            </div>}
 
             {isRegister && (
               <>
@@ -175,16 +175,6 @@ export default function Login() {
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-dark-300 mb-1.5">Team Name</label>
-                  <input
-                    type="text"
-                    className="input-field"
-                    placeholder="My NBA Squad"
-                    value={teamName}
-                    onChange={e => setTeamName(e.target.value)}
                   />
                 </div>
               </>
@@ -223,12 +213,6 @@ export default function Login() {
             </button>
           </div>
 
-          {!isRegister && (
-            <div className="mt-4 p-3 bg-dark-900 rounded-lg text-center">
-              <p className="text-xs text-dark-400">Demo credentials</p>
-              <p className="text-sm text-dark-300 font-mono mt-1">demo / demo123</p>
-            </div>
-          )}
         </div>
       </div>
     </div>

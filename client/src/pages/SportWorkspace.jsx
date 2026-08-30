@@ -11,7 +11,7 @@ import Rankings from '../components/Rankings';
 import AIManager from '../components/AIManager';
 
 const SECTIONS = [
-  ['overview', 'My Team'], ['league', 'League Hub'], ['gm', 'AI General Manager'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
+  ['overview', 'My Team'], ['league', 'League Hub'], ['gm', 'Ask ProGM'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
 ];
 
 function PlayerRow({ player, detail }) {

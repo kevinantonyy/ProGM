@@ -6,6 +6,8 @@ import YahooFantasy from './pages/YahooFantasy';
 import EspnFantasy from './pages/EspnFantasy';
 import LeagueSync from './pages/LeagueSync';
 import SportWorkspace from './pages/SportWorkspace';
+import Home from './pages/Home';
+import Settings from './pages/Settings';
 
 function ProtectedRoute({ children }) {
   const { token, loading } = useAuth();
@@ -19,7 +21,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Navigate to="/football" replace />} />
+        <Route index element={<Home />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="yahoo" element={<YahooFantasy />} />
         <Route path="espn" element={<EspnFantasy />} />
         <Route path=":sport/matchup/:matchupId" element={<SportWorkspace />} />
