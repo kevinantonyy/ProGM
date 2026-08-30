@@ -73,7 +73,7 @@ export default function TradeBuilder({ data }) {
   const overallChange = overallAfter - data.rating.overall;
   const gap = send.length && receive.length ? Math.abs(valueDelta) / Math.max(adjustedSentValue, adjustedReceivedValue, 1) * 100 : 0;
   const baseVerdict = !send.length || !receive.length ? null : userCuts.length < requiredUserCuts ? 'Invalid roster' : gap <= 7.5 ? 'Fair trade' : valueDelta > 0 ? 'You are winning' : 'You are losing';
-  const verdict = baseVerdict && userCuts.length ? `${baseVerdict} · Drop ${userCuts.map(player => player.name).join(' + ')}` : baseVerdict;
+  const verdict = baseVerdict;
   const verdictClass = baseVerdict === 'Fair trade' ? 'text-blue-400' : baseVerdict === 'You are winning' ? 'text-green-400' : 'text-red-400';
   const opponentTeam = data.opponents.find(team => team.name === opponent);
   const espnTradeUrl = `https://fantasy.espn.com/${data.connection.sport}/team?leagueId=${encodeURIComponent(data.connection.leagueId)}&teamId=${encodeURIComponent(opponentTeam?.id || '')}&seasonId=${encodeURIComponent(data.connection.season)}`;
