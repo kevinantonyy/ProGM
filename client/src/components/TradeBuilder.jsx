@@ -8,6 +8,12 @@ function tradeValue(player) {
   return Math.max(1, Number(player.projectedPoints) || 0) + Math.max(0, Number(player.percentOwned) || 0) * 0.12 + (player.proRank ? Math.max(0, 100 - player.proRank) * 0.08 : 0);
 }
 
+function rosterSpotCost(roster, tradedAway, extraIncoming) {
+  if (extraIncoming <= 0) return 0;
+  const tradedIds = new Set(tradedAway.map(player => player.id));
+  return roster.filter(player => !tradedIds.has(player.id)).sort((a, b) => tradeValue(a) - tradeValue(b)).slice(0, extraIncoming).reduce((total, player) => total + tradeValue(player), 0);
+}
+
 function possiblePackages(players, maxSize = 3) {
   const results = [];
   function build(start, current) {
@@ -39,11 +45,15 @@ export default function TradeBuilder({ data }) {
   const receivedPoints = receive.reduce((total, player) => total + player.projectedPoints, 0);
   const sentValue = send.reduce((total, player) => total + tradeValue(player), 0);
   const receivedValue = receive.reduce((total, player) => total + tradeValue(player), 0);
-  const valueDelta = receivedValue - sentValue;
+  const userRosterCost = rosterSpotCost(data.myTeam.roster, send, receive.length - send.length);
+  const opponentRosterCost = rosterSpotCost(opponentPlayers, receive, send.length - receive.length);
+  const adjustedReceivedValue = receivedValue - userRosterCost;
+  const adjustedSentValue = sentValue - opponentRosterCost;
+  const valueDelta = adjustedReceivedValue - adjustedSentValue;
   const pointDelta = receivedPoints - sentPoints;
-  const overallAfter = Math.max(0, Math.min(99, Math.round((data.rating.rosterValue - sentValue + receivedValue) / data.rating.maxTeamValue * 99)));
+  const overallAfter = Math.max(0, Math.min(99, Math.round((data.rating.rosterValue - sentValue + receivedValue - userRosterCost) / data.rating.maxTeamValue * 99)));
   const overallChange = overallAfter - data.rating.overall;
-  const gap = send.length && receive.length ? Math.abs(valueDelta) / Math.max(sentValue, receivedValue) * 100 : 0;
+  const gap = send.length && receive.length ? Math.abs(valueDelta) / Math.max(adjustedSentValue, adjustedReceivedValue, 1) * 100 : 0;
   const verdict = !send.length || !receive.length ? null : gap <= 7.5 ? 'Fair trade' : valueDelta > 0 ? 'You are winning' : 'You are losing';
   const verdictClass = verdict === 'Fair trade' ? 'text-blue-400' : verdict === 'You are winning' ? 'text-green-400' : 'text-red-400';
   const opponentTeam = data.opponents.find(team => team.name === opponent);
@@ -51,10 +61,10 @@ export default function TradeBuilder({ data }) {
   function toggle(id, setter) { setter(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]); }
   function suggestTrade() {
     if (receive.length) {
-      const rankedOutgoing = possiblePackages(data.myTeam.roster, 3).map(players => { const value = players.reduce((total, player) => total + tradeValue(player), 0); const gapPercent = Math.abs(value - receivedValue) / Math.max(value, receivedValue) * 100; return { players, gapPercent, score: gapPercent + (players.length - 1) * 0.4 }; }).sort((a, b) => a.score - b.score);
+      const rankedOutgoing = possiblePackages(data.myTeam.roster, 3).map(players => { const value = players.reduce((total, player) => total + tradeValue(player), 0) - rosterSpotCost(opponentPlayers, receive, players.length - receive.length); const rosterCost = rosterSpotCost(data.myTeam.roster, players, receive.length - players.length); const returnValue = receivedValue - rosterCost; const gapPercent = Math.abs(value - returnValue) / Math.max(value, returnValue, 1) * 100; return { players, gapPercent, rosterCost, score: gapPercent + Math.max(0, receive.length - players.length) * 2 }; }).sort((a, b) => a.score - b.score);
       const bestOutgoing = rankedOutgoing[0];
       setSendIds(bestOutgoing.players.map(player => player.id));
-      setSuggestionMessage(bestOutgoing.gapPercent <= 7.5 ? `ProGM found a realistic offer for ${receive.map(player => player.name).join(' + ')}.` : `This is your closest outgoing package for ${receive.map(player => player.name).join(' + ')}, but it remains outside the 7.5% fair-value range.`);
+      setSuggestionMessage(`${bestOutgoing.gapPercent <= 7.5 ? `ProGM found a realistic offer for ${receive.map(player => player.name).join(' + ')}.` : `This is your closest outgoing package for ${receive.map(player => player.name).join(' + ')}, but it remains outside the 7.5% fair-value range.`}${bestOutgoing.rosterCost > 0 ? ` The grade includes ${bestOutgoing.rosterCost.toFixed(1)} value for the roster spot you must clear.` : ''}`);
       return;
     }
     if (!send.length) { setSuggestionMessage('Select player(s) on either side first.'); return; }
@@ -62,14 +72,16 @@ export default function TradeBuilder({ data }) {
     const targetValue = sentValue;
     const needs = data.needs?.slice(0, 3) || [];
     const ranked = possiblePackages(opponentPlayers, 3).map(players => {
-      const value = players.reduce((total, player) => total + tradeValue(player), 0);
-      const gapPercent = Math.abs(value - targetValue) / Math.max(value, targetValue) * 100;
+      const value = players.reduce((total, player) => total + tradeValue(player), 0) - rosterSpotCost(data.myTeam.roster, send, players.length - send.length);
+      const offerValue = targetValue - rosterSpotCost(opponentPlayers, players, send.length - players.length);
+      const gapPercent = Math.abs(value - offerValue) / Math.max(value, offerValue, 1) * 100;
       const needMatches = players.filter(player => needs.includes(player.position)).length;
-      return { players, gapPercent, score: gapPercent - needMatches * 0.35 };
+      const rosterCost = rosterSpotCost(data.myTeam.roster, send, players.length - send.length);
+      return { players, gapPercent, rosterCost, score: gapPercent - needMatches * 0.35 + Math.max(0, players.length - send.length) * 2 };
     }).sort((a, b) => a.score - b.score);
     const best = ranked[0];
     setReceiveIds(best.players.map(player => player.id));
-    setSuggestionMessage(best.gapPercent <= 7.5 ? `ProGM found a realistic return from ${opponent}.` : `This is the closest available return from ${opponent}, but it remains outside the 7.5% fair-value range.`);
+    setSuggestionMessage(`${best.gapPercent <= 7.5 ? `ProGM found a realistic return from ${opponent}.` : `This is the closest available return from ${opponent}, but it remains outside the 7.5% fair-value range.`}${best.rosterCost > 0 ? ` The grade includes ${best.rosterCost.toFixed(1)} value for the roster spot you must clear.` : ''}`);
   }
   async function negotiate() {
     if (!send.length || !receive.length || !managerInput.trim()) return;
