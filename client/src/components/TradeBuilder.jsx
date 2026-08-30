@@ -75,7 +75,12 @@ export default function TradeBuilder({ data }) {
     if (!send.length || !receive.length || !managerInput.trim()) return;
     setNegotiating(true); setNegotiation('');
     try {
-      const prompt = `Negotiate this trade with ${opponent}. I send ${send.map(p => p.name).join(', ')} and receive ${receive.map(p => p.name).join(', ')}. My priorities and concerns: ${managerInput}. Tell me whether to accept, revise, or walk away, and explain why concisely. If you recommend a counteroffer, use only exact player names from these lists. My roster: ${data.myTeam.roster.map(p => p.name).join(', ')}. ${opponent}'s roster: ${opponentPlayers.map(p => p.name).join(', ')}. End your response on its own line with exactly COUNTER: SEND player name, player name | RECEIVE player name, player name. If the current offer should stay unchanged or I should walk away, end with COUNTER: NONE.`;
+      const candidateNames = (players, selected, targetValue) => [...selected, ...players.slice().sort((a, b) => Math.abs(tradeValue(a) - targetValue) - Math.abs(tradeValue(b) - targetValue))].filter((player, index, list) => list.findIndex(item => item.id === player.id) === index).slice(0, 4).map(player => player.name).join(', ');
+      const outgoingCandidates = candidateNames(data.myTeam.roster, send, receivedValue);
+      const incomingCandidates = candidateNames(opponentPlayers, receive, sentValue);
+      const concerns = managerInput.trim().slice(0, 160);
+      const packageNames = players => `${players.slice(0, 6).map(player => player.name).join(', ')}${players.length > 6 ? ` + ${players.length - 6} more` : ''}`;
+      const prompt = `Negotiate: I send [${packageNames(send)}]; receive [${packageNames(receive)}] from ${opponent}. Priorities: ${concerns}. Be concise: accept, revise, or walk away, with reasons. Counteroffers may use only these exact names. SEND options: ${outgoingCandidates}. RECEIVE options: ${incomingCandidates}. End exactly: COUNTER: SEND names | RECEIVE names. If no change or walk away, end: COUNTER: NONE.`;
       const response = await api.post('/gm/chat', { messages: [{ role: 'user', text: prompt }], league: leagueContext(data) });
       const message = response.data.message || '';
       const counter = message.match(/COUNTER:\s*SEND\s*(.*?)\s*\|\s*RECEIVE\s*(.*?)(?:\n|$)/i);
