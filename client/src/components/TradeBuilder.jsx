@@ -8,10 +8,14 @@ function tradeValue(player) {
   return Math.max(1, Number(player.projectedPoints) || 0) + Math.max(0, Number(player.percentOwned) || 0) * 0.12 + (player.proRank ? Math.max(0, 100 - player.proRank) * 0.08 : 0);
 }
 
-function rosterSpotCost(roster, tradedAway, extraIncoming) {
-  if (extraIncoming <= 0) return 0;
+function rosterCuts(roster, tradedAway, extraIncoming) {
+  if (extraIncoming <= 0) return [];
   const tradedIds = new Set(tradedAway.map(player => player.id));
-  return roster.filter(player => !tradedIds.has(player.id)).sort((a, b) => tradeValue(a) - tradeValue(b)).slice(0, extraIncoming).reduce((total, player) => total + tradeValue(player), 0);
+  return roster.filter(player => !tradedIds.has(player.id)).sort((a, b) => tradeValue(a) - tradeValue(b)).slice(0, extraIncoming);
+}
+
+function rosterSpotCost(roster, tradedAway, extraIncoming) {
+  return rosterCuts(roster, tradedAway, extraIncoming).reduce((total, player) => total + tradeValue(player), 0);
 }
 
 function possiblePackages(players, maxSize = 3) {
@@ -45,7 +49,8 @@ export default function TradeBuilder({ data }) {
   const receivedPoints = receive.reduce((total, player) => total + player.projectedPoints, 0);
   const sentValue = send.reduce((total, player) => total + tradeValue(player), 0);
   const receivedValue = receive.reduce((total, player) => total + tradeValue(player), 0);
-  const userRosterCost = rosterSpotCost(data.myTeam.roster, send, receive.length - send.length);
+  const userCuts = rosterCuts(data.myTeam.roster, send, receive.length - send.length);
+  const userRosterCost = userCuts.reduce((total, player) => total + tradeValue(player), 0);
   const opponentRosterCost = rosterSpotCost(opponentPlayers, receive, send.length - receive.length);
   const adjustedReceivedValue = receivedValue - userRosterCost;
   const adjustedSentValue = sentValue - opponentRosterCost;
@@ -54,8 +59,9 @@ export default function TradeBuilder({ data }) {
   const overallAfter = Math.max(0, Math.min(99, Math.round((data.rating.rosterValue - sentValue + receivedValue - userRosterCost) / data.rating.maxTeamValue * 99)));
   const overallChange = overallAfter - data.rating.overall;
   const gap = send.length && receive.length ? Math.abs(valueDelta) / Math.max(adjustedSentValue, adjustedReceivedValue, 1) * 100 : 0;
-  const verdict = !send.length || !receive.length ? null : gap <= 7.5 ? 'Fair trade' : valueDelta > 0 ? 'You are winning' : 'You are losing';
-  const verdictClass = verdict === 'Fair trade' ? 'text-blue-400' : verdict === 'You are winning' ? 'text-green-400' : 'text-red-400';
+  const baseVerdict = !send.length || !receive.length ? null : gap <= 7.5 ? 'Fair trade' : valueDelta > 0 ? 'You are winning' : 'You are losing';
+  const verdict = baseVerdict && userCuts.length ? `${baseVerdict} · Drop ${userCuts.map(player => player.name).join(' + ')}` : baseVerdict;
+  const verdictClass = baseVerdict === 'Fair trade' ? 'text-blue-400' : baseVerdict === 'You are winning' ? 'text-green-400' : 'text-red-400';
   const opponentTeam = data.opponents.find(team => team.name === opponent);
   const espnTradeUrl = `https://fantasy.espn.com/${data.connection.sport}/team?leagueId=${encodeURIComponent(data.connection.leagueId)}&teamId=${encodeURIComponent(opponentTeam?.id || '')}&seasonId=${encodeURIComponent(data.connection.season)}`;
   function toggle(id, setter) { setter(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]); }
@@ -63,8 +69,10 @@ export default function TradeBuilder({ data }) {
     if (receive.length) {
       const rankedOutgoing = possiblePackages(data.myTeam.roster, 3).map(players => { const value = players.reduce((total, player) => total + tradeValue(player), 0) - rosterSpotCost(opponentPlayers, receive, players.length - receive.length); const rosterCost = rosterSpotCost(data.myTeam.roster, players, receive.length - players.length); const returnValue = receivedValue - rosterCost; const gapPercent = Math.abs(value - returnValue) / Math.max(value, returnValue, 1) * 100; return { players, gapPercent, rosterCost, score: gapPercent + Math.max(0, receive.length - players.length) * 2 }; }).sort((a, b) => a.score - b.score);
       const bestOutgoing = rankedOutgoing[0];
+      if (bestOutgoing.gapPercent > 7.5) { setSuggestionMessage(`No fair offer was found for ${receive.map(player => player.name).join(' + ')} within the 7.5% value range. Try another target or add a player.`); return; }
       setSendIds(bestOutgoing.players.map(player => player.id));
-      setSuggestionMessage(`${bestOutgoing.gapPercent <= 7.5 ? `ProGM found a realistic offer for ${receive.map(player => player.name).join(' + ')}.` : `This is your closest outgoing package for ${receive.map(player => player.name).join(' + ')}, but it remains outside the 7.5% fair-value range.`}${bestOutgoing.rosterCost > 0 ? ` The grade includes ${bestOutgoing.rosterCost.toFixed(1)} value for the roster spot you must clear.` : ''}`);
+      const cuts = rosterCuts(data.myTeam.roster, bestOutgoing.players, receive.length - bestOutgoing.players.length);
+      setSuggestionMessage(`ProGM found a realistic offer for ${receive.map(player => player.name).join(' + ')}.${cuts.length ? ` You would need to drop ${cuts.map(player => player.name).join(' + ')}; that cost is included in the grade.` : ''}`);
       return;
     }
     if (!send.length) { setSuggestionMessage('Select player(s) on either side first.'); return; }
@@ -80,19 +88,21 @@ export default function TradeBuilder({ data }) {
       return { players, gapPercent, rosterCost, score: gapPercent - needMatches * 0.35 + Math.max(0, players.length - send.length) * 2 };
     }).sort((a, b) => a.score - b.score);
     const best = ranked[0];
+    if (best.gapPercent > 7.5) { setSuggestionMessage(`No fair return was found from ${opponent} within the 7.5% value range. Try a different player or trade partner.`); return; }
     setReceiveIds(best.players.map(player => player.id));
-    setSuggestionMessage(`${best.gapPercent <= 7.5 ? `ProGM found a realistic return from ${opponent}.` : `This is the closest available return from ${opponent}, but it remains outside the 7.5% fair-value range.`}${best.rosterCost > 0 ? ` The grade includes ${best.rosterCost.toFixed(1)} value for the roster spot you must clear.` : ''}`);
+    const cuts = rosterCuts(data.myTeam.roster, send, best.players.length - send.length);
+    setSuggestionMessage(`ProGM found a realistic return from ${opponent}.${cuts.length ? ` You would need to drop ${cuts.map(player => player.name).join(' + ')}; that cost is included in the grade.` : ''}`);
   }
   async function negotiate() {
     if (!send.length || !receive.length || !managerInput.trim()) return;
     setNegotiating(true); setNegotiation('');
     try {
-      const candidateNames = (players, selected, targetValue) => [...selected, ...players.slice().sort((a, b) => Math.abs(tradeValue(a) - targetValue) - Math.abs(tradeValue(b) - targetValue))].filter((player, index, list) => list.findIndex(item => item.id === player.id) === index).slice(0, 4).map(player => player.name).join(', ');
+      const candidateNames = (players, selected, targetValue) => [...selected, ...players.slice().sort((a, b) => Math.abs(tradeValue(a) - targetValue) - Math.abs(tradeValue(b) - targetValue))].filter((player, index, list) => list.findIndex(item => item.id === player.id) === index).slice(0, 3).map(player => player.name).join(', ');
       const outgoingCandidates = candidateNames(data.myTeam.roster, send, receivedValue);
       const incomingCandidates = candidateNames(opponentPlayers, receive, sentValue);
-      const concerns = managerInput.trim().slice(0, 160);
-      const packageNames = players => `${players.slice(0, 6).map(player => player.name).join(', ')}${players.length > 6 ? ` + ${players.length - 6} more` : ''}`;
-      const prompt = `Negotiate: I send [${packageNames(send)}]; receive [${packageNames(receive)}] from ${opponent}. Priorities: ${concerns}. Be concise: accept, revise, or walk away, with reasons. Counteroffers may use only these exact names. SEND options: ${outgoingCandidates}. RECEIVE options: ${incomingCandidates}. End exactly: COUNTER: SEND names | RECEIVE names. If no change or walk away, end: COUNTER: NONE.`;
+      const concerns = managerInput.trim().slice(0, 100);
+      const packageNames = players => `${players.slice(0, 4).map(player => player.name).join(', ')}${players.length > 4 ? ` + ${players.length - 4} more` : ''}`;
+      const prompt = `Negotiate: send [${packageNames(send)}]; receive [${packageNames(receive)}] from ${opponent}. ProGM grade: ${baseVerdict}; adjusted value ${adjustedSentValue.toFixed(1)} out vs ${adjustedReceivedValue.toFixed(1)} in${userCuts.length ? ` after dropping ${userCuts.map(player => player.name).join(', ')}` : ''}. Priorities: ${concerns}. Explain consistently with these roster-adjusted numbers; if asked why it wins, explain the advantage instead of reversing the grade. Counteroffers use exact names only. SEND: ${outgoingCandidates}. RECEIVE: ${incomingCandidates}. End: COUNTER: SEND names | RECEIVE names; or COUNTER: NONE.`;
       const response = await api.post('/gm/chat', { messages: [{ role: 'user', text: prompt }], league: leagueContext(data) });
       const message = response.data.message || '';
       const counter = message.match(/COUNTER:\s*SEND\s*(.*?)\s*\|\s*RECEIVE\s*(.*?)(?:\n|$)/i);
