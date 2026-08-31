@@ -108,8 +108,8 @@ export default function Login() {
         {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold mb-2">
-            <span className="text-accent-orange">Pro</span>
-            <span className="text-white">GM</span>
+            <span className="text-primary-400">Pro</span>
+            <span className="text-dark-50">GM</span>
           </h1>
           <p className="text-dark-400">Personalized Football & Basketball Assistant</p>
         </div>
@@ -127,7 +127,7 @@ export default function Login() {
           )}
 
           {!isRegister && (
-            <div className="mb-6 rounded-xl border border-[#6b4ba1]/50 bg-[#3f2867]/20 p-4">
+            <div className="mb-6 rounded-lg border border-[#6b4ba1]/50 bg-[#3f2867]/20 p-4">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#6001d2] text-xl font-black text-white">Y!</div>
                 <div>
@@ -143,7 +143,7 @@ export default function Login() {
           )}
 
           {!isRegister && (
-            <div className="mb-6 rounded-xl border border-red-700/40 bg-red-950/20 p-4">
+            <div className="mb-6 rounded-lg border border-red-700/40 bg-red-950/20 p-4">
               <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-white">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Paste a football or basketball team URL. ProGM uses the league settings and real player pool to personalize every tool.</p></div></div>
               <input className="input-field mt-4" value={espnLeagueId} onChange={e => { setEspnLeagueId(e.target.value); setEspnPreview(null); }} placeholder="Paste ESPN team URL or league ID" />
               <div className="mt-2 grid grid-cols-2 gap-2"><select className="input-field" value={espnSport} onChange={e => setEspnSport(e.target.value)}><option value="football">Football</option><option value="basketball">Basketball</option></select><input className="input-field" value={espnSeason} onChange={e => setEspnSeason(e.target.value)} placeholder="Season" /></div>
