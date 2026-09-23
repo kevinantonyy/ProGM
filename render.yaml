@@ -23,3 +23,8 @@ services:
         value: https://progm.onrender.com/api/yahoo/callback
       - key: GEMINI_API_KEY
         sync: false
+      # External NBA data provider (Tank01 via RapidAPI). Enter in dashboard.
+      - key: RAPIDAPI_KEY
+        sync: false
+      - key: NBA_STATS_FALLBACK
+        value: "false"

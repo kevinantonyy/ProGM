@@ -6,6 +6,7 @@ import YahooFantasy from './pages/YahooFantasy';
 import EspnFantasy from './pages/EspnFantasy';
 import LeagueSync from './pages/LeagueSync';
 import SportWorkspace from './pages/SportWorkspace';
+import BasketballWorkspace from './pages/BasketballWorkspace';
 import Home from './pages/Home';
 import Settings from './pages/Settings';
 
@@ -25,6 +26,10 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="yahoo" element={<YahooFantasy />} />
         <Route path="espn" element={<EspnFantasy />} />
+        {/* Fantasy Basketball is powered by Yahoo + Tank01 + ProGM analytics.
+            Its explicit routes take precedence over the generic :sport routes. */}
+        <Route path="basketball/:section?" element={<BasketballWorkspace />} />
+        {/* Football (and any other sport) stays on the existing ESPN workspace. */}
         <Route path=":sport/matchup/:matchupId" element={<SportWorkspace />} />
         <Route path=":sport/:section?" element={<SportWorkspace />} />
         <Route path="sync" element={<LeagueSync />} />
