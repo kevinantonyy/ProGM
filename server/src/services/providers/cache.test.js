@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { set, get, isFresh, remember, clearAll, freshnessFrom } from './cache.js';
+import { set, get, isFresh, remember, clearAll, freshnessFrom, inFlightCount } from './cache.js';
 
 test('set/get returns value with cacheHit metadata', () => {
   clearAll();
@@ -52,6 +52,28 @@ test('remember rethrows when loader fails and nothing cached', async () => {
     () => remember('k7', { provider: 'p', ttl: 10000 }, async () => { throw new Error('down'); }),
     /down/
   );
+});
+
+test('single-flight: concurrent misses for the same key trigger ONE loader call', async () => {
+  clearAll();
+  let calls = 0;
+  const loader = async () => { calls += 1; await new Promise((r) => setTimeout(r, 20)); return 'value'; };
+  // Fire 10 concurrent requests for the same uncached key.
+  const results = await Promise.all(Array.from({ length: 10 }, () => remember('dedup', { provider: 'p', ttl: 10000 }, loader)));
+  assert.equal(calls, 1); // only one provider fetch despite 10 concurrent callers
+  assert.ok(results.every((r) => r.value === 'value'));
+  assert.equal(inFlightCount(), 0); // in-flight map cleaned up
+});
+
+test('single-flight: different keys are NOT coalesced', async () => {
+  clearAll();
+  let calls = 0;
+  const loader = async () => { calls += 1; await new Promise((r) => setTimeout(r, 10)); return 'v'; };
+  await Promise.all([
+    remember('a', { provider: 'p', ttl: 10000 }, loader),
+    remember('b', { provider: 'p', ttl: 10000 }, loader),
+  ]);
+  assert.equal(calls, 2);
 });
 
 test('freshnessFrom aggregates provider metas', () => {

@@ -250,6 +250,11 @@ export function normalizeLeagueMeta(leagueMeta) {
     endDate: m.end_date || null,
     isFinished: m.is_finished === 1 || m.is_finished === '1',
     scoringType: m.scoring_type || null,
+    // Lineup format: 'date' = daily lineups (games-per-week matters most),
+    // 'week' = weekly lineups. Drives schedule-aware weekly value.
+    rosterType: m.roster_type || null,
+    // Yahoo's current coverage date (YYYY-MM-DD), used to anchor the period.
+    editKey: m.edit_key || null,
   };
 }
 
@@ -300,12 +305,23 @@ export function normalizeLeagueSettings(settingsResponse) {
 
   const scoringType = s.scoring_type || meta.scoringType;
 
+  // Lineup format + current fantasy-period window (for schedule-aware value).
+  // 'date' roster type = daily lineups; the relevant period is the current
+  // fantasy week. We anchor the window at Yahoo's current coverage date
+  // (edit_key/current_date) and extend through the end of that ISO week,
+  // clamped to the season end. If the season is over or dates are missing,
+  // no period is produced (callers fall back to per-game value).
+  const lineupFormat = meta.rosterType === 'week' ? 'weekly' : meta.rosterType === 'date' ? 'daily' : 'unknown';
+  const period = computeCurrentPeriod({ editKey: meta.editKey, seasonEnd: meta.endDate, isFinished: meta.isFinished });
+
   return {
     ...meta,
     settings: {
       scoringType,
       scoringFormat: normalizeScoringFormat(scoringType),
       scoringLabel: s.scoring_label || null,
+      lineupFormat,
+      period,
       rosterSlots,
       statCategories,
       raw: {
@@ -317,6 +333,26 @@ export function normalizeLeagueSettings(settingsResponse) {
       },
     },
   };
+}
+
+/**
+ * Current fantasy-period window: [editKey (today), end of that ISO week],
+ * clamped to season end. Returns { startDate, endDate } as 'YYYY-MM-DD', or
+ * null when the season is finished or the anchor date is unavailable. Never
+ * fabricates a window without a real anchor date.
+ */
+function computeCurrentPeriod({ editKey, seasonEnd, isFinished }) {
+  if (isFinished || !editKey) return null;
+  const start = new Date(`${editKey}T00:00:00Z`);
+  if (Number.isNaN(start.getTime())) return null;
+  // End of the current week (Sunday). Yahoo NBA weeks run Mon–Sun.
+  const dow = start.getUTCDay(); // 0=Sun..6=Sat
+  const daysToSunday = dow === 0 ? 0 : 7 - dow;
+  const end = new Date(start.getTime() + daysToSunday * 86400000);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  let endStr = fmt(end);
+  if (seasonEnd && endStr > seasonEnd) endStr = seasonEnd;
+  return { startDate: fmt(start), endDate: endStr };
 }
 
 // ---------------------------------------------------------------------------

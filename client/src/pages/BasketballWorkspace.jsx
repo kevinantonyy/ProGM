@@ -12,6 +12,9 @@ const SECTIONS = [
   ['start-sit', 'Start / Sit'],
   ['trades', 'Trades'],
   ['waivers', 'Waivers'],
+  ['rankings', 'Rankings'],
+  ['draft', 'Draft Helper'],
+  ['league', 'League Hub'],
   ['gm', 'Ask ProGM'],
 ];
 
@@ -115,6 +118,13 @@ function Overview({ data }) {
 
 function nth(n) { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; return (s[(v - 20) % 10] || s[v] || s[0]); }
 
+// Yahoo season start-year -> "2025-26" label. Falls back to the raw value.
+function seasonLabelFrom(season) {
+  const y = Number(season);
+  if (!Number.isInteger(y)) return season || '';
+  return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+}
+
 // --- Tab: Roster (starters / bench / IL) ---
 function Roster({ data }) {
   const roster = data.myTeam.roster;
@@ -161,29 +171,54 @@ function Waivers({ data }) {
   if (!w) return <section className="card text-dark-400">Waivers unavailable.</section>;
   if (!w.projectionsAvailable) return <section className="card border-orange-500/30"><h2 className="text-xl font-bold">Waiver rankings</h2><p className="mt-2 text-dark-300">{w.note}</p></section>;
   const rows = view === 'bestFit' ? w.bestFit : w.bestAvailable;
+  const CAT = { MustAdd: 'badge-green', Upgrade: 'badge-green', Stream: 'badge-blue', OpenSlot: 'badge-blue', Watch: 'badge-orange' };
   return (
     <div className="space-y-4">
       <div className="flex gap-1 border-b border-dark-700">
-        {[['bestAvailable', 'Best Available'], ['bestFit', 'Best Fit']].map(([k, l]) => (
+        {[['bestAvailable', 'Best Available'], ['bestFit', 'Best Fit'], ['addDrop', 'Add / Drop']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)} className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold ${view === k ? 'border-primary-500 text-primary-400' : 'border-transparent text-dark-400 hover:text-dark-50'}`}>{l}</button>
         ))}
       </div>
-      <section className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3 text-right">{view === 'bestFit' ? 'Fit' : 'Proj'}</th><th className="p-3 text-right">Owned</th><th className="p-3 text-right">Status</th></tr></thead>
-          <tbody>{rows.map((p) => (
-            <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
-              <td className="p-3 text-dark-400">{p.rank}</td>
-              <td className="p-3"><p className="font-semibold">{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}{view === 'bestFit' && p.fitReason ? ` · ${p.fitReason}` : ''}</p></td>
-              <td className="p-3 text-right">{view === 'bestFit' ? <span className="font-bold text-primary-400">{p.fitScore?.toFixed(1)}</span> : <Proj value={p.projectedPoints} />}</td>
-              <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
-              <td className="p-3 text-right"><StatusBadge status={p.status} /></td>
-            </tr>))}
-          </tbody>
-        </table>
-        {!rows.length && <p className="p-8 text-center text-dark-400">No ranked available players.</p>}
-      </section>
-      <p className="text-xs text-dark-500">Best Available ranks by projected league fantasy points. Best Fit adjusts for your roster's positional needs. Ownership % is context only, not a quality signal.</p>
+
+      {view === 'addDrop' && (
+        <section className="space-y-3">
+          {!(w.addDrop || []).length && <div className="card text-sm text-dark-400">No add/drop upgrade available right now. ProGM only pairs an add with a drop when your roster is full and the move is a clear net gain — it won't suggest churn.</div>}
+          {(w.addDrop || []).map((m, i) => (
+            <div key={i} className="card">
+              <div className="flex items-center justify-between gap-2">
+                <span className={CAT[m.category] || 'badge-orange'}>{m.category}</span>
+                {m.netImprovement != null && <span className="badge-green">+{m.netImprovement} proj</span>}
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2 text-sm">
+                <div className="min-w-0"><p className="text-[10px] uppercase text-green-400">Add</p><p className="truncate font-semibold">{m.add?.name}</p><Proj value={m.add?.projectedPoints} /></div>
+                <span className="text-dark-500">↔</span>
+                <div className="min-w-0 text-right"><p className="text-[10px] uppercase text-red-400">{m.drop ? 'Drop' : 'Open slot'}</p><p className="truncate font-semibold">{m.drop?.name || 'No drop needed'}</p>{m.drop && <Proj value={m.drop?.projectedPoints} />}</div>
+              </div>
+              {m.reason && <p className="mt-2 border-t border-dark-700 pt-2 text-xs text-dark-400">{m.reason}</p>}
+              {m.drop && m.drop.projectionKnown === false && <p className="mt-1 text-[11px] text-orange-300/80">Drop candidate has no projection — confirm before dropping.</p>}
+            </div>))}
+        </section>
+      )}
+      {view !== 'addDrop' && (
+        <>
+          <section className="card overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3 text-right">{view === 'bestFit' ? 'Fit' : 'Proj'}</th><th className="p-3 text-right">Owned</th><th className="p-3 text-right">Status</th></tr></thead>
+              <tbody>{rows.map((p) => (
+                <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
+                  <td className="p-3 text-dark-400">{p.rank}</td>
+                  <td className="p-3"><p className="font-semibold">{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}{view === 'bestFit' && p.fitReason ? ` · ${p.fitReason}` : ''}</p></td>
+                  <td className="p-3 text-right">{view === 'bestFit' ? <span className="font-bold text-primary-400">{p.fitScore?.toFixed(1)}</span> : <Proj value={p.projectedPoints} />}</td>
+                  <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
+                  <td className="p-3 text-right"><StatusBadge status={p.status} /></td>
+                </tr>))}
+              </tbody>
+            </table>
+            {!rows.length && <p className="p-8 text-center text-dark-400">No ranked available players.</p>}
+          </section>
+          <p className="text-xs text-dark-500">Best Available ranks by projected league fantasy points. Best Fit adjusts for your roster's positional needs. Ownership % is context only, not a quality signal.</p>
+        </>
+      )}
     </div>
   );
 }
@@ -225,9 +260,42 @@ function Trades({ data, leagueKey }) {
     </div>
   );
   const ASSESS = { improves: ['Improves projected output', 'badge-green'], neutral: ['Approximately neutral', 'badge-blue'], reduces: ['Reduces projected output', 'badge-red'], unknown: ['Projection data unavailable', 'badge-orange'] };
+  const recs = data.recommendedTrades;
+  const FAIR = { balanced: 'badge-green', 'plausible starting point': 'badge-blue', 'favors their side': 'badge-orange' };
   return (
     <div className="space-y-5">
       {error && <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-300">{error}</div>}
+
+      {/* ProGM AI trade recommender (found for you, not fabricated). */}
+      <section>
+        <h2 className="mb-1 text-xl font-bold">ProGM trade ideas</h2>
+        <p className="mb-3 text-sm text-dark-400">Found by ProGM from real rosters + projections. Improvement and fairness are separate questions; ProGM never predicts acceptance.</p>
+        {recs && !recs.available && <div className="card border-orange-500/30 text-sm text-dark-300">{recs.reason}</div>}
+        {recs?.available && !recs.recommendations.length && <div className="card text-sm text-dark-400">No trade clearly improves your team right now without being lopsided. ProGM will not suggest a move just to churn.</div>}
+        {recs?.available && recs.recommendations.length > 0 && (
+          <div className="grid gap-3 lg:grid-cols-2">{recs.recommendations.map((t, i) => (
+            <div key={i} className="card space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-dark-300">with {t.withTeam}</span>
+                <div className="flex items-center gap-1.5">
+                  {t.production?.net != null && <span className="badge-green">+{t.production.net} to you</span>}
+                  <span className={FAIR[t.fairness] || 'badge-orange'}>{t.fairness}</span>
+                </div>
+              </div>
+              <div className="flex items-stretch justify-between gap-2 text-sm">
+                <div className="min-w-0 flex-1"><p className="text-[10px] uppercase text-red-400">You send</p>{t.send.map((p) => <p key={p.id} className="truncate font-semibold">{p.name}</p>)}</div>
+                <span className="self-center text-dark-500">↔</span>
+                <div className="min-w-0 flex-1 text-right"><p className="text-[10px] uppercase text-green-400">You receive</p>{t.receive.map((p) => <p key={p.id} className="truncate font-semibold">{p.name}</p>)}</div>
+              </div>
+              {t.whyForMe?.length > 0 && <ul className="space-y-0.5 border-t border-dark-700 pt-2">{t.whyForMe.slice(0, 3).map((r, j) => <li key={j} className="text-xs text-dark-400">· {r}</li>)}</ul>}
+              {t.risks?.length > 0 && <p className="text-[11px] text-orange-300/80">Risk: {t.risks[0]}</p>}
+              <p className="text-[11px] text-dark-500">Confidence {Math.round((t.confidence ?? 0) * 100)}% · based on how much of the package has projection data.</p>
+            </div>))}
+          </div>
+        )}
+      </section>
+
+      <div className="border-t border-dark-700 pt-5"><h2 className="text-xl font-bold">Analyze a specific trade</h2><p className="mt-1 mb-1 text-sm text-dark-400">Build any package manually and get ProGM's assessment.</p></div>
       <div className="flex flex-wrap items-center gap-3"><label className="text-sm text-dark-300">Trade with</label><select value={theirTeamKey} onChange={(e) => pickOpponent(e.target.value)} className="input-field max-w-xs"><option value="">Select a team…</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Picker title="You send" players={myRoster} selected={sendKeys} onToggle={toggle(sendKeys, setSendKeys)} />
@@ -245,6 +313,176 @@ function Trades({ data, leagueKey }) {
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+// --- Tab: Rankings ---
+function Rankings({ data }) {
+  const r = data.rankings;
+  const [sortBy, setSortBy] = useState(data.scheduleAware ? 'period' : 'projected');
+  if (!r) return <section className="card text-dark-400">Rankings unavailable.</section>;
+  if (!r.projectionsAvailable) return <section className="card border-orange-500/30"><h2 className="text-xl font-bold">Player rankings</h2><p className="mt-2 text-dark-300">{r.note}</p></section>;
+  const players = [...(r.players || [])].sort((a, b) => {
+    if (sortBy === 'owned') return (b.percentOwned ?? -1) - (a.percentOwned ?? -1);
+    if (sortBy === 'period') return (b.periodProjected ?? -1) - (a.periodProjected ?? -1);
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    return (b.projected ?? -1) - (a.projected ?? -1);
+  });
+  const cols = [['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-dark-400">Sort by</span>
+        {cols.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
+      </div>
+      <section className="card overflow-hidden p-0">
+        <table className="w-full text-sm">
+          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
+          <tbody>{players.map((p, i) => (
+            <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
+              <td className="p-3 text-dark-400">{i + 1}</td>
+              <td className="p-3"><p className="font-semibold">{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3 text-right"><Proj value={p.projected} /></td>
+              {data.scheduleAware && <td className="p-3 text-right">{p.periodProjected != null ? <span className="font-bold text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
+              <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
+            </tr>))}
+          </tbody>
+        </table>
+      </section>
+      <p className="text-xs text-dark-500">{r.note}</p>
+    </div>
+  );
+}
+
+// --- Tab: Draft Helper (research / rankings tool) ---
+function DraftHelper({ data }) {
+  const db = data.draftBoard;
+  const [q, setQ] = useState('');
+  const [pos, setPos] = useState('ALL');
+  const [avail, setAvail] = useState('ALL');
+  const [sortBy, setSortBy] = useState('value');
+  if (!db) return <section className="card text-dark-400">Draft Helper unavailable.</section>;
+  if (!db.available) return (
+    <section className="card border-orange-500/30"><h2 className="text-xl font-bold">Draft Helper</h2><p className="mt-2 text-dark-300">{db.note}</p></section>
+  );
+
+  const positions = ['ALL', ...Array.from(new Set((db.board || []).flatMap((p) => p.eligiblePositions || []))).sort()];
+  let rows = [...(db.board || [])];
+  if (q.trim()) { const s = q.trim().toLowerCase(); rows = rows.filter((p) => p.name.toLowerCase().includes(s) || (p.teamAbbr || '').toLowerCase().includes(s)); }
+  if (pos !== 'ALL') rows = rows.filter((p) => (p.eligiblePositions || []).includes(pos));
+  if (db.availabilityKnown && avail !== 'ALL') rows = rows.filter((p) => p.availability === avail);
+  rows.sort((a, b) => {
+    if (sortBy === 'projected') return (b.projected ?? -1) - (a.projected ?? -1);
+    if (sortBy === 'period') return (b.periodProjected ?? -1) - (a.periodProjected ?? -1);
+    if (sortBy === 'scarcity') return (b.scarcity ?? -1) - (a.scarcity ?? -1);
+    if (sortBy === 'owned') return (b.percentOwned ?? -1) - (a.percentOwned ?? -1);
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    return (b.value ?? -1) - (a.value ?? -1); // default: ProGM value
+  });
+
+  const AVAIL_BADGE = { available: 'badge-green', rostered: 'badge-blue', unknown: 'badge-orange' };
+  const FIT_BADGE = { need: 'badge-green', surplus: 'badge-orange', neutral: 'text-dark-400' };
+  const hasPeriod = data.scheduleAware;
+  const sortBtns = [['value', 'ProGM value'], ['projected', 'Proj/gm'], hasPeriod && ['period', 'Period'], ['scarcity', 'Scarcity'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold">Draft Helper</h2>
+        <p className="mt-1 text-sm text-dark-400">{db.note}</p>
+      </div>
+
+      {/* Research vs available-to-acquire is made explicit. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search player or team…" className="input-field max-w-xs" />
+        <select value={pos} onChange={(e) => setPos(e.target.value)} className="input-field max-w-[10rem]">{positions.map((p) => <option key={p} value={p}>{p === 'ALL' ? 'All positions' : p}</option>)}</select>
+        {db.availabilityKnown && (
+          <div className="flex gap-1">
+            {[['ALL', 'All'], ['available', 'Available to acquire'], ['rostered', 'Rostered']].map(([k, l]) => (
+              <button key={k} onClick={() => setAvail(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${avail === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-dark-400">Sort by</span>
+        {sortBtns.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
+      </div>
+
+      <section className="card overflow-x-auto p-0">
+        <table className="w-full text-sm">
+          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr>
+            <th className="p-3">#</th><th className="p-3">Player</th><th className="p-3">Tier</th>
+            <th className="p-3 text-right">Value</th><th className="p-3 text-right">Proj/gm</th>
+            {hasPeriod && <th className="p-3 text-right">Period</th>}
+            <th className="p-3 text-right">Scarcity</th><th className="p-3">Fit</th>
+            {db.availabilityKnown && <th className="p-3">Availability</th>}
+            <th className="p-3 text-right">Owned</th><th className="p-3 text-right">Conf</th>
+          </tr></thead>
+          <tbody>{rows.map((p) => (
+            <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
+              <td className="p-3 text-dark-400">{p.overallRank}</td>
+              <td className="p-3"><p className="font-semibold">{p.name}{p.out && <span className="badge-red ml-2">OUT</span>}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3"><span className="badge-blue">T{p.tier}</span></td>
+              <td className="p-3 text-right font-bold text-primary-400">{p.value?.toFixed(1)}</td>
+              <td className="p-3 text-right"><Proj value={p.projected} /></td>
+              {hasPeriod && <td className="p-3 text-right">{p.periodProjected != null ? <span className="text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
+              <td className="p-3 text-right text-dark-300">{p.scarcity != null ? `×${p.scarcity.toFixed(2)}` : '—'}</td>
+              <td className="p-3"><span className={FIT_BADGE[p.rosterFit] || 'text-dark-400'} title={p.rosterFitLabel}>{p.rosterFit === 'need' ? 'Need' : p.rosterFit === 'surplus' ? 'Surplus' : '—'}</span></td>
+              {db.availabilityKnown && <td className="p-3"><span className={AVAIL_BADGE[p.availability]}>{p.availability === 'available' ? 'Available' : p.availability === 'rostered' ? 'Rostered' : 'Unknown'}</span></td>}
+              <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
+              <td className="p-3 text-right text-dark-300">{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</td>
+            </tr>))}
+          </tbody>
+        </table>
+        {!rows.length && <p className="p-8 text-center text-dark-400">No players match your filters.</p>}
+      </section>
+
+      {db.noData?.length > 0 && (
+        <section className="card">
+          <h3 className="text-sm font-bold">No projection data ({db.noData.length})</h3>
+          <p className="mt-1 text-xs text-dark-500">These players lack projection data, so ProGM does not assign them a value or rank them (never zeroed or faked).</p>
+          <p className="mt-2 text-xs text-dark-400">{db.noData.slice(0, 30).map((p) => p.name).join(', ')}{db.noData.length > 30 ? ` +${db.noData.length - 30} more` : ''}</p>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// --- Tab: League Hub ---
+function LeagueHub({ data }) {
+  const hub = data.leagueHub;
+  if (!hub?.available) return <section className="card text-dark-400">{hub?.note || 'League hub unavailable.'}</section>;
+  return (
+    <div className="grid gap-6 xl:grid-cols-2">
+      <section className="card">
+        <h2 className="text-xl font-bold">Standings</h2>
+        <p className="mt-1 text-sm text-dark-400">Reported by Yahoo</p>
+        <div className="mt-4 overflow-x-auto"><table className="w-full text-sm">
+          <thead className="border-b border-dark-600 text-left text-dark-400"><tr><th className="pb-2">#</th><th className="pb-2">Team</th><th className="pb-2 text-right">Record</th><th className="pb-2 text-right">PF</th></tr></thead>
+          <tbody>{hub.standings.map((t) => (
+            <tr key={t.teamKey} className={`border-b border-dark-700 ${t.isMine ? 'bg-primary-600/10' : ''}`}>
+              <td className="py-2 font-bold text-dark-400">{t.rank ?? '—'}</td>
+              <td className="py-2">{t.name}{t.isMine && <span className="badge-blue ml-2">You</span>}</td>
+              <td className="py-2 text-right">{t.wins}-{t.losses}{t.ties ? `-${t.ties}` : ''}</td>
+              <td className="py-2 text-right text-primary-400">{t.pointsFor != null ? Math.round(t.pointsFor).toLocaleString() : '—'}</td>
+            </tr>))}
+          </tbody></table></div>
+      </section>
+      <section className="card">
+        <h2 className="text-xl font-bold">Power Ranking</h2>
+        <p className="mt-1 text-sm text-dark-400">ProGM · 65% record + 35% league-relative scoring</p>
+        {hub.powerRankings.length ? (
+          <div className="mt-4 space-y-2">{hub.powerRankings.map((t) => (
+            <div key={t.teamKey} className={`flex items-center justify-between rounded-lg border border-dark-700 px-4 py-2.5 ${t.isMine ? 'bg-primary-600/10' : 'bg-dark-900'}`}>
+              <div className="flex items-center gap-3"><span className="text-lg font-black text-dark-500">{t.powerRank}</span><div><p className="font-semibold">{t.name}{t.isMine && <span className="badge-blue ml-2">You</span>}</p><p className="text-xs text-dark-400">Win% {(t.winPct * 100).toFixed(0)}%</p></div></div>
+              <span className="stat-value text-lg">{t.powerScore.toFixed(1)}</span>
+            </div>))}
+          </div>
+        ) : <p className="mt-4 text-sm text-dark-400">{hub.note}</p>}
+      </section>
     </div>
   );
 }
@@ -271,6 +509,9 @@ function AskProGM({ data }) {
 }
 
 // Structured basketball analytics context for Gemini (explanation-only).
+// Gemini never invents trades, values, or stats — it only explains the
+// ProGM-computed recommendations packed into this context. Every field here is
+// produced by a ProGM engine (or is a Yahoo fact); nothing is fabricated.
 export function basketballContext(data) {
   const slim = (p) => ({ name: p?.name, position: p?.position, team: p?.teamAbbr, projected: p?.projectedPoints, injury: p?.injuryStatus, ownedPct: p?.percentOwned, starting: p?.isStarting });
   return {
@@ -279,7 +520,31 @@ export function basketballContext(data) {
     roster: (data.myTeam?.roster || []).map(slim),
     standings: data.standings,
     lineupRecommendation: data.lineup ? { projectedCurrent: data.lineup.projectedCurrentPoints, projectedOptimized: data.lineup.projectedOptimizedPoints, difference: data.lineup.projectedDifference, swaps: (data.lineup.swaps || []).map((s) => ({ start: s.in?.name, bench: s.out?.name, gain: s.projectedGain })) } : null,
-    waivers: data.waivers?.projectionsAvailable ? { bestAvailable: (data.waivers.bestAvailable || []).slice(0, 8).map(slim), bestFit: (data.waivers.bestFit || []).slice(0, 8).map((p) => ({ ...slim(p), fitScore: p.fitScore })) } : null,
+    // Schedule-aware start/sit calls (ProGM), when produced by the engine.
+    startSit: data.startSit?.benchOverStarter?.length
+      ? { scheduleAware: data.startSit.scheduleAware, calls: data.startSit.benchOverStarter.slice(0, 6).map((s) => ({ start: s.start?.name, sit: s.sit?.name, gain: s.gain, note: s.reason })) }
+      : null,
+    waivers: data.waivers?.projectionsAvailable ? {
+      bestAvailable: (data.waivers.bestAvailable || []).slice(0, 8).map(slim),
+      bestFit: (data.waivers.bestFit || []).slice(0, 8).map((p) => ({ ...slim(p), fitScore: p.fitScore })),
+      // Paired add/drop moves (ProGM), never an add without a considered drop.
+      addDrop: (data.waivers.addDrop || []).slice(0, 6).map((m) => ({ add: m.add?.name, drop: m.drop?.name || null, net: m.netImprovement, category: m.category })),
+    } : null,
+    // AI trade recommender candidates (ProGM-generated + scored, not Gemini).
+    recommendedTrades: (data.recommendedTrades?.recommendations || []).slice(0, 6).map((t) => ({
+      with: t.withTeam,
+      youSend: (t.send || []).map((p) => p.name),
+      youReceive: (t.receive || []).map((p) => p.name),
+      myImprovement: t.production?.net ?? null,
+      fairness: t.fairness,
+      confidence: t.confidence,
+    })),
+    // Player rankings (ProGM), top slice for reference.
+    rankingsTop: (data.rankings?.players || []).slice(0, 15).map((p) => ({ rank: p.rank, name: p.name, projected: p.projected, period: p.periodProjected })),
+    // Draft Helper board top slice (ProGM value + fit + availability), for
+    // explanation only — Gemini must not invent rankings or values.
+    draftBoardTop: (data.draftBoard?.board || []).slice(0, 15).map((p) => ({ rank: p.overallRank, name: p.name, value: p.value, tier: p.tier, fit: p.rosterFit, availability: p.availability })),
+    leagueHub: data.leagueHub ? { powerRankings: (data.leagueHub.powerRankings || []).map((t) => ({ rank: t.powerRank, name: t.name, score: t.powerScore })) } : null,
     recommendations: data.intelligence?.recommendations,
     dataAvailable: data.externalData?.available,
   };
@@ -297,13 +562,23 @@ export default function BasketballWorkspace() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/basketball/leagues')
+    // Send the remembered in-session selection so the server can honor it —
+    // unless a newer season has appeared, in which case it returns that as the
+    // default. This keeps a stale pick from blocking a newer season.
+    let remembered = null;
+    try { remembered = sessionStorage.getItem('progm-bball-league'); } catch { /* ignore */ }
+    api.get('/basketball/leagues', { params: remembered ? { selected: remembered } : {} })
       .then((r) => {
         setLeagues(r.data.leagues || []);
-        setLeagueKey((r.data.leagues || [])[0]?.leagueKey || '');
+        setLeagueKey(r.data.defaultLeagueKey || (r.data.leagues || [])[0]?.leagueKey || '');
       })
       .catch((err) => { setError(err.response?.data?.error || 'Connect Yahoo to load your basketball leagues.'); setLoading(false); });
   }, []);
+
+  function selectLeague(key) {
+    setLeagueKey(key);
+    try { sessionStorage.setItem('progm-bball-league', key); } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     if (!leagueKey) return;
@@ -324,12 +599,12 @@ export default function BasketballWorkspace() {
         <div>
           <p className="text-sm font-semibold uppercase tracking-widest text-primary-400">Fantasy Basketball</p>
           <h1 className="mt-1 text-3xl font-bold">{data.connection.teamName}</h1>
-          <p className="mt-1 text-dark-400">{data.connection.leagueName} · {data.connection.season}</p>
+          <p className="mt-1 text-dark-400">{data.connection.leagueName} · {seasonLabelFrom(data.connection.season)}</p>
         </div>
         <div className="flex items-center gap-3">
           {leagues?.length > 1 && (
-            <select value={leagueKey} onChange={(e) => setLeagueKey(e.target.value)} className="input-field max-w-xs">
-              {leagues.map((l) => <option key={l.leagueKey} value={l.leagueKey}>{l.name} · {l.season}</option>)}
+            <select value={leagueKey} onChange={(e) => selectLeague(e.target.value)} className="input-field max-w-xs">
+              {leagues.map((l) => <option key={l.leagueKey} value={l.leagueKey}>{l.myTeam?.name || l.name} — {l.seasonLabel || l.season}</option>)}
             </select>
           )}
           <Freshness external={data.externalData} />
@@ -347,6 +622,9 @@ export default function BasketballWorkspace() {
       {active === 'start-sit' && <StartSit data={data} />}
       {active === 'trades' && <Trades data={data} leagueKey={leagueKey} />}
       {active === 'waivers' && <Waivers data={data} />}
+      {active === 'rankings' && <Rankings data={data} />}
+      {active === 'draft' && <DraftHelper data={data} />}
+      {active === 'league' && <LeagueHub data={data} />}
       {active === 'gm' && <AskProGM data={data} />}
     </div>
   );

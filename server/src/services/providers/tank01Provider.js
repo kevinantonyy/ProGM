@@ -25,10 +25,36 @@ export function isConfigured() {
   return Boolean(apiKey());
 }
 
+// --- Request instrumentation (for API-budget visibility, no secrets logged) ---
+let requestCount = 0;
+// Per-endpoint breakdown so we can attribute every outbound Tank01 request.
+const endpointCounts = { playerList: 0, gamesForPlayer: 0, injuryList: 0, teamSchedule: 0, other: 0 };
+
+function classifyEndpoint(path) {
+  if (path.startsWith('/getNBAPlayerList')) return 'playerList';
+  if (path.startsWith('/getNBAGamesForPlayer')) return 'gamesForPlayer';
+  if (path.startsWith('/getNBAInjuryList')) return 'injuryList';
+  if (path.startsWith('/getNBATeamSchedule')) return 'teamSchedule';
+  return 'other';
+}
+
+export function getRequestCount() {
+  return requestCount;
+}
+export function getRequestBreakdown() {
+  return { ...endpointCounts, total: requestCount };
+}
+export function resetRequestCount() {
+  requestCount = 0;
+  for (const k of Object.keys(endpointCounts)) endpointCounts[k] = 0;
+}
+
 async function tankFetch(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
   const key = apiKey();
   if (!key) throw new Error('Tank01 not configured');
 
+  requestCount += 1; // count every actual outbound Tank01 request (cache misses only)
+  endpointCounts[classifyEndpoint(path)] += 1;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -90,53 +116,67 @@ function toStatLine(stats) {
   return line;
 }
 
+/** Average a list of game stat lines into a single per-game StatLine (or null). */
+function aggregateGames(list) {
+  const sum = emptyStatLine();
+  const keys = ['minutes', 'points', 'rebounds', 'assists', 'steals', 'blocks', 'turnovers', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade'];
+  for (const k of keys) sum[k] = 0;
+  let n = 0;
+  for (const g of list) {
+    const line = toStatLine(g);
+    if (!line) continue;
+    n += 1;
+    for (const k of keys) sum[k] += line[k] || 0;
+  }
+  if (!n) return null;
+  for (const k of keys) sum[k] = Number((sum[k] / n).toFixed(2));
+  sum.gamesPlayed = n;
+  return sum;
+}
+
 /**
- * Season averages for many players. Tank01's per-player season stats come from
- * getNBAPlayerInfo/getNBAGamesForPlayer, which are per-player calls. To respect
- * the API budget, the orchestrator only requests stats for the specific
- * externalIds it needs (roster + candidate pool), and caches per player.
+ * Season (+ last-10 recent) averages for ONE player from their game log.
+ * This is the single Tank01 network call per player (getNBAGamesForPlayer).
+ * The orchestrator caches this per player+season and reuses it across all
+ * users/leagues, so a player is only fetched once until the cache expires.
+ *
+ * @param {string} season
+ * @param {string} externalId
+ * @returns {Promise<PlayerStats|null>} null when the player has no game data
+ */
+export async function getSeasonStatsForPlayer(season, externalId) {
+  const yr = tankSeason(season);
+  const body = await tankFetch(`/getNBAGamesForPlayer?playerID=${encodeURIComponent(externalId)}&season=${yr}`);
+  const games = body && typeof body === 'object' ? Object.values(body) : [];
+  const valid = games.filter((g) => g && typeof g === 'object');
+  if (!valid.length) return null;
+
+  // Games are keyed by gameID which sorts chronologically (YYYYMMDD prefix).
+  const chrono = valid
+    .map((g) => ({ g, id: String(g.gameID || '') }))
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((x) => x.g);
+
+  const seasonAvg = aggregateGames(chrono);
+  const recent = aggregateGames(chrono.slice(-10));
+  return { externalId: String(externalId), season: seasonAvg || emptyStatLine(), recent, recentGameCount: Math.min(10, chrono.length) };
+}
+
+/**
+ * Season averages for many players. Tank01 has no bulk season-average endpoint,
+ * so this is one getNBAGamesForPlayer call per player. The orchestrator
+ * (providers/index.js) caches PER PLAYER and only calls this for players whose
+ * stats are not already cached, so a warm cache costs zero calls here.
  *
  * @param {string} season
  * @param {string[]} externalIds
  */
 export async function getSeasonStats(season, externalIds = []) {
   const out = [];
-  const yr = tankSeason(season);
-  // Per-player game logs; aggregate to season + recent. Budget-bounded by caller.
   for (const externalId of externalIds) {
     try {
-      const body = await tankFetch(`/getNBAGamesForPlayer?playerID=${encodeURIComponent(externalId)}&season=${yr}`);
-      const games = body && typeof body === 'object' ? Object.values(body) : [];
-      const valid = games.filter((g) => g && typeof g === 'object');
-      if (!valid.length) continue;
-
-      const agg = (list) => {
-        const sum = emptyStatLine();
-        const keys = ['minutes', 'points', 'rebounds', 'assists', 'steals', 'blocks', 'turnovers', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade'];
-        for (const k of keys) sum[k] = 0;
-        let n = 0;
-        for (const g of list) {
-          const line = toStatLine(g);
-          if (!line) continue;
-          n += 1;
-          for (const k of keys) sum[k] += line[k] || 0;
-        }
-        if (!n) return null;
-        for (const k of keys) sum[k] = Number((sum[k] / n).toFixed(2));
-        sum.gamesPlayed = n;
-        return sum;
-      };
-
-      // Games are keyed by gameID which sorts chronologically (YYYYMMDD prefix).
-      const chrono = valid
-        .map((g) => ({ g, id: String(g.gameID || '') }))
-        .sort((a, b) => a.id.localeCompare(b.id))
-        .map((x) => x.g);
-
-      const seasonAvg = agg(chrono);
-      const recent = agg(chrono.slice(-10));
-
-      out.push({ externalId: String(externalId), season: seasonAvg || emptyStatLine(), recent, recentGameCount: Math.min(10, chrono.length) });
+      const stats = await getSeasonStatsForPlayer(season, externalId);
+      if (stats) out.push(stats);
     } catch {
       // Skip this player on failure; caller degrades gracefully.
     }
@@ -157,12 +197,41 @@ export async function getInjuries() {
     }));
 }
 
+// All 30 NBA team abbreviations (Tank01 uses these for getNBATeamSchedule).
+const NBA_TEAMS = ['ATL', 'BOS', 'BKN', 'CHA', 'CHI', 'CLE', 'DAL', 'DEN', 'DET', 'GS', 'HOU', 'IND', 'LAC', 'LAL', 'MEM', 'MIA', 'MIL', 'MIN', 'NO', 'NY', 'OKC', 'ORL', 'PHI', 'PHO', 'POR', 'SAC', 'SA', 'TOR', 'UTA', 'WAS'];
+
+/**
+ * League-wide team schedules for a season. One call per team (bulk-ish, 30
+ * calls max), heavily cached upstream and SHARED across users/leagues. Returns
+ * { teamAbbr -> [{ gameDate:'YYYYMMDD', completed:boolean }] }.
+ */
+export async function getSchedule(season) {
+  const yr = tankSeason(season);
+  const out = {};
+  const results = await Promise.all(NBA_TEAMS.map(async (team) => {
+    try {
+      const body = await tankFetch(`/getNBATeamSchedule?teamAbv=${team}&season=${yr}`);
+      const games = Array.isArray(body?.schedule) ? body.schedule : [];
+      return [team, games.map((g) => ({
+        gameDate: g?.gameDate || null,
+        completed: String(g?.gameStatus || '').toLowerCase() === 'completed' || g?.gameStatusCode === '3',
+      })).filter((g) => g.gameDate)];
+    } catch {
+      return [team, null];
+    }
+  }));
+  for (const [team, games] of results) if (games) out[team] = games;
+  return out;
+}
+
 export const tank01Provider = {
   name: 'tank01',
   isConfigured,
   getPlayerIndex,
   getSeasonStats,
+  getSeasonStatsForPlayer,
   getInjuries,
+  getSchedule,
 };
 
 export default tank01Provider;

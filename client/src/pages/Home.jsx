@@ -34,6 +34,14 @@ function basketballOpportunities(data) {
   if (fit) cards.push({ type: 'ADD', text: `${fit.name}`, detail: `Best fit waiver · ${fit.projectedPoints?.toFixed?.(1) ?? '—'} proj`, to: '/basketball/waivers' });
   const injury = data.myTeam.roster.find((p) => p.injuryStatus && !['Healthy', 'ACTIVE', 'NORMAL'].includes(p.injuryStatus));
   if (injury) cards.push({ type: 'WATCH', text: `${injury.name} · ${injury.injuryStatus}`, detail: injury.injuryDetail || 'Check status before lock', to: '/basketball/roster' });
+  // A ProGM-recommended trade (only when the recommender actually produced one).
+  const trade = data.recommendedTrades?.recommendations?.[0];
+  if (trade) {
+    const send = (trade.send || []).map((p) => p.name).join(', ');
+    const recv = (trade.receive || []).map((p) => p.name).join(', ');
+    const improve = trade.production?.net;
+    if (send && recv) cards.push({ type: 'TRADE', text: `${recv} for ${send}`, detail: `${trade.withTeam || 'Opponent'}${improve != null ? ` · +${Number(improve).toFixed(1)} to your team` : ''}`, to: '/basketball/trades' });
+  }
   // A projection-backed roster recommendation (e.g. thin position) as a TARGET.
   const rec = data.intelligence?.recommendations?.find((r) => /thin|depth|surplus/i.test(r.recommendation));
   if (rec) cards.push({ type: 'TARGET', text: rec.recommendation, detail: rec.reasons?.[0] || 'Roster construction insight', to: '/basketball/overview' });
@@ -46,6 +54,7 @@ function basketballOpportunities(data) {
 const TYPE_STYLE = {
   START: 'bg-green-900/50 text-green-400', ADD: 'bg-blue-900/50 text-blue-400',
   TARGET: 'bg-purple-900/50 text-purple-300', WATCH: 'bg-orange-900/50 text-orange-400',
+  TRADE: 'bg-primary-900/50 text-primary-300',
 };
 
 export default function Home() {

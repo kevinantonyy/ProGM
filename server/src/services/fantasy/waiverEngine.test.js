@@ -48,3 +48,92 @@ test('degrades gracefully without projections (facts only)', () => {
   assert.equal(res.bestAvailable.length, 0);
   assert.equal(res.players[0].percentOwned, 40); // ownership fact still shown
 });
+
+// --- Paired ADD/DROP ---------------------------------------------------------
+
+function rosterPlayer(key, elig, proj, { slot = 'BN', isStarting = false, status = null } = {}) {
+  return { playerKey: key, name: key, teamAbbr: 'BOS', eligiblePositions: elig, selectedPosition: slot, isStarting, status, statusFull: status, _proj: proj };
+}
+
+test('full roster pairs each add with a beatable drop (net improvement)', () => {
+  const available = [fa('Waiver30', ['PG'], 30)];
+  const roster = [rosterPlayer('Weak10', ['PG'], 10), rosterPlayer('Strong28', ['SG'], 28, { isStarting: true })];
+  const allProj = provider([...available, ...roster]);
+  const res = rankWaivers({
+    availablePlayers: available,
+    projectionProvider: allProj,
+    myRoster: roster,
+    rosterAnalysis: { counts: { openSlots: 0 } },
+  });
+  assert.equal(res.addDrop.length, 1);
+  assert.equal(res.addDrop[0].add.playerKey, 'Waiver30');
+  assert.equal(res.addDrop[0].drop.playerKey, 'Weak10'); // weakest, not the starter
+  assert.equal(res.addDrop[0].netImprovement, 20);
+  assert.equal(res.addDrop[0].openSlotUsed, false);
+});
+
+test('no drop is forced when the add does not beat any roster player', () => {
+  const available = [fa('MidWaiver', ['PG'], 12)];
+  const roster = [rosterPlayer('Player20', ['PG'], 20), rosterPlayer('Player22', ['SG'], 22)];
+  const allProj = provider([...available, ...roster]);
+  const res = rankWaivers({
+    availablePlayers: available,
+    projectionProvider: allProj,
+    myRoster: roster,
+    rosterAnalysis: { counts: { openSlots: 0 } },
+  });
+  assert.equal(res.addDrop.length, 0); // churn avoided
+});
+
+test('open roster slot yields an add with no drop', () => {
+  const available = [fa('Waiver25', ['PG'], 25)];
+  const roster = [rosterPlayer('Player20', ['PG'], 20)];
+  const allProj = provider([...available, ...roster]);
+  const res = rankWaivers({
+    availablePlayers: available,
+    projectionProvider: allProj,
+    myRoster: roster,
+    rosterAnalysis: { counts: { openSlots: 1 } },
+  });
+  assert.equal(res.addDrop.length, 1);
+  assert.equal(res.addDrop[0].drop, null);
+  assert.equal(res.addDrop[0].openSlotUsed, true);
+  assert.equal(res.addDrop[0].category, 'OpenSlot');
+});
+
+test('IL-stashed players are not the first drop when a healthier bench option exists', () => {
+  const available = [fa('Waiver30', ['PG'], 30)];
+  const roster = [
+    rosterPlayer('Stashed5', ['C'], 5, { slot: 'IL', status: 'O' }),
+    rosterPlayer('Bench8', ['PG'], 8),
+  ];
+  const allProj = provider([...available, ...roster]);
+  const res = rankWaivers({
+    availablePlayers: available,
+    projectionProvider: allProj,
+    myRoster: roster,
+    rosterAnalysis: { counts: { openSlots: 0 } },
+  });
+  assert.equal(res.addDrop[0].drop.playerKey, 'Bench8'); // bench dropped before IL stash
+});
+
+test('drop candidate with no projection is flagged, not fabricated', () => {
+  const available = [fa('Waiver30', ['PG'], 30)];
+  const roster = [rosterPlayer('Unknown', ['PG'], null)];
+  const allProj = provider([...available, ...roster]);
+  const res = rankWaivers({
+    availablePlayers: available,
+    projectionProvider: allProj,
+    myRoster: roster,
+    rosterAnalysis: { counts: { openSlots: 0 } },
+  });
+  assert.equal(res.addDrop.length, 1);
+  assert.equal(res.addDrop[0].drop.projectionKnown, false);
+  assert.equal(res.addDrop[0].netImprovement, null); // not invented
+});
+
+test('no paired add/drop is produced without the user roster', () => {
+  const available = [fa('Waiver30', ['PG'], 30)];
+  const res = rankWaivers({ availablePlayers: available, projectionProvider: provider(available) });
+  assert.deepEqual(res.addDrop, []);
+});

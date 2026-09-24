@@ -15,6 +15,7 @@
  */
 
 const store = new Map(); // key -> { value, provider, fetchedAt, expiresAt }
+const inFlight = new Map(); // key -> Promise<{ value, meta }>  (single-flight de-dup)
 
 // Per-dataset TTLs (ms), tuned to how fast each dataset changes.
 export const TTL = {
@@ -67,8 +68,11 @@ export function clearAll() {
 }
 
 /**
- * Cache-aware fetch wrapper.
- *   - If a fresh entry exists, return it (cacheHit).
+ * Cache-aware fetch wrapper with single-flight de-duplication.
+ *   - If a fresh entry exists, return it (cacheHit) without touching a provider.
+ *   - If an identical fetch is already in flight, AWAIT that one instead of
+ *     starting a second — so N concurrent misses for the same key trigger a
+ *     single provider request, not N.
  *   - Otherwise run loader(). On success, cache and return it.
  *   - On loader failure, fall back to a STALE cached value if present
  *     (better slightly-old real data than none), marked stale.
@@ -81,15 +85,31 @@ export function clearAll() {
 export async function remember(key, opts, loader) {
   if (isFresh(key)) return get(key);
 
-  try {
-    const value = await loader();
-    set(key, value, opts);
-    return { value, meta: { provider: opts.provider, fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + opts.ttl).toISOString(), stale: false, cacheHit: false } };
-  } catch (error) {
-    const stale = get(key);
-    if (stale) return stale; // serve stale data rather than nothing
-    throw error;
-  }
+  // Single-flight: coalesce concurrent misses for the same key onto one promise.
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    try {
+      const value = await loader();
+      set(key, value, opts);
+      return { value, meta: { provider: opts.provider, fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + opts.ttl).toISOString(), stale: false, cacheHit: false } };
+    } catch (error) {
+      const stale = get(key);
+      if (stale) return stale; // serve stale data rather than nothing
+      throw error;
+    } finally {
+      inFlight.delete(key);
+    }
+  })();
+
+  inFlight.set(key, promise);
+  return promise;
+}
+
+/** Number of in-flight loads (for tests/diagnostics). */
+export function inFlightCount() {
+  return inFlight.size;
 }
 
 /** Freshness metadata for a computed/analysis result that layered on cached inputs. */

@@ -13,6 +13,7 @@ import { authenticate } from '../middleware/auth.js';
 import { accessTokenFor, yahooFantasy } from './yahoo.js';
 import { extractUserLeagues, extractUserTeams } from '../services/fantasy/normalize.js';
 import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspace.js';
+import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
 import { cache } from '../services/providers/index.js';
 
 const router = Router();
@@ -46,15 +47,26 @@ router.get('/leagues', authenticate, async (req, res) => {
       yahooFantasy('/users;use_login=1/games;game_codes=nba/leagues', token),
       yahooFantasy('/users;use_login=1/games;game_codes=nba/teams', token),
     ]);
-    const leagues = extractUserLeagues(leaguesData);
+    const rawLeagues = extractUserLeagues(leaguesData);
     const teams = extractUserTeams(teamsData);
     const teamByLeague = new Map(teams.map((t) => [t.leagueKey, t]));
+
+    // Newest season first, deduped by stable key, with season labels. The
+    // client may pass its remembered selection so we can compute the default
+    // that yields to a newer season when one appears.
+    const persisted = typeof req.query.selected === 'string' ? req.query.selected : null;
+    const { selectedLeagueKey, reason, leagues: ordered } = chooseDefaultLeague(orderLeaguesForDisplay(rawLeagues), persisted);
+
     res.json({
       connected: true,
-      leagues: leagues.map((l) => ({
+      defaultLeagueKey: selectedLeagueKey,
+      defaultReason: reason,
+      leagues: ordered.map((l) => ({
         leagueKey: l.leagueKey,
         name: l.name,
         season: l.season,
+        seasonYear: l.seasonYear,
+        seasonLabel: l.seasonLabel,
         numTeams: l.numTeams,
         scoringType: l.scoringType,
         myTeam: teamByLeague.get(l.leagueKey) || null,

@@ -15,7 +15,7 @@
  */
 import * as cache from './cache.js';
 import * as health from './health.js';
-import tank01Provider from './tank01Provider.js';
+import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
 
 const FALLBACK_ENABLED = () => process.env.NBA_STATS_FALLBACK === 'true';
@@ -35,10 +35,13 @@ export function externalDataAvailable() {
 
 export function providerStatus() {
   return {
-    tank01: { configured: tank01Provider.isConfigured(), ...health.status('tank01') },
+    tank01: { configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
   };
 }
+
+// Tank01 request instrumentation, re-exported for API-budget visibility.
+export { getRequestCount as tank01RequestCount, resetRequestCount as resetTank01RequestCount, getRequestBreakdown as tank01RequestBreakdown };
 
 /**
  * Run an operation against the best available provider, recording health and
@@ -83,16 +86,57 @@ export function getPlayerIndex(season) {
   );
 }
 
-/** Season (+recent) stats for a specific set of external ids, cached. */
-export function getSeasonStats(season, externalIds) {
-  // Cache key is derived from the sorted id set so identical requests share cache.
-  const idKey = Array.isArray(externalIds) && externalIds.length ? `:${[...externalIds].sort().join(',').slice(0, 200)}` : ':all';
-  return withProvider(
-    `seasonStats:${season}${idKey}`,
-    cache.TTL.seasonStats,
-    (p) => p.getSeasonStats(season, externalIds),
-    (p) => typeof p.getSeasonStats === 'function'
-  );
+/**
+ * Season (+recent) stats for a specific set of external ids.
+ *
+ * Cached PER PLAYER (`seasonStats:{season}:{externalId}`) rather than per id-set
+ * blob, so:
+ *   - a player fetched by one user/league is reused by every other user/league
+ *     (NBA player stats are global, not per-user),
+ *   - only players NOT already cached trigger a provider call, and
+ *   - concurrent identical player requests are coalesced by cache single-flight
+ *     (one Tank01 call in flight per player, others await it).
+ *
+ * Returns { value: PlayerStats[], meta } shaped like the old batch call so the
+ * insights layer is unchanged. meta.cacheHit is true only when EVERY requested
+ * player came from cache (no provider call happened).
+ *
+ * @param {string} season
+ * @param {string[]} externalIds
+ */
+export async function getSeasonStats(season, externalIds) {
+  const ids = Array.isArray(externalIds) ? [...new Set(externalIds.map(String))] : [];
+  if (!ids.length) {
+    return { value: [], meta: { provider: 'cache', fetchedAt: new Date().toISOString(), expiresAt: new Date().toISOString(), stale: false, cacheHit: true } };
+  }
+
+  const metas = [];
+  const results = await Promise.all(ids.map((externalId) =>
+    withProvider(
+      `seasonStats:${season}:${externalId}`,
+      cache.TTL.seasonStats,
+      async (p) => {
+        // Prefer the per-player helper; fall back to the batch API for providers
+        // that only implement getSeasonStats (e.g. nba.com fallback).
+        if (typeof p.getSeasonStatsForPlayer === 'function') {
+          return p.getSeasonStatsForPlayer(season, externalId);
+        }
+        const arr = await p.getSeasonStats(season, [externalId]);
+        return Array.isArray(arr) ? (arr[0] || null) : null;
+      },
+      (p) => typeof p.getSeasonStatsForPlayer === 'function' || typeof p.getSeasonStats === 'function'
+    ),
+  ));
+
+  const value = [];
+  for (const r of results) {
+    if (!r) continue;
+    metas.push(r.meta);
+    if (r.value) value.push(r.value); // null => player had no game data; omit (never fabricate)
+  }
+
+  const merged = cache.freshnessFrom(...metas) || { provider: 'tank01', fetchedAt: new Date().toISOString(), expiresAt: new Date().toISOString(), stale: false, cacheHit: true };
+  return { value, meta: { ...merged, cacheHit: metas.length > 0 && metas.every((m) => m.cacheHit) } };
 }
 
 /** League-wide injuries (bulk, cached ~30min). */
@@ -102,6 +146,19 @@ export function getInjuries() {
     cache.TTL.injuries,
     (p) => p.getInjuries(),
     (p) => typeof p.getInjuries === 'function'
+  );
+}
+
+/**
+ * League-wide team schedules for a season (bulk, cached). Shared across all
+ * users/leagues since NBA schedules are global — one build serves everyone.
+ */
+export function getSchedule(season) {
+  return withProvider(
+    `schedule:${season}`,
+    cache.TTL.schedule,
+    (p) => p.getSchedule(season),
+    (p) => typeof p.getSchedule === 'function'
   );
 }
 
