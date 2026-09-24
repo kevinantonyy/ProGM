@@ -30,6 +30,27 @@ let requestCount = 0;
 // Per-endpoint breakdown so we can attribute every outbound Tank01 request.
 const endpointCounts = { playerList: 0, gamesForPlayer: 0, injuryList: 0, teamSchedule: 0, other: 0 };
 
+/**
+ * Last outbound error, SANITIZED for diagnostics (never contains the API key,
+ * headers, or response body). Classifies the HTTP status into an actionable
+ * kind so the UI/report can say "quota_exceeded" vs "invalid_key" etc.
+ */
+let lastError = null; // { status:number|null, kind:string, at:string }
+
+/** Map an HTTP status (or network failure) to an actionable diagnostic kind. */
+function classifyStatus(status) {
+  if (status === 401) return 'invalid_key';
+  if (status === 403) return 'access_forbidden'; // subscription/plan/permission
+  if (status === 429) return 'quota_exceeded';   // rate limit or monthly quota
+  if (status != null && status >= 500) return 'provider_error';
+  if (status == null) return 'network_error';
+  return 'http_error';
+}
+
+export function getLastError() {
+  return lastError;
+}
+
 function classifyEndpoint(path) {
   if (path.startsWith('/getNBAPlayerList')) return 'playerList';
   if (path.startsWith('/getNBAGamesForPlayer')) return 'gamesForPlayer';
@@ -63,13 +84,31 @@ async function tankFetch(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
       signal: controller.signal,
     });
     if (!res.ok) {
+      // Record a SANITIZED diagnostic. RapidAPI exposes rate-limit metadata via
+      // x-ratelimit-* headers (limit / remaining / reset); capture them so the
+      // report can say whether it's a rate window or a monthly plan quota, and
+      // when it resets. No key, no body, no other headers are stored.
+      const rateLimit = {
+        limit: res.headers.get('x-ratelimit-requests-limit'),
+        remaining: res.headers.get('x-ratelimit-requests-remaining'),
+        reset: res.headers.get('x-ratelimit-requests-reset'),
+        retryAfter: res.headers.get('retry-after'),
+      };
+      lastError = { status: res.status, kind: classifyStatus(res.status), at: new Date().toISOString(), rateLimit };
       const err = new Error(`Tank01 HTTP ${res.status}`);
       err.httpStatus = res.status;
       throw err;
     }
+    lastError = null; // clear on a successful call
     const json = await res.json();
     // Tank01 wraps payloads in { statusCode, body }.
     return json?.body ?? json;
+  } catch (error) {
+    // Network/DNS/timeout (no HTTP status) — record as a sanitized network error.
+    if (error.httpStatus == null) {
+      lastError = { status: null, kind: 'network_error', at: new Date().toISOString(), rateLimit: null };
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }

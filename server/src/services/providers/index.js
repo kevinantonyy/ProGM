@@ -15,7 +15,7 @@
  */
 import * as cache from './cache.js';
 import * as health from './health.js';
-import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown } from './tank01Provider.js';
+import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
 
 const FALLBACK_ENABLED = () => process.env.NBA_STATS_FALLBACK === 'true';
@@ -35,7 +35,7 @@ export function externalDataAvailable() {
 
 export function providerStatus() {
   return {
-    tank01: { configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), ...health.status('tank01') },
+    tank01: { configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
   };
 }

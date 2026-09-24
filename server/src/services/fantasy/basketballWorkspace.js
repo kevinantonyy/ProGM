@@ -251,6 +251,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     externalData: {
       available: ctx.externalAvailable,
       reason: ctx.reason,
+      diagnostic: ctx.diagnostic || null,
       freshness: ctx.freshness,
       identity: ctx.identityDiagnostics,
       providerStatus: ctx.providerStatus,

@@ -75,7 +75,41 @@ export async function buildProjectionContext({ season, players, statCategories, 
     indexResult = null;
   }
   if (!indexResult?.value) {
-    return { ...base, reason: 'External NBA data provider is not available; running in Yahoo-only mode.' };
+    // Distinguish WHY the provider is unavailable so production can report a
+    // precise, sanitized diagnostic instead of a generic message. This reads
+    // the provider's recorded last error (status + classified kind) — it does
+    // NOT make another provider request.
+    const status = providers.providerStatus();
+    const tank = status?.tank01 || {};
+    const diag = tank.lastError || null;
+    let reason = 'External NBA data provider is not available; running in Yahoo-only mode.';
+    if (!tank.configured) {
+      reason = 'NBA stats provider is not configured on the server (RAPIDAPI_KEY missing).';
+    } else if (diag?.kind === 'quota_exceeded') {
+      reason = 'NBA stats provider quota/rate limit reached; projections will return when it resets.';
+    } else if (diag?.kind === 'invalid_key') {
+      reason = 'NBA stats provider rejected the API key (check RAPIDAPI_KEY).';
+    } else if (diag?.kind === 'access_forbidden') {
+      reason = 'NBA stats provider denied access (subscription/plan issue).';
+    } else if (diag?.kind === 'provider_error') {
+      reason = 'NBA stats provider is having a temporary outage; retrying later.';
+    } else if (diag?.kind === 'network_error') {
+      reason = 'Could not reach the NBA stats provider from the server (network).';
+    }
+    return {
+      ...base,
+      reason,
+      // Structured, sanitized diagnostic for the UI/report (no keys/bodies).
+      diagnostic: {
+        provider: 'tank01',
+        available: false,
+        configured: Boolean(tank.configured),
+        reason: diag?.kind || (tank.configured ? 'unavailable' : 'not_configured'),
+        status: diag?.status ?? null,
+        rateLimit: diag?.rateLimit || null,
+        breakerState: tank.state || null,
+      },
+    };
   }
 
   // 2. Canonical identity mapping + diagnostics.
