@@ -8,6 +8,7 @@ import yahooRoutes from './routes/yahoo.js';
 import espnRoutes from './routes/espn.js';
 import gmRoutes from './routes/gm.js';
 import basketballRoutes from './routes/basketball.js';
+import diagnosticsRoutes from './routes/diagnostics.js';
 import { initDatabase } from './db/connection.js';
 
 dotenv.config();
@@ -26,6 +27,7 @@ app.use('/api/yahoo', yahooRoutes);
 app.use('/api/espn', espnRoutes);
 app.use('/api/gm', gmRoutes);
 app.use('/api/basketball', basketballRoutes);
+app.use('/api/diagnostics', diagnosticsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

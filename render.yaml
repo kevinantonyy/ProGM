@@ -28,3 +28,8 @@ services:
         sync: false
       - key: NBA_STATS_FALLBACK
         value: "false"
+      # TEMPORARY: enables GET /api/diagnostics/free-nba (authenticated-only
+      # Render->ESPN/NBA CDN connectivity probe). Set to "false" to disable
+      # without a code change once the connectivity test is complete.
+      - key: ENABLE_FREE_NBA_DIAG
+        value: "true"
