@@ -118,7 +118,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const matched = canonical.filter((c) => c.matched && c.externalId);
   const externalIds = matched.map((c) => c.externalId);
 
-  // 3. Stats for matched players only (budget-conscious).
+  // 3. Season stats for matched players (ONE league-wide request via the free
+  //    provider's bulk path; filtered to our ids). Budget-conscious + shared.
   let statsResult = null;
   if (externalIds.length) {
     try {
@@ -132,10 +133,30 @@ export async function buildProjectionContext({ season, players, statCategories, 
     for (const s of statsResult.value) statsByExternalId.set(String(s.externalId), s);
   }
 
-  // 4. Project each canonical player using the league's actual scoring.
+  // 3b. Recent form (OPTIONAL). Built from box scores of recently completed
+  //     games (one request per game, shared). A failure here must NOT break
+  //     season-stat projections — the model falls back to season-only cleanly.
+  let recentResult = null;
+  try {
+    recentResult = await providers.getRecentForm(season);
+  } catch {
+    recentResult = null;
+  }
+  const recentByExternalId = recentResult?.value || {};
+
+  // 4. Project each canonical player using the league's actual scoring. Merge
+  //    recent form into the season stats so the EXISTING projection model
+  //    (season+recent blend) uses it with no weight changes.
   const projectionByCanonicalId = new Map();
   for (const c of canonical) {
-    const stats = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
+    const base = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
+    let stats = base;
+    if (base && c.externalId) {
+      const rec = recentByExternalId[String(c.externalId)];
+      if (rec && rec.recent) {
+        stats = { ...base, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null };
+      }
+    }
     const projection = projectPlayer({ stats, statCategories });
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
@@ -143,16 +164,27 @@ export async function buildProjectionContext({ season, players, statCategories, 
   }
 
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, canonicalIdOf });
-  const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta);
+  const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
+  const recentCount = Object.keys(recentByExternalId).length;
 
   return {
     externalAvailable: true,
     projectionProvider,
     projectionByCanonicalId,
-    identityDiagnostics: { ...diagnostics, projectedCount },
+    identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount },
     freshness,
     providerStatus: providers.providerStatus(),
+    // Per-source availability so the UI/report can see what the primary served.
+    diagnostic: {
+      provider: statsResult?.meta?.provider || indexResult?.meta?.provider || 'free_nba',
+      available: true,
+      sources: {
+        seasonStats: Boolean(statsResult?.value?.length),
+        recentForm: recentCount > 0,
+        playerIndex: Boolean(indexResult?.value?.length),
+      },
+    },
     reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',
   };
 }

@@ -25,6 +25,7 @@ export const TTL = {
   injuries: 30 * 60 * 1000, // injury/status: every 30 min
   schedule: 12 * 60 * 60 * 1000, // schedule: twice daily
   projections: 6 * 60 * 60 * 1000, // provider projections: a few times daily
+  boxscore: 7 * 24 * 60 * 60 * 1000, // completed box scores are immutable once final: 7 days
 };
 
 /** Read a cache entry. Returns { value, meta } or null if absent. Expired entries are returned as stale. */
