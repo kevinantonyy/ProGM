@@ -355,16 +355,124 @@ function Rankings({ data }) {
   );
 }
 
-// --- Tab: Draft Helper (research / rankings tool) ---
-function DraftHelper({ data }) {
-  const db = data.draftBoard;
+// Live Yahoo draft sync hook. Polls /basketball/draft every ~5s while the Draft
+// Helper tab is open AND the draft is active. Read-only: never writes to Yahoo.
+// - No overlapping requests (in-flight guard).
+// - Stops polling when the tab closes/unmounts, or when the draft is complete,
+//   or on predraft (nothing to sync yet).
+// - Reconnect-safe: the server de-dupes picks by player_key, and we drive
+//   detection off the known pick count so refresh never double-counts.
+const DRAFT_POLL_MS = 5000;
+
+function useLiveDraft({ leagueKey, teamKey, active }) {
+  const [sync, setSync] = useState({ status: 'idle', draftState: null, picks: [], myRoster: [], recommendations: null, newPicks: [], error: null, lastSyncAt: null, totalPicks: 0 });
+
+  useEffect(() => {
+    if (!active || !leagueKey) return undefined;
+    let cancelled = false;
+    let inFlight = false;
+    let timer = null;
+    let knownPicks = 0;
+
+    async function poll() {
+      if (cancelled || inFlight) return; // never overlap requests
+      inFlight = true;
+      try {
+        const r = await api.get('/basketball/draft', { params: { leagueKey, teamKey, knownPicks } });
+        if (cancelled) return;
+        const d = r.data;
+        knownPicks = d.totalPicks ?? knownPicks;
+        setSync({
+          status: d.draftState === 'complete' ? 'complete' : d.draftState === 'live' ? 'live' : 'waiting',
+          draftState: d.draftState,
+          picks: d.picks || [],
+          myRoster: d.myRoster || [],
+          recommendations: d.recommendations || null,
+          newPicks: d.newPicks || [],
+          totalPicks: d.totalPicks ?? 0,
+          error: null,
+          lastSyncAt: new Date().toISOString(),
+        });
+        // Stop polling once the draft is over — nothing more will change.
+        if (d.draftState === 'complete') { cancelled = true; return; }
+      } catch (err) {
+        if (!cancelled) setSync((s) => ({ ...s, status: 'error', error: err.response?.data?.error || 'Draft sync error' }));
+      } finally {
+        inFlight = false;
+        if (!cancelled) timer = setTimeout(poll, DRAFT_POLL_MS);
+      }
+    }
+    setSync((s) => ({ ...s, status: 'connecting' }));
+    poll();
+
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [leagueKey, teamKey, active]);
+
+  return sync;
+}
+
+// Status banner: LIVE / waiting / complete / sync error / connecting.
+function LiveDraftBanner({ live }) {
+  const map = {
+    connecting: ['badge-blue', 'Connecting to your Yahoo draft…'],
+    live: ['badge-green', `LIVE · ${live.totalPicks} pick${live.totalPicks === 1 ? '' : 's'} made`],
+    waiting: ['badge-orange', 'Waiting for the draft to start…'],
+    complete: ['badge-blue', 'Draft complete'],
+    error: ['badge-red', live.error || 'Draft sync error'],
+    idle: ['badge-orange', 'Draft sync idle'],
+  };
+  const [cls, label] = map[live.status] || map.idle;
+  const pulsing = live.status === 'live' || live.status === 'connecting';
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-dark-700 bg-dark-900 px-4 py-2">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2 w-2 rounded-full ${live.status === 'live' ? 'bg-green-400' : live.status === 'error' ? 'bg-red-400' : 'bg-dark-500'} ${pulsing ? 'animate-pulse' : ''}`} />
+        <span className={cls}>{label}</span>
+        {live.newPicks?.length > 0 && live.status === 'live' && <span className="text-xs text-green-400">+{live.newPicks.length} new</span>}
+      </div>
+      {live.lastSyncAt && <span className="text-xs text-dark-500">synced {new Date(live.lastSyncAt).toLocaleTimeString()}</span>}
+    </div>
+  );
+}
+
+// The user's drafted roster-so-far during a live draft (pick #, round).
+function LiveDraftRoster({ live }) {
+  if (!live.myRoster?.length) return (
+    <section className="card"><h3 className="text-sm font-bold">Your draft picks</h3><p className="mt-1 text-xs text-dark-400">No picks yet — your selections will appear here as the draft progresses.</p></section>
+  );
+  return (
+    <section className="card">
+      <h3 className="text-sm font-bold">Your draft picks <span className="text-dark-500">({live.myRoster.length})</span></h3>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {live.myRoster.map((p) => (
+          <span key={p.playerKey} className="rounded-lg border border-dark-700 bg-dark-800 px-2.5 py-1 text-xs">
+            <span className="text-dark-500">R{p.round ?? '?'} P{p.pick ?? '?'}</span> · {p.playerKey}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// --- Tab: Draft Helper (research tool + LIVE Yahoo draft sync) ---
+function DraftHelper({ data, leagueKey, active }) {
+  const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active });
+  const isLive = live.draftState === 'live' || live.draftState === 'complete';
+  // When a live draft is active, the recommendations come from the live sync
+  // (undrafted pool, recomputed after each pick). Otherwise fall back to the
+  // existing offseason/static Draft Helper board — preserving current behavior.
+  const db = isLive && live.recommendations ? live.recommendations : data.draftBoard;
+
   const [q, setQ] = useState('');
   const [pos, setPos] = useState('ALL');
   const [avail, setAvail] = useState('ALL');
   const [sortBy, setSortBy] = useState('value');
-  if (!db) return <section className="card text-dark-400">Draft Helper unavailable.</section>;
+
+  const liveBanner = <LiveDraftBanner live={live} />;
+
+  if (!db) return <section className="space-y-4">{liveBanner}<section className="card text-dark-400">Draft Helper unavailable.</section></section>;
   if (!db.available) return (
-    <section className="card border-orange-500/30"><h2 className="text-xl font-bold">Draft Helper</h2><p className="mt-2 text-dark-300">{db.note}</p></section>
+    <section className="space-y-4">{liveBanner}<section className="card border-orange-500/30"><h2 className="text-xl font-bold">Draft Helper</h2><p className="mt-2 text-dark-300">{db.note}</p></section></section>
   );
 
   const positions = ['ALL', ...Array.from(new Set((db.board || []).flatMap((p) => p.eligiblePositions || []))).sort()];
@@ -388,10 +496,13 @@ function DraftHelper({ data }) {
 
   return (
     <div className="space-y-4">
+      {liveBanner}
       <div>
         <h2 className="text-xl font-bold">Draft Helper</h2>
-        <p className="mt-1 text-sm text-dark-400">{db.note}</p>
+        <p className="mt-1 text-sm text-dark-400">{isLive ? 'LIVE draft — best available is recomputed from undrafted players after every pick. Read-only: ProGM never drafts for you.' : db.note}</p>
       </div>
+
+      {isLive && <LiveDraftRoster live={live} />}
 
       {/* Research vs available-to-acquire is made explicit. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -623,7 +734,7 @@ export default function BasketballWorkspace() {
       {active === 'trades' && <Trades data={data} leagueKey={leagueKey} />}
       {active === 'waivers' && <Waivers data={data} />}
       {active === 'rankings' && <Rankings data={data} />}
-      {active === 'draft' && <DraftHelper data={data} />}
+      {active === 'draft' && <DraftHelper data={data} leagueKey={leagueKey} active={active === 'draft'} />}
       {active === 'league' && <LeagueHub data={data} />}
       {active === 'gm' && <AskProGM data={data} />}
     </div>

@@ -249,6 +249,8 @@ export function normalizeLeagueMeta(leagueMeta) {
     startDate: m.start_date || null,
     endDate: m.end_date || null,
     isFinished: m.is_finished === 1 || m.is_finished === '1',
+    // Yahoo draft lifecycle: 'predraft' | 'drafting' | 'postdraft' (when present).
+    draftStatus: m.draft_status || null,
     scoringType: m.scoring_type || null,
     // Lineup format: 'date' = daily lineups (games-per-week matters most),
     // 'week' = weekly lineups. Drives schedule-aware weekly value.
