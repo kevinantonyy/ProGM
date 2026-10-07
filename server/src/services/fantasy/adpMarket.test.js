@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeMarketContext, ADP_THRESHOLDS } from './adpMarket.js';
+import { computeMarketContext, ADP_THRESHOLDS, computeRankComparison, RANK_COMPARE_THRESHOLDS } from './adpMarket.js';
 
 test('neutral when ProGM rank or ADP is missing (never fabricated)', () => {
   assert.equal(computeMarketContext({ progmRank: 5, yahooAdp: null }).label, 'neutral');
@@ -55,4 +55,44 @@ test('thresholds are the documented, tunable constants', () => {
   assert.equal(ADP_THRESHOLDS.REACH_GAP, 10);
   assert.equal(ADP_THRESHOLDS.STRONG_VALUE_GAP, 12);
   assert.equal(ADP_THRESHOLDS.SURVIVE_MARGIN, 3);
+});
+
+// --- ProGM vs Yahoo Rank comparison -----------------------------------------
+
+test('computeRankComparison: aligned when ranks are close', () => {
+  const r = computeRankComparison({ progmRank: 10, yahooOverallRank: 12 });
+  assert.equal(r.agreement, 'aligned');
+  assert.equal(r.rankGap, 2);
+  assert.match(r.reason, /aligned/i);
+});
+
+test('computeRankComparison: ProGM significantly higher (large positive gap)', () => {
+  // Yahoo ranks him #40, ProGM #10 => gap +30 => ProGM more bullish.
+  const r = computeRankComparison({ progmRank: 10, yahooOverallRank: 40 });
+  assert.equal(r.agreement, 'progm_higher');
+  assert.equal(r.rankGap, 30);
+  assert.match(r.reason, /ProGM is significantly higher/i);
+});
+
+test('computeRankComparison: Yahoo significantly higher (large negative gap)', () => {
+  const r = computeRankComparison({ progmRank: 40, yahooOverallRank: 10 });
+  assert.equal(r.agreement, 'yahoo_higher');
+  assert.equal(r.rankGap, -30);
+  assert.match(r.reason, /Yahoo ranks this player significantly higher/i);
+});
+
+test('computeRankComparison: mild leans between CLOSE and LARGE', () => {
+  assert.equal(computeRankComparison({ progmRank: 10, yahooOverallRank: 20 }).agreement, 'progm_lean');
+  assert.equal(computeRankComparison({ progmRank: 20, yahooOverallRank: 10 }).agreement, 'yahoo_lean');
+});
+
+test('computeRankComparison: unknown when Yahoo rank missing (null-safe)', () => {
+  const r = computeRankComparison({ progmRank: 5, yahooOverallRank: null });
+  assert.equal(r.agreement, 'unknown');
+  assert.equal(r.rankGap, null);
+});
+
+test('rank-compare thresholds are documented constants', () => {
+  assert.equal(RANK_COMPARE_THRESHOLDS.CLOSE_GAP, 5);
+  assert.equal(RANK_COMPARE_THRESHOLDS.LARGE_GAP, 15);
 });

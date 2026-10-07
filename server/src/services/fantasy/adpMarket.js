@@ -33,6 +33,13 @@ export const ADP_THRESHOLDS = Object.freeze({
   SURVIVE_MARGIN: 3,   // ADP within this margin BEFORE nextPick => "won't survive"
 });
 
+// Thresholds for the ProGM-vs-Yahoo RANK comparison (ranking spots, not picks).
+// Tunable + exported so the agreement bands can be adjusted/backtested later.
+export const RANK_COMPARE_THRESHOLDS = Object.freeze({
+  CLOSE_GAP: 5,  // |yahooRank - progmRank| <= this => "aligned"
+  LARGE_GAP: 15, // gap of at least this => "significantly" more bullish
+});
+
 /**
  * Compute market context for one player. Pure + deterministic.
  *
@@ -94,4 +101,41 @@ export function computeMarketContext({ progmRank, yahooAdp, currentPick = null, 
   }
 
   return { adpVsProgm, label: 'neutral', reason: 'ProGM rank and market ADP are closely aligned.' };
+}
+
+/**
+ * Deterministic ProGM-vs-Yahoo RANK comparison (independent of ADP / market
+ * timing). Yahoo Rank is an EXTERNAL signal shown alongside ProGM Rank — it
+ * NEVER reorders the ProGM board and does NOT affect DRAFT NOW/WAIT.
+ *
+ *   rankGap = yahooOverallRank - progmRank
+ *     > +LARGE_GAP  => ProGM is notably more bullish (ProGM ranks him earlier)
+ *     < -LARGE_GAP  => Yahoo is notably more bullish
+ *     |rankGap| <= CLOSE_GAP => agreement
+ *
+ * @param {Object} params
+ * @param {number|null} params.progmRank          ProGM board rank (1-based)
+ * @param {number|null} params.yahooOverallRank   Yahoo overall (OR) rank
+ * @returns {{ rankGap:number|null, agreement:string, reason:string }}
+ */
+export function computeRankComparison({ progmRank, yahooOverallRank }) {
+  if (progmRank == null || yahooOverallRank == null) {
+    return { rankGap: null, agreement: 'unknown', reason: 'Yahoo Rank unavailable for comparison.' };
+  }
+  const rankGap = Number((yahooOverallRank - progmRank).toFixed(0));
+  const { CLOSE_GAP, LARGE_GAP } = RANK_COMPARE_THRESHOLDS;
+
+  if (Math.abs(rankGap) <= CLOSE_GAP) {
+    return { rankGap, agreement: 'aligned', reason: 'ProGM and Yahoo are closely aligned on this player.' };
+  }
+  if (rankGap >= LARGE_GAP) {
+    return { rankGap, agreement: 'progm_higher', reason: 'ProGM is significantly higher on this player than Yahoo.' };
+  }
+  if (rankGap <= -LARGE_GAP) {
+    return { rankGap, agreement: 'yahoo_higher', reason: 'Yahoo ranks this player significantly higher than ProGM.' };
+  }
+  // Between CLOSE and LARGE: a mild lean, reported directionally but softly.
+  return rankGap > 0
+    ? { rankGap, agreement: 'progm_lean', reason: 'ProGM is somewhat higher on this player than Yahoo.' }
+    : { rankGap, agreement: 'yahoo_lean', reason: 'Yahoo is somewhat higher on this player than ProGM.' };
 }

@@ -51,11 +51,45 @@ async function fetchAvailableWithAdp(leagueKey, token) {
   const key = `bball:availAdp:${leagueKey}`;
   const cached = cache.get(key);
   if (cached && !cached.meta.stale) return cached.value;
-  // percent_owned + draft_analysis are both appended as sub-resources so one
-  // call returns ownership AND market ADP for every player in the batch.
-  const data = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis`, token);
+  // NOTE: Yahoo's /players collection returns only the FIRST appended
+  // sub-resource, so percent_owned + draft_analysis cannot be combined in one
+  // call. We request percent_owned here (ownership) and fetch Yahoo Rank via a
+  // SEPARATE batched call (fetchYahooRanks) merged by player key — both are
+  // league-wide batched (count=50), cached, and never per-player.
+  const data = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned`, token);
   cache.set(key, data, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
   return data;
+}
+
+/**
+ * Batched Yahoo RANK fetch (separate sub-resource request, cached, never
+ * per-player). Returns a map playerKey -> { overall, bySeason } for merging
+ * onto the pool. Graceful: a failure returns an empty map so the Draft Helper
+ * (and ProGM ranking) are unaffected.
+ */
+async function fetchYahooRanks(leagueKey, token) {
+  const key = `bball:yahooRanks:${leagueKey}`;
+  const cached = cache.get(key);
+  if (cached && !cached.meta.stale) return cached.value;
+  const map = {};
+  try {
+    const data = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/ranks`, token);
+    const leagueNode = data?.fantasy_content?.league;
+    const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
+    for (const p of extractPlayerList(playersNode)) {
+      if (p.playerKey && p.yahooRanks) map[p.playerKey] = p.yahooRanks;
+    }
+  } catch {
+    // graceful: leave map empty
+  }
+  cache.set(key, map, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
+  return map;
+}
+
+/** Attach Yahoo ranks (from fetchYahooRanks map) onto normalized players. */
+function mergeYahooRanks(players, ranksMap) {
+  if (!ranksMap || !Object.keys(ranksMap).length) return players;
+  return (players || []).map((p) => (ranksMap[p.playerKey] ? { ...p, yahooRanks: ranksMap[p.playerKey] } : p));
 }
 
 async function requireToken(req, res) {
@@ -231,6 +265,13 @@ router.get('/draft', authenticate, async (req, res) => {
     const draftedKeys = draftedPlayerKeys(allPicks);
     availablePlayers = removeDrafted(availablePlayers, draftedKeys); // drop drafted immediately
 
+    // Merge Yahoo Rank (external signal) via a SEPARATE batched call — Yahoo
+    // can't combine sub-resources in one /players request. Graceful (empty map
+    // on failure); never per-player; never affects ProGM ranking.
+    try {
+      availablePlayers = mergeYahooRanks(availablePlayers, await fetchYahooRanks(leagueKey, token));
+    } catch { /* ranks are optional context */ }
+
     // Live market context inputs. currentPick = the pick about to be made.
     // nextPick is derived from snake order IF reliably recoverable, else null
     // (so DRAFT NOW/WAIT are omitted but VALUE/REACH remain).
@@ -267,6 +308,7 @@ router.get('/draft', authenticate, async (req, res) => {
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentPick,
         nextPick, // null when snake slot not reliably recoverable -> no DRAFT NOW/WAIT
+        currentSeason: league?.season || null, // for current-season Yahoo rank
       });
     }
 

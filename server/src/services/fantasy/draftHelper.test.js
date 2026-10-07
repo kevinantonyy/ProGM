@@ -302,6 +302,51 @@ test('DRAFT NOW/WAIT only appear when a next pick is supplied', () => {
   assert.equal(star2.marketLabel, 'DRAFT NOW'); // strong value + won't survive to #24
 });
 
+// --- Yahoo Rank (external signal) -------------------------------------------
+
+function plRank(key, elig, proj, yahooRanks) {
+  return { playerKey: key, name: key, teamAbbr: 'BOS', eligiblePositions: elig, percentOwned: 0, status: null, _proj: proj, yahooRanks };
+}
+
+test('Yahoo Rank (overall + current-season S) is exposed per board row', () => {
+  const players = [plRank('A', ['PG'], 40, { overall: 5, bySeason: { 2025: 8, 2024: 5 } })];
+  const res = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentSeason: 2025 });
+  const row = res.board[0];
+  assert.equal(row.yahooRank, 5);
+  assert.equal(row.yahooSeasonRank, 8); // current season (2025) S rank
+  assert.deepEqual(row.yahooPriorSeasonRanks, [{ season: '2024', rank: 5 }]);
+});
+
+test('rank comparison is attached (ProGM rank vs Yahoo overall)', () => {
+  // Two players; A clearly #1 by ProGM but Yahoo ranks him #40 => ProGM higher.
+  const players = [plRank('A', ['PG'], 45, { overall: 40, bySeason: {} }), plRank('B', ['SG'], 20, { overall: 2, bySeason: {} })];
+  const res = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players) });
+  const a = res.board.find((p) => p.name === 'A');
+  assert.equal(a.overallRank, 1);
+  assert.equal(a.yahooRank, 40);
+  assert.equal(a.rankGap, 39); // 40 - 1
+  assert.equal(a.rankAgreement, 'progm_higher');
+  assert.ok('rankReason' in a);
+});
+
+test('Yahoo Rank NEVER reorders the ProGM Best Available board', () => {
+  // A: higher production (ProGM #1) but WORSE Yahoo rank; B: lower production, elite Yahoo rank.
+  const players = [plRank('A', ['PG'], 45, { overall: 120, bySeason: {} }), plRank('B', ['SG'], 20, { overall: 1, bySeason: {} })];
+  const withRanks = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players) });
+  const noRanks = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  assert.deepEqual(withRanks.board.map((p) => p.name), noRanks.board.map((p) => p.name));
+  assert.equal(withRanks.board[0].name, 'A'); // ProGM value leads, not Yahoo rank
+});
+
+test('missing Yahoo Rank yields null fields + unknown agreement (null-safe)', () => {
+  const players = [pl('NoRank', ['PG'], 30)]; // pl() has no yahooRanks
+  const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  assert.equal(res.board[0].yahooRank, null);
+  assert.equal(res.board[0].yahooSeasonRank, null);
+  assert.equal(res.board[0].rankGap, null);
+  assert.equal(res.board[0].rankAgreement, 'unknown');
+});
+
 test('elite production is NOT overwhelmed by durability + scarcity', () => {
   // Elite per-game (60) but worst durability vs a mediocre, fully-durable,
   // positionally-scarce player (25). Elite must still rank first — durability

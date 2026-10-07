@@ -13,7 +13,7 @@
  */
 import { scarcityWeights, healthMultiplier } from './playerValue.js';
 import { computeDurability } from './durability.js';
-import { computeMarketContext } from './adpMarket.js';
+import { computeMarketContext, computeRankComparison } from './adpMarket.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
 
@@ -248,8 +248,9 @@ function rosterFit(eligiblePositions, thinSet, overloadedSet) {
  * @param {number} [params.limit]
  * @param {number|null} [params.currentPick] current overall draft pick (live) for market labels
  * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
+ * @param {string|number|null} [params.currentSeason] Yahoo/NBA season for picking the current-season Yahoo rank
  */
-export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 150, currentPick = null, nextPick = null }) {
+export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 150, currentPick = null, nextPick = null, currentSeason = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const weights = scarcityWeights(settings);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
@@ -273,6 +274,17 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       yahooAdp: p.yahooAdp ?? null,
       yahooAvgRound: p.yahooAvgRound ?? null,
       yahooPercentDrafted: p.yahooPercentDrafted ?? null,
+      // Yahoo RANK (external signal; labeled "Yahoo Rank", NOT Expert Rank).
+      // Overall (OR) + current-season (S) + prior seasons for explanation only.
+      // Never feeds ProGM value/ranking; comparison is attached after sorting.
+      yahooRank: p.yahooRanks?.overall ?? null,
+      yahooSeasonRank: currentSeason != null ? (p.yahooRanks?.bySeason?.[String(currentSeason)] ?? null) : null,
+      yahooPriorSeasonRanks: p.yahooRanks?.bySeason
+        ? Object.entries(p.yahooRanks.bySeason)
+            .filter(([yr]) => currentSeason == null || String(yr) !== String(currentSeason))
+            .map(([yr, rank]) => ({ season: yr, rank }))
+            .sort((a, b) => Number(b.season) - Number(a.season))
+        : [],
       // Availability is a Yahoo FACT when known, otherwise explicitly unknown.
       availability: availabilityKnown ? (availabilityOf(p) ? 'available' : 'rostered') : 'unknown',
       rosterFit: fit.fit,
@@ -352,12 +364,17 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       currentPick,
       nextPick,
     });
+    // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
+    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooRank });
     return {
-      overallRank,
+      overallRank, // ProGM Rank (authoritative ordering)
       ...p,
       adpVsProgm: market.adpVsProgm,
       marketLabel: market.label,
       marketReason: market.reason,
+      rankGap: rankCmp.rankGap,
+      rankAgreement: rankCmp.agreement,
+      rankReason: rankCmp.reason,
     };
   });
 
@@ -376,6 +393,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
         'PER-GAME anchored — games-in-window totals do NOT drive draft value',
         'value tiers from natural gaps; roster fit shown but does NOT reorder Best Available',
         'Yahoo ADP shown as MARKET context (VALUE/REACH/DRAFT NOW/WAIT) — it never changes the ProGM ranking',
+        'Yahoo Rank (overall + current season) shown as an independent EXTERNAL signal with a ProGM-vs-Yahoo agreement note — it never reorders the ProGM board',
       ],
     },
     note: availabilityKnown

@@ -134,6 +134,36 @@ function yahooNumOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Parse Yahoo `player_ranks` (from the `ranks` sub-resource) into a compact,
+ * season-agnostic shape:
+ *   { overall: number|null, bySeason: { [year:string]: number } }
+ * - rank_type 'OR'  -> overall (Yahoo's overall rank; one value, no season)
+ * - rank_type 'S'   -> bySeason[rank_season] (per-season rank)
+ * Numeric strings are coerced safely; missing/"-"/non-numeric -> omitted
+ * (never fabricated as 0). Returns null when no usable ranks are present.
+ *
+ * @param {Array|undefined} node  Yahoo player_ranks array
+ */
+export function parseYahooRanks(node) {
+  if (!Array.isArray(node)) return null;
+  let overall = null;
+  const bySeason = {};
+  for (const entry of node) {
+    const r = entry && entry.player_rank ? entry.player_rank : entry;
+    if (!r || typeof r !== 'object') continue;
+    const value = yahooNumOrNull(r.rank_value);
+    if (value == null) continue;
+    if (r.rank_type === 'OR') {
+      if (overall == null) overall = value; // first OR wins
+    } else if (r.rank_type === 'S' && r.rank_season != null) {
+      bySeason[String(r.rank_season)] = value;
+    }
+  }
+  if (overall == null && Object.keys(bySeason).length === 0) return null;
+  return { overall, bySeason };
+}
+
 // ---------------------------------------------------------------------------
 // Scoring format
 // ---------------------------------------------------------------------------
@@ -170,6 +200,7 @@ export function normalizePlayer(rawPlayer) {
   let selectedPosition = null;
   let percentOwnedValue = null;
   let draftAnalysis = null; // { yahooAdp, yahooAvgRound, yahooPercentDrafted } or null
+  let yahooRanks = null; // { overall:number|null, bySeason:{ [year]: number } } or null
 
   if (Array.isArray(rawPlayer) && Array.isArray(rawPlayer[0])) {
     propsNode = rawPlayer[0];
@@ -197,6 +228,12 @@ export function normalizePlayer(rawPlayer) {
       const pct = yahooNumOrNull(da.percent_drafted) ?? yahooNumOrNull(da.preseason_percent_drafted);
       draftAnalysis = { yahooAdp: adp, yahooAvgRound: rnd, yahooPercentDrafted: pct };
     }
+    // player_ranks (from the `ranks` sub-resource) is an array of
+    //   { player_rank: { rank_type:'OR'|'S', rank_value:'65', rank_season?:'2024' } }
+    // OR = Yahoo's overall rank (one value, no season). S = per-season rank.
+    // Season-agnostic parse here; the current-season pick happens downstream
+    // (where league.season is known). Missing -> null, never 0. Graceful.
+    yahooRanks = parseYahooRanks(meta.player_ranks);
   }
 
   const p = mergeYahooProps(propsNode);
@@ -237,6 +274,11 @@ export function normalizePlayer(rawPlayer) {
     yahooAdp: draftAnalysis?.yahooAdp ?? null,
     yahooAvgRound: draftAnalysis?.yahooAvgRound ?? null,
     yahooPercentDrafted: draftAnalysis?.yahooPercentDrafted ?? null,
+    // Yahoo RANK, only present when the `ranks` sub-resource is requested.
+    // Independent EXTERNAL signal (labeled "Yahoo Rank" in product, NOT
+    // "Expert Rank"). Season-agnostic here; the caller picks the current
+    // season's S rank. null when absent (never 0). Does NOT feed ProGM rank.
+    yahooRanks: yahooRanks || null,
   };
 }
 
