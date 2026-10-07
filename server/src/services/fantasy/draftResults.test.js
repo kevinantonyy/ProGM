@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractDraftResults, dedupePicks, detectNewPicks, draftedPlayerKeys,
-  removeDrafted, deriveDraftState, picksForTeam,
+  removeDrafted, deriveDraftState, picksForTeam, deriveNextPick,
 } from './draftResults.js';
 
 // Build a Yahoo-shaped draftresults response from simple pick tuples.
@@ -113,4 +113,25 @@ test('full flow: extract -> detect -> remove drafted (no duplicates on re-sync)'
   // Re-sync same board: still no new picks, pool identical.
   const resync = detectNewPicks(allPicks, extractDraftResults(board));
   assert.equal(resync.newPicks.length, 0);
+});
+
+// --- deriveNextPick (snake order, reliable-or-null) -------------------------
+
+test('deriveNextPick: snake order from the user\'s round-1 slot', () => {
+  // 12-team league, user slot 3 (first overall pick #3).
+  const myPicks = [{ pick: 3, round: 1 }];
+  // currentPick 5 -> user's next pick is still #3's round-2 pick = 12*1 + (12-3+1)=22.
+  assert.equal(deriveNextPick({ myPicks, numTeams: 12, currentPick: 5 }), 22);
+  // After round-1 pick made, currentPick 15 -> next is round-2 pick 22.
+  assert.equal(deriveNextPick({ myPicks, numTeams: 12, currentPick: 15 }), 22);
+  // currentPick 23 (past round 2) -> round-3 pick = 24 + 3 = 27.
+  assert.equal(deriveNextPick({ myPicks, numTeams: 12, currentPick: 23 }), 27);
+});
+
+test('deriveNextPick returns null when inputs are unreliable (never invented)', () => {
+  assert.equal(deriveNextPick({ myPicks: [], numTeams: 12, currentPick: 5 }), null); // no picks yet
+  assert.equal(deriveNextPick({ myPicks: [{ pick: 3 }], numTeams: null, currentPick: 5 }), null); // no team count
+  assert.equal(deriveNextPick({ myPicks: [{ pick: 3 }], numTeams: 12, currentPick: 0 }), null); // bad current
+  // Earliest known pick is NOT in round 1 (slot unrecoverable) -> null.
+  assert.equal(deriveNextPick({ myPicks: [{ pick: 20 }], numTeams: 12, currentPick: 25 }), null);
 });

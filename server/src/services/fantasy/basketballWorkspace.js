@@ -128,10 +128,12 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const myRoster = extractRosterPlayers(rosterData);
   const myStanding = standings.find((t) => t.teamKey === teamKey) || standings.find((t) => t.isOwnedByLogin) || null;
 
-  // 2. Available player pool (free agents / waivers) with ownership.
+  // 2. Available player pool (free agents / waivers) with ownership + Yahoo ADP
+  //    (draft_analysis) in ONE batched request — ADP is market context for the
+  //    Draft Helper only; it never feeds projections or the ProGM ranking.
   let availablePlayers = [];
   try {
-    const playersData = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned`, accessToken);
+    const playersData = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis`, accessToken);
     const leagueNode = playersData?.fantasy_content?.league;
     const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
     availablePlayers = extractPlayerList(playersNode);

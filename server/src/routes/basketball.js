@@ -19,7 +19,7 @@ import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspac
 import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
 import {
   extractDraftResults, detectNewPicks, draftedPlayerKeys, removeDrafted,
-  deriveDraftState, picksForTeam,
+  deriveDraftState, picksForTeam, deriveNextPick,
 } from '../services/fantasy/draftResults.js';
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
@@ -38,6 +38,25 @@ const WORKSPACE_TTL = 5 * 60 * 1000;
 // (and multiple tabs) never trigger concurrent duplicate Yahoo draftresults
 // calls. Short enough that each poll still sees fresh picks promptly.
 const DRAFT_FETCH_TTL = 3 * 1000;
+// Yahoo ADP / market data changes during a draft, so cache it briefly (NOT
+// immutable) and share across polls/tabs. One batched request per window.
+const ADP_FETCH_TTL = 60 * 1000;
+
+/**
+ * Fetch the available-player pool WITH Yahoo ADP (draft_analysis) in ONE
+ * batched request (count=50), cached briefly and shared. Never per-player. On
+ * failure the caller falls back so ADP is simply absent (Draft Helper intact).
+ */
+async function fetchAvailableWithAdp(leagueKey, token) {
+  const key = `bball:availAdp:${leagueKey}`;
+  const cached = cache.get(key);
+  if (cached && !cached.meta.stale) return cached.value;
+  // percent_owned + draft_analysis are both appended as sub-resources so one
+  // call returns ownership AND market ADP for every player in the batch.
+  const data = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis`, token);
+  cache.set(key, data, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
+  return data;
+}
 
 async function requireToken(req, res) {
   const token = await accessTokenFor(req.userId);
@@ -199,7 +218,10 @@ router.get('/draft', authenticate, async (req, res) => {
     // even mid-draft (Yahoo marks players taken as they are picked).
     let availablePlayers = [];
     try {
-      const playersData = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned`, token);
+      // Batched request (count=50) with BOTH percent_owned and draft_analysis
+      // sub-resources — Yahoo ADP comes back per player in ONE call, never
+      // per-player. Cached briefly below (market data changes during a draft).
+      const playersData = await fetchAvailableWithAdp(leagueKey, token);
       const leagueNode = playersData?.fantasy_content?.league;
       const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
       availablePlayers = extractPlayerList(playersNode);
@@ -208,6 +230,12 @@ router.get('/draft', authenticate, async (req, res) => {
     }
     const draftedKeys = draftedPlayerKeys(allPicks);
     availablePlayers = removeDrafted(availablePlayers, draftedKeys); // drop drafted immediately
+
+    // Live market context inputs. currentPick = the pick about to be made.
+    // nextPick is derived from snake order IF reliably recoverable, else null
+    // (so DRAFT NOW/WAIT are omitted but VALUE/REACH remain).
+    const currentPick = totalPicks + 1;
+    const nextPick = deriveNextPick({ myPicks, numTeams: league?.numTeams, currentPick });
 
     // Recompute recommendations over the remaining pool using league scoring +
     // ProGM projections (same engines as the workspace Draft Helper). Roster-fit
@@ -237,6 +265,8 @@ router.get('/draft', authenticate, async (req, res) => {
         projectionProvider,
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
+        currentPick,
+        nextPick, // null when snake slot not reliably recoverable -> no DRAFT NOW/WAIT
       });
     }
 
@@ -247,6 +277,8 @@ router.get('/draft', authenticate, async (req, res) => {
       yahooDraftStatus: league?.draftStatus || null,
       totalPicks,
       expectedPicks,
+      currentPick, // overall pick about to be made
+      nextPick, // user's next projected overall pick (snake), or null if unreliable
       newPicks, // picks the client had not seen yet (by player_key)
       picks: allPicks, // full ordered board (pick, round, teamKey, playerKey)
       myRoster: myPicks, // the user's current drafted roster (pick, round, playerKey)

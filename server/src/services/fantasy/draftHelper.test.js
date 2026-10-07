@@ -250,6 +250,58 @@ test('CURRENT injury is applied SEPARATELY from historical durability', () => {
   assert.ok(c.durabilityScore > 0.95);      // and it is SEPARATE from the injury multiplier
 });
 
+// --- Yahoo ADP market context -----------------------------------------------
+
+function providerPlain(players) {
+  const map = new Map(players.map((p) => [p.playerKey, p._proj]));
+  return { getProjection: (p) => (map.get(p.playerKey) != null ? { projectedPoints: map.get(p.playerKey), confidence: 0.8 } : null) };
+}
+// Players carry Yahoo ADP fields (as normalize.js would produce them).
+function plAdp(key, elig, proj, adp) {
+  return { playerKey: key, name: key, teamAbbr: 'BOS', eligiblePositions: elig, percentOwned: 0, status: null, _proj: proj, yahooAdp: adp };
+}
+
+test('ADP fields + market label are exposed per board row', () => {
+  const players = [plAdp('A', ['PG'], 40, 15), plAdp('B', ['C'], 30, 40)];
+  // B: ProGM ~#2 but ADP 40 => big VALUE lean.
+  const res = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players) });
+  const b = res.board.find((p) => p.name === 'B');
+  assert.equal(b.yahooAdp, 40);
+  assert.ok('adpVsProgm' in b);
+  assert.ok('marketLabel' in b);
+  assert.ok('marketReason' in b);
+  assert.equal(b.marketLabel, 'VALUE'); // ADP much later than ProGM rank
+});
+
+test('Yahoo ADP does NOT reorder the ProGM Best Available board', () => {
+  // A has higher production (ranks #1) but a LATE ADP; B lower production, early ADP.
+  const players = [plAdp('A', ['PG'], 45, 60), plAdp('B', ['SG'], 20, 1)];
+  const withAdp = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players) });
+  const noAdp = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  // Same ProGM order regardless of ADP — ADP is context only.
+  assert.deepEqual(withAdp.board.map((p) => p.name), noAdp.board.map((p) => p.name));
+  assert.equal(withAdp.board[0].name, 'A');
+});
+
+test('missing ADP yields a neutral market label (null-safe, never 0)', () => {
+  const players = [pl('NoAdp', ['PG'], 30)]; // pl() has no yahooAdp
+  const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  assert.equal(res.board[0].yahooAdp, null);
+  assert.equal(res.board[0].marketLabel, 'neutral');
+  assert.equal(res.board[0].adpVsProgm, null);
+});
+
+test('DRAFT NOW/WAIT only appear when a next pick is supplied', () => {
+  // Strong value: ProGM #1, ADP 13. currentPick 10.
+  const players = [plAdp('Star', ['PG'], 50, 13), plAdp('Filler', ['SG'], 10, 90)];
+  const withoutNext = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentPick: 10 });
+  const star1 = withoutNext.board.find((p) => p.name === 'Star');
+  assert.ok(star1.marketLabel !== 'DRAFT NOW' && star1.marketLabel !== 'WAIT'); // omitted w/o nextPick
+  const withNext = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentPick: 10, nextPick: 24 });
+  const star2 = withNext.board.find((p) => p.name === 'Star');
+  assert.equal(star2.marketLabel, 'DRAFT NOW'); // strong value + won't survive to #24
+});
+
 test('elite production is NOT overwhelmed by durability + scarcity', () => {
   // Elite per-game (60) but worst durability vs a mediocre, fully-durable,
   // positionally-scarce player (25). Elite must still rank first — durability

@@ -13,6 +13,7 @@
  */
 import { scarcityWeights, healthMultiplier } from './playerValue.js';
 import { computeDurability } from './durability.js';
+import { computeMarketContext } from './adpMarket.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
 
@@ -245,8 +246,10 @@ function rosterFit(eligiblePositions, thinSet, overloadedSet) {
  *        treated as UNKNOWN (never fabricated as available).
  * @param {string} [params.position]         filter to a position
  * @param {number} [params.limit]
+ * @param {number|null} [params.currentPick] current overall draft pick (live) for market labels
+ * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
  */
-export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 150 }) {
+export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 150, currentPick = null, nextPick = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const weights = scarcityWeights(settings);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
@@ -266,6 +269,10 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       status: p.status || null,
       out: Boolean(p.status && OUT_STATUSES.has(p.status)),
       percentOwned: p.percentOwned ?? null, // context only
+      // Yahoo MARKET data (ADP) — context only, never feeds ProGM value/ranking.
+      yahooAdp: p.yahooAdp ?? null,
+      yahooAvgRound: p.yahooAvgRound ?? null,
+      yahooPercentDrafted: p.yahooPercentDrafted ?? null,
       // Availability is a Yahoo FACT when known, otherwise explicitly unknown.
       availability: availabilityKnown ? (availabilityOf(p) ? 'available' : 'rostered') : 'unknown',
       rosterFit: fit.fit,
@@ -331,11 +338,28 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     };
   });
 
-  // Global BEST AVAILABLE order: by draft value only. Roster fit is attached
-  // for the UI but MUST NOT influence this global ordering (fit affects the
-  // separate "Best Fit" view, not Best Available).
+  // Global BEST AVAILABLE order: by draft value only. Roster fit AND Yahoo ADP
+  // are attached for the UI but MUST NOT influence this global ordering (fit =>
+  // "Best Fit" view; ADP => market label only). ProGM rank stays authoritative.
   const sorted = valued.sort((a, b) => b.value - a.value).slice(0, limit);
-  const board = assignTiers(sorted).map((p, i) => ({ overallRank: i + 1, ...p }));
+  const board = assignTiers(sorted).map((p, i) => {
+    const overallRank = i + 1;
+    // Market context compares ProGM rank (this board position) vs Yahoo ADP.
+    // DRAFT NOW/WAIT only when a reliable nextPick was supplied.
+    const market = computeMarketContext({
+      progmRank: overallRank,
+      yahooAdp: p.yahooAdp,
+      currentPick,
+      nextPick,
+    });
+    return {
+      overallRank,
+      ...p,
+      adpVsProgm: market.adpVsProgm,
+      marketLabel: market.label,
+      marketReason: market.reason,
+    };
+  });
 
   return {
     available: true,
@@ -351,6 +375,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
         'historical durability (season availability over last 3 completed seasons) applied as a downside-only multiplier capped at 10%; neutral when <2 usable seasons; kept separate from current injury',
         'PER-GAME anchored — games-in-window totals do NOT drive draft value',
         'value tiers from natural gaps; roster fit shown but does NOT reorder Best Available',
+        'Yahoo ADP shown as MARKET context (VALUE/REACH/DRAFT NOW/WAIT) — it never changes the ProGM ranking',
       ],
     },
     note: availabilityKnown

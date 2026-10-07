@@ -121,6 +121,19 @@ function toNumberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Yahoo draft_analysis uses the string "-" (and sometimes "" / "0.0" for
+ * never-drafted players) to mean "no market data". Treat "-" and blanks as
+ * NULL (never fabricate 0). A real "0" stays null too for ADP since pick 0 is
+ * not meaningful; percent_drafted of exactly 0 is coerced from "-" already, so
+ * callers see null when Yahoo had nothing.
+ */
+function yahooNumOrNull(value) {
+  if (value === null || value === undefined || value === '' || value === '-') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring format
 // ---------------------------------------------------------------------------
@@ -156,6 +169,7 @@ export function normalizePlayer(rawPlayer) {
   let propsNode = rawPlayer;
   let selectedPosition = null;
   let percentOwnedValue = null;
+  let draftAnalysis = null; // { yahooAdp, yahooAvgRound, yahooPercentDrafted } or null
 
   if (Array.isArray(rawPlayer) && Array.isArray(rawPlayer[0])) {
     propsNode = rawPlayer[0];
@@ -170,6 +184,18 @@ export function normalizePlayer(rawPlayer) {
       percentOwnedValue = po.value;
     } else if (meta.percent_owned && typeof meta.percent_owned === 'object') {
       percentOwnedValue = meta.percent_owned.value;
+    }
+    // draft_analysis is a prop-array: [{average_pick},{average_round},
+    // {average_cost},{percent_drafted},{preseason_average_pick},...]. Yahoo
+    // uses the string "-" for missing values -> normalize to null (NEVER 0).
+    // preseason_* is used as a fallback before live draft data accumulates.
+    const daNode = meta.draft_analysis;
+    if (daNode) {
+      const da = Array.isArray(daNode) ? mergeYahooProps(daNode) : daNode;
+      const adp = yahooNumOrNull(da.average_pick) ?? yahooNumOrNull(da.preseason_average_pick);
+      const rnd = yahooNumOrNull(da.average_round) ?? yahooNumOrNull(da.preseason_average_round);
+      const pct = yahooNumOrNull(da.percent_drafted) ?? yahooNumOrNull(da.preseason_percent_drafted);
+      draftAnalysis = { yahooAdp: adp, yahooAvgRound: rnd, yahooPercentDrafted: pct };
     }
   }
 
@@ -205,6 +231,12 @@ export function normalizePlayer(rawPlayer) {
     // Yahoo ownership %, only present when the players resource is requested
     // with the percent_owned sub-resource. null otherwise.
     percentOwned: toNumberOrNull(percentOwnedValue),
+    // Yahoo market/ADP, only present when the draft_analysis sub-resource is
+    // requested. Missing values are null (never 0). These are MARKET context —
+    // they do NOT feed ProGM projections or the core ranking.
+    yahooAdp: draftAnalysis?.yahooAdp ?? null,
+    yahooAvgRound: draftAnalysis?.yahooAvgRound ?? null,
+    yahooPercentDrafted: draftAnalysis?.yahooPercentDrafted ?? null,
   };
 }
 

@@ -109,3 +109,51 @@ export function deriveDraftState({ yahooDraftStatus, totalPicks, expectedPicks }
 export function picksForTeam(picks, teamKey) {
   return (picks || []).filter((p) => p.teamKey === teamKey);
 }
+
+/**
+ * Derive the user's next overall pick in a SNAKE draft, reliably or not at all.
+ *
+ * A snake draft alternates direction each round. If we know the user's draft
+ * SLOT (their 1-based position in round 1) and the team count, the next pick
+ * after `currentPick` is deterministic. We derive the slot from the user's
+ * FIRST actual pick in draftresults (its overall pick number in round 1), which
+ * is the only reliable signal — Yahoo does not expose a draft-order resource we
+ * depend on. If any input is missing/inconsistent we return null so the caller
+ * OMITS DRAFT NOW/WAIT rather than inventing a next pick.
+ *
+ * @param {Object} params
+ * @param {Array} params.myPicks       the user's picks so far (pick numbers)
+ * @param {number|null} params.numTeams
+ * @param {number} params.currentPick  the next overall pick about to be made
+ * @returns {number|null} the user's next overall pick strictly after currentPick, or null
+ */
+export function deriveNextPick({ myPicks, numTeams, currentPick }) {
+  const n = Number(numTeams);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  if (!Number.isInteger(currentPick) || currentPick < 1) return null;
+
+  // Need the user's round-1 slot. Prefer an explicit round-1 pick; otherwise
+  // infer from any pick whose round we can trust.
+  const picksWithNums = (myPicks || []).filter((p) => Number.isInteger(p.pick) && p.pick >= 1);
+  if (!picksWithNums.length) return null;
+
+  const firstOverall = Math.min(...picksWithNums.map((p) => p.pick));
+  // In a snake draft, round 1 is picks 1..n, so the slot is simply the first
+  // overall pick IF that pick is in round 1. If the user's earliest known pick
+  // is not in round 1 we cannot reliably recover the slot -> null.
+  if (firstOverall > n) return null;
+  const slot = firstOverall; // 1-based slot in round 1
+
+  // Overall pick for this user in round r (1-based), snake order:
+  //   odd round  r: (r-1)*n + slot
+  //   even round r: (r-1)*n + (n - slot + 1)
+  const pickInRound = (r) => (r % 2 === 1 ? (r - 1) * n + slot : (r - 1) * n + (n - slot + 1));
+
+  // Find the smallest round whose pick is strictly greater than currentPick.
+  // (currentPick is the pick about to be made; "next" is the user's upcoming one.)
+  for (let r = 1; r <= 50; r += 1) {
+    const overall = pickInRound(r);
+    if (overall >= currentPick) return overall;
+  }
+  return null;
+}
