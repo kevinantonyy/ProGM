@@ -12,6 +12,7 @@
  * a player's worth is consistent across the whole product.
  */
 import { scarcityWeights, healthMultiplier } from './playerValue.js';
+import { computeDurability } from './durability.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
 
@@ -35,16 +36,43 @@ const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
  *                        never treated as zero production)
  *   healthMult   (mult)  injury availability multiplier (1 / 0.85 / 0.5)
  *
- *   rawScore = 0.55*production + 0.30*replacement + 0.15*scarcity
+ *   rawScore = 0.60*production + 0.30*replacement + 0.10*scarcity
  *   draftValue = rawScore
  *                * (CONF_FLOOR + (1-CONF_FLOOR)*confidence)   // confidence penalty
- *                * healthMult                                  // injury penalty
+ *                * healthMult                                  // CURRENT injury penalty
+ *                * (1 - durabilityPenalty)                     // historical availability
+ *
+ * DURABILITY (historical, season-level availability) is DISTINCT from the
+ * current injury multiplier (healthMult). It is a DOWNSIDE-ONLY adjustment:
+ * players with strong/neutral or insufficient history are not boosted; only
+ * demonstrably lower historical availability is penalized, capped at
+ * DURABILITY_MAX_PENALTY so elite per-game production is never overwhelmed.
+ * When history is missing or thin (<2 usable seasons) the penalty is 0.
+ *
+ * Scarcity weight was reduced (0.15 -> 0.10, the 0.05 moved to production) so
+ * positional scarcity does not double-count with the replacement/VORP term.
  *
  * Everything is derived from existing normalized data (projection per-game,
- * league rosterSlots, Yahoo injury status). No player-specific hardcoding.
+ * league rosterSlots, Yahoo injury status, historical games played). No
+ * player-specific hardcoding.
  */
-export const DRAFT_WEIGHTS = Object.freeze({ production: 0.55, replacement: 0.30, scarcity: 0.15 });
+export const DRAFT_WEIGHTS = Object.freeze({ production: 0.60, replacement: 0.30, scarcity: 0.10 });
 const CONF_FLOOR = 0.6; // a no-confidence player keeps 60% of value, never 0 from data gaps
+// Durability penalty is downside-only and capped so it moderately adjusts, never
+// dominates. A fully-available player (durabilityScore 1) gets 0 penalty; the
+// penalty scales with the availability SHORTFALL up to this cap. Tunable.
+export const DURABILITY_MAX_PENALTY = 0.10; // max 10% of draft value
+
+/**
+ * Downside-only durability penalty in [0, DURABILITY_MAX_PENALTY].
+ *   penalty = DURABILITY_MAX_PENALTY × (1 - durabilityScore)
+ * null durabilityScore (insufficient/no history) => 0 penalty (neutral).
+ */
+export function durabilityPenaltyFrom(durabilityScore) {
+  if (durabilityScore == null) return 0;
+  const shortfall = Math.max(0, Math.min(1, 1 - durabilityScore));
+  return Number((DURABILITY_MAX_PENALTY * shortfall).toFixed(4));
+}
 
 /** Max scarcity weight among a player's eligible positions (>=1). */
 function bestScarcity(eligiblePositions, weights) {
@@ -110,9 +138,10 @@ export function computeReplacementBaselines(rows, settings) {
  * @param {Object} params.weights             scarcityWeights(settings)
  * @param {number} params.poolMaxPerGame      max per-game in the pool (for production norm)
  * @param {{baselineByPos:Object, spread:number}} params.replacement
+ * @param {Array|null} [params.history]        historical availability [{season,gamesPlayed,gameTotal}]
  * @returns {{ value:number|null, components:Object }|{ value:null, components:Object }}
  */
-export function computeDraftValue({ perGame, confidence, status, eligiblePositions, weights, poolMaxPerGame, replacement }) {
+export function computeDraftValue({ perGame, confidence, status, eligiblePositions, weights, poolMaxPerGame, replacement, history = null }) {
   if (perGame == null) {
     return { value: null, components: { reason: 'no_projection' } };
   }
@@ -138,15 +167,22 @@ export function computeDraftValue({ perGame, confidence, status, eligiblePositio
   const conf = confidence == null ? 0 : Math.max(0, Math.min(1, confidence));
   const confFactor = CONF_FLOOR + (1 - CONF_FLOOR) * conf;
 
-  // 5. Injury availability multiplier.
+  // 5. CURRENT injury availability multiplier (separate from durability).
   const healthMult = healthMultiplier(status);
+
+  // 6. Historical durability (season-level availability). Downside-only, capped.
+  //    Missing/thin history => neutral (durabilityScore null => 0 penalty).
+  const durability = computeDurability(history);
+  const durabilityPenalty = durabilityPenaltyFrom(durability.durabilityScore);
 
   const rawScore = DRAFT_WEIGHTS.production * production
     + DRAFT_WEIGHTS.replacement * replacementComp
     + DRAFT_WEIGHTS.scarcity * scarcityComp;
 
-  // Scale to a readable 0..100 draft score (relative within pool).
-  const value = Number((rawScore * confFactor * healthMult * 100).toFixed(2));
+  // Scale to a readable 0..100 draft score (relative within pool). Durability
+  // is applied as a (1 - penalty) multiplier, kept separate from the current
+  // injury multiplier so the two signals never conflate.
+  const value = Number((rawScore * confFactor * healthMult * (1 - durabilityPenalty) * 100).toFixed(2));
 
   return {
     value,
@@ -159,7 +195,12 @@ export function computeDraftValue({ perGame, confidence, status, eligiblePositio
       scarcityWeight: scarcityW,
       confidence: Number(conf.toFixed(2)),
       confidenceFactor: Number(confFactor.toFixed(3)),
-      healthMult,
+      healthMult, // CURRENT injury status (distinct from durability)
+      // Historical durability (explainability) — kept separate from injury.
+      durabilityScore: durability.durabilityScore,
+      durabilityPenalty,
+      durabilitySeasons: durability.usableSeasons,
+      history: history || null,
       rawScore: Number(rawScore.toFixed(4)),
     },
   };
@@ -260,8 +301,10 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
     });
+    // Historical availability (optional) rides on the projection object.
+    const history = proj?.history ?? null;
     if (perGame == null) { noData.push({ ...base, value: null }); continue; }
-    prelim.push({ ...base, perGame });
+    prelim.push({ ...base, perGame, history });
   }
 
   // Pool-wide references for normalization (computed from the pool itself).
@@ -278,6 +321,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       weights,
       poolMaxPerGame,
       replacement,
+      history: r.history,
     });
     return {
       ...r,
@@ -302,8 +346,9 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     dataBasis: {
       facts: ['player eligibility, team, injury status, ownership, availability (Yahoo)'],
       calculations: [
-        'draft value = normalized blend of per-game league production (55%), positional replacement/VORP (30%), and scarcity (15%)',
-        'confidence/injury penalties applied as multipliers (missing data penalized, never zeroed)',
+        'draft value = normalized blend of per-game league production (60%), positional replacement/VORP (30%), and scarcity (10%)',
+        'confidence + CURRENT injury penalties applied as multipliers (missing data penalized, never zeroed)',
+        'historical durability (season availability over last 3 completed seasons) applied as a downside-only multiplier capped at 10%; neutral when <2 usable seasons; kept separate from current injury',
         'PER-GAME anchored — games-in-window totals do NOT drive draft value',
         'value tiers from natural gaps; roster fit shown but does NOT reorder Best Available',
       ],

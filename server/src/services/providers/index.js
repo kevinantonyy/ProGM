@@ -258,4 +258,50 @@ export function getSchedule(season) {
   );
 }
 
+/**
+ * Historical availability (games played) for the last `count` COMPLETED NBA
+ * regular seasons. ONE league-wide request per completed season, each cached
+ * long-term (completed seasons are immutable) and shared across all users —
+ * NEVER per player. Returns a map keyed by externalId:
+ *   { externalId -> [{ season, gamesPlayed, gameTotal }] }  (newest season first)
+ *
+ * Entirely optional and best-effort: any season that fails to fetch is simply
+ * omitted, and a total failure returns {} so projections are never broken and
+ * no player is penalized for missing history.
+ *
+ * @param {string|number} currentSeason  active ESPN season start-year
+ * @param {number} [count]
+ */
+export async function getHistoricalAvailability(currentSeason, count = 3) {
+  const provider = candidateProviders().find((p) => typeof p.getSeasonGamesPlayed === 'function' && typeof p.completedSeasons === 'function');
+  if (!provider) return { value: {}, meta: { provider: 'none', cacheHit: true } };
+
+  const seasons = provider.completedSeasons(currentSeason, count);
+  const gameTotal = provider.REGULAR_SEASON_GAMES || 82;
+  const byPlayer = {}; // externalId -> [{ season, gamesPlayed, gameTotal }]
+
+  for (const season of seasons) {
+    try {
+      // One cached, league-wide request per completed season (immutable TTL).
+      const result = await cache.remember(
+        `gamesPlayed:${season}:${provider.name}`,
+        { provider: provider.name, ttl: cache.TTL.history },
+        () => provider.getSeasonGamesPlayed(season),
+      );
+      if (!result.meta.cacheHit) health.recordSuccess(provider.name);
+      for (const [externalId, gamesPlayed] of Object.entries(result.value || {})) {
+        if (!byPlayer[externalId]) byPlayer[externalId] = [];
+        byPlayer[externalId].push({ season, gamesPlayed, gameTotal });
+      }
+    } catch (error) {
+      // A failed season is omitted; never breaks projections or penalizes.
+      health.recordFailure(provider.name, error);
+    }
+  }
+
+  // Keep newest season first for recency weighting downstream.
+  for (const id of Object.keys(byPlayer)) byPlayer[id].sort((a, b) => b.season - a.season);
+  return { value: byPlayer, meta: { provider: provider.name, cacheHit: false } };
+}
+
 export { cache, health };

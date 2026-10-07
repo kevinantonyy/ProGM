@@ -144,9 +144,23 @@ export async function buildProjectionContext({ season, players, statCategories, 
   }
   const recentByExternalId = recentResult?.value || {};
 
+  // 3c. Historical availability (OPTIONAL): games played across the last 3
+  //     completed seasons for durability. Best-effort — any failure yields no
+  //     history, which the draft model treats as NEUTRAL (no penalty). Never
+  //     breaks projections.
+  let historyResult = null;
+  try {
+    historyResult = await providers.getHistoricalAvailability(season);
+  } catch {
+    historyResult = null;
+  }
+  const historyByExternalId = historyResult?.value || {};
+
   // 4. Project each canonical player using the league's actual scoring. Merge
   //    recent form into the season stats so the EXISTING projection model
-  //    (season+recent blend) uses it with no weight changes.
+  //    (season+recent blend) uses it with no weight changes. Historical
+  //    availability is attached as projection.history for the draft durability
+  //    adjustment — it does NOT affect the projected points themselves.
   const projectionByCanonicalId = new Map();
   for (const c of canonical) {
     const base = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
@@ -160,6 +174,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     const projection = projectPlayer({ stats, statCategories });
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
+    projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
@@ -167,12 +182,13 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
   const recentCount = Object.keys(recentByExternalId).length;
+  const historyCount = Object.keys(historyByExternalId).length;
 
   return {
     externalAvailable: true,
     projectionProvider,
     projectionByCanonicalId,
-    identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount },
+    identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
     freshness,
     providerStatus: providers.providerStatus(),
     // Per-source availability so the UI/report can see what the primary served.
@@ -183,6 +199,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
         seasonStats: Boolean(statsResult?.value?.length),
         recentForm: recentCount > 0,
         playerIndex: Boolean(indexResult?.value?.length),
+        history: historyCount > 0,
       },
     },
     reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',

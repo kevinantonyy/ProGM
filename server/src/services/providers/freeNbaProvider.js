@@ -361,6 +361,55 @@ export async function getSeasonStatsBulk(season) {
   return mapEspnSeasonStats(payload);
 }
 
+// Regular-season game total used as the availability denominator.
+export const REGULAR_SEASON_GAMES = 82;
+
+/**
+ * The last N COMPLETED NBA regular seasons as ESPN season start-years.
+ * ESPN uses the season START year (e.g. 2024 == the 2024-25 season). The
+ * current/in-progress season is EXCLUDED (not completed), so this returns
+ * [current-1, current-2, current-3] for N=3. Pure + deterministic given the
+ * current season year.
+ *
+ * @param {string|number} currentSeason  ESPN start-year of the active season
+ * @param {number} [count]
+ */
+export function completedSeasons(currentSeason, count = 3) {
+  const cur = Number(currentSeason) || new Date().getFullYear();
+  const seasons = [];
+  for (let i = 1; i <= count; i += 1) seasons.push(cur - i);
+  return seasons;
+}
+
+/**
+ * Pure mapper: ESPN byathlete payload -> { externalId -> gamesPlayed }.
+ * Extracts ONLY games played (availability signal). Missing GP is omitted
+ * (never fabricated as 0).
+ */
+export function mapEspnGamesPlayed(payload) {
+  const namesByCat = espnNamesByCategory(payload);
+  const out = {};
+  for (const a of payload?.athletes || []) {
+    const id = a.athlete?.id != null ? String(a.athlete.id) : null;
+    if (!id) continue;
+    const m = espnAthleteStatMap(a, namesByCat);
+    const gp = m.gamesPlayed;
+    if (gp != null && Number.isFinite(gp)) out[id] = gp;
+  }
+  return out;
+}
+
+/**
+ * League-wide games-played for ONE completed season in ONE request.
+ * Returns { externalId -> gamesPlayed }. Never per-player.
+ */
+export async function getSeasonGamesPlayed(season) {
+  const yr = Number(season);
+  if (!Number.isFinite(yr)) return {};
+  const payload = await jsonFetch(BYATHLETE_URL(yr), ESPN_HEADERS);
+  return mapEspnGamesPlayed(payload);
+}
+
 /**
  * Back-compat batch method. Fetches the league-wide dataset once and filters.
  * (Still one request regardless of how many ids are requested.)
@@ -435,6 +484,9 @@ export const freeNbaProvider = {
   getPlayerIndex,
   getSeasonStats,
   getSeasonStatsBulk,
+  getSeasonGamesPlayed,
+  completedSeasons,
+  REGULAR_SEASON_GAMES,
   getInjuries,
   getSchedule,
   getScheduleWithIds,
