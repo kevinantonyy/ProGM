@@ -458,6 +458,60 @@ function LiveDraftRoster({ live }) {
   );
 }
 
+function DraftRecommendation({ player }) {
+  if (player.yahooAdp == null) return <span className="text-dark-500" title="Yahoo ADP is unavailable, so no market recommendation is shown.">—</span>;
+  const labels = {
+    'DRAFT NOW': ['Draft Now', 'badge-green'],
+    WAIT: ['Wait', 'badge-blue'],
+    VALUE: ['Good Value', 'badge-green'],
+    REACH: ['Reach', 'badge-orange'],
+    neutral: ['Fair Value', 'badge-blue'],
+  };
+  const [label, className] = labels[player.marketLabel] || ['—', 'badge-blue'];
+  return <span className={className} title={player.marketReason}>{label}</span>;
+}
+
+function DraftPlayerRow({ player, hasPeriod, availabilityKnown }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailId = `draft-details-${String(player.playerKey || player.name).replace(/[^a-z0-9_-]/gi, '-')}`;
+  const comparison = player.rankAgreement === 'progm_higher' ? 'ProGM ranks him much higher'
+    : player.rankAgreement === 'yahoo_higher' ? 'Yahoo ranks him much higher'
+      : player.rankAgreement === 'progm_lean' ? 'ProGM ranks him somewhat higher'
+        : player.rankAgreement === 'yahoo_lean' ? 'Yahoo ranks him somewhat higher'
+          : player.rankAgreement === 'aligned' ? 'ProGM and Yahoo agree' : 'Comparison unavailable';
+  const availability = player.availability === 'available' ? 'Available' : player.availability === 'rostered' ? 'Rostered' : 'Availability unknown';
+  const details = [
+    ['Yahoo Season Rank', player.yahooSeasonRank != null ? `#${player.yahooSeasonRank}` : '—'],
+    ['Projected Fantasy Points/Game', player.projected != null ? player.projected.toFixed(1) : '—'],
+    hasPeriod && ['Projected Points This Period', player.periodProjected != null ? `${player.periodProjected.toFixed(1)}${player.expectedGames != null ? ` (${player.expectedGames} games)` : ''}` : '—'],
+    ['Positional Scarcity', player.scarcity != null ? `${player.scarcity.toFixed(2)}×` : '—'],
+    ['Projection Confidence', player.confidence != null ? `${Math.round(player.confidence * 100)}%` : '—'],
+    ['Historical Availability', player.components?.durabilityScore != null ? `${Math.round(player.components.durabilityScore * 100)}%` : '—'],
+    ['ProGM Draft Score', player.value != null ? player.value.toFixed(1) : '—'],
+    ['ProGM Tier', player.tier != null ? `Tier ${player.tier}` : '—'],
+    ['Yahoo Rostered', player.percentOwned != null ? `${player.percentOwned}%` : '—'],
+  ].filter(Boolean);
+
+  return <>
+    <tr className="border-b border-dark-700">
+      <td className="p-3 text-center text-lg font-black text-primary-400">{player.overallRank ?? '—'}</td>
+      <td className="p-3">
+        <div className="flex items-center gap-2"><PlayerLink player={player}>{player.name}</PlayerLink>{player.out && <span className="badge-red">OUT</span>}</div>
+        <p className="pl-11 text-xs text-dark-400">{player.teamAbbr || 'FA'} · {player.eligiblePositions?.join('/') || 'Position unavailable'}{availabilityKnown ? ` · ${availability}` : ''}</p>
+      </td>
+      <td className="p-3 text-center font-semibold text-dark-300">{player.yahooOverallRank != null ? `#${player.yahooOverallRank}` : '—'}</td>
+      <td className="p-3 text-center font-semibold text-dark-300">{player.yahooAdp ?? '—'}</td>
+      <td className="p-3">
+        <div className="flex flex-wrap items-center gap-2"><DraftRecommendation player={player} /><button type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded} aria-controls={detailId} className="rounded-sm px-1.5 py-1 text-xs font-semibold text-dark-400 hover:bg-dark-900 hover:text-primary-400">{expanded ? 'Hide details' : 'View details'}</button></div>
+      </td>
+    </tr>
+    {expanded && <tr id={detailId} className="border-b border-dark-700 bg-dark-900/50"><td colSpan="5" className="p-4 sm:pl-16">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{details.map(([label, value]) => <div key={label}><p className="stat-label">{label}</p><p className="mt-1 font-semibold tabular-nums">{value}</p></div>)}</div>
+      <div className="mt-4 border-t border-dark-700 pt-3 text-xs leading-5 text-dark-400"><p><span className="font-semibold text-dark-300">Ranking comparison:</span> {comparison}{player.rankReason ? `. ${player.rankReason}` : ''}</p>{player.marketReason && <p><span className="font-semibold text-dark-300">Draft recommendation:</span> {player.marketReason}</p>}{player.rosterFitLabel && <p><span className="font-semibold text-dark-300">Roster fit:</span> {player.rosterFitLabel}</p>}{player.yahooPriorSeasonRanks?.length > 0 && <p><span className="font-semibold text-dark-300">Prior Yahoo Season Ranks:</span> {player.yahooPriorSeasonRanks.map((row) => `${row.season}: #${row.rank}`).join(' · ')}</p>}</div>
+    </td></tr>}
+  </>;
+}
+
 // --- Tab: Draft Helper (research tool + LIVE Yahoo draft sync) ---
 function DraftHelper({ data, leagueKey, active }) {
   const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active });
@@ -470,7 +524,7 @@ function DraftHelper({ data, leagueKey, active }) {
   const [q, setQ] = useState('');
   const [pos, setPos] = useState('ALL');
   const [avail, setAvail] = useState('ALL');
-  const [sortBy, setSortBy] = useState('value');
+  const [sortBy, setSortBy] = useState('progm');
 
   const liveBanner = <LiveDraftBanner live={live} />;
 
@@ -485,6 +539,9 @@ function DraftHelper({ data, leagueKey, active }) {
   if (pos !== 'ALL') rows = rows.filter((p) => (p.eligiblePositions || []).includes(pos));
   if (db.availabilityKnown && avail !== 'ALL') rows = rows.filter((p) => p.availability === avail);
   rows.sort((a, b) => {
+    if (sortBy === 'progm') return (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity);
+    if (sortBy === 'yahooRank') return (a.yahooOverallRank ?? Infinity) - (b.yahooOverallRank ?? Infinity);
+    if (sortBy === 'adp') return (a.yahooAdp ?? Infinity) - (b.yahooAdp ?? Infinity);
     if (sortBy === 'projected') return (b.projected ?? -1) - (a.projected ?? -1);
     if (sortBy === 'period') return (b.periodProjected ?? -1) - (a.periodProjected ?? -1);
     if (sortBy === 'scarcity') return (b.scarcity ?? -1) - (a.scarcity ?? -1);
@@ -493,10 +550,9 @@ function DraftHelper({ data, leagueKey, active }) {
     return (b.value ?? -1) - (a.value ?? -1); // default: ProGM value
   });
 
-  const AVAIL_BADGE = { available: 'badge-green', rostered: 'badge-blue', unknown: 'badge-orange' };
-  const FIT_BADGE = { need: 'badge-green', surplus: 'badge-orange', neutral: 'text-dark-400' };
   const hasPeriod = data.scheduleAware;
-  const sortBtns = [['value', 'ProGM value'], ['projected', 'Proj/gm'], hasPeriod && ['period', 'Period'], ['scarcity', 'Scarcity'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+  const sortBtns = [['progm', 'ProGM Rank', 'Your league-specific ProGM order'], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
+  const advancedSorts = [['projected', 'Projected Fantasy Points/Game', 'Projected production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
 
   return (
     <div className="space-y-4">
@@ -505,6 +561,8 @@ function DraftHelper({ data, leagueKey, active }) {
         <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">Draft Helper</h2><span className="badge-blue">League-specific</span>{isLive && <span className="badge-green">Read-only live board</span>}</div>
         {isLive ? <p className="mt-1 text-xs text-dark-400">Recomputed after every pick.</p> : <SecondaryDetails label="Board method" className="mt-2">{db.note}</SecondaryDetails>}
       </div>
+
+      <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">ProGM Rank</strong><br />League-specific order based on ProGM's existing model. This determines the default board order.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
 
       {isLive && <LiveDraftRoster live={live} />}
 
@@ -523,39 +581,17 @@ function DraftHelper({ data, leagueKey, active }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-dark-400">Sort by</span>
-        {sortBtns.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
+        {sortBtns.map(([k, l, tip]) => <button key={k} onClick={() => setSortBy(k)} title={tip} aria-pressed={sortBy === k} className={`rounded-sm px-2.5 py-1.5 text-xs font-semibold transition-colors ${sortBy === k ? 'bg-primary-600 text-white' : 'border border-dark-700 bg-dark-800 text-dark-300 hover:border-primary-500 hover:text-dark-50'}`}>{l}</button>)}
+        <details className="secondary-details"><summary className="px-2 py-1">Advanced sorts</summary><div className="mt-2 flex flex-wrap gap-1.5">{advancedSorts.map(([k, l, tip]) => <button key={k} onClick={() => setSortBy(k)} title={tip} aria-pressed={sortBy === k} className={`rounded-sm px-2.5 py-1.5 text-xs font-semibold transition-colors ${sortBy === k ? 'bg-primary-600 text-white' : 'border border-dark-700 bg-dark-800 text-dark-300 hover:border-primary-500 hover:text-dark-50'}`}>{l}</button>)}</div></details>
       </div>
 
       <section className="card overflow-x-auto p-0">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr>
-            <th className="p-3">ProGM Rank</th><th className="p-3">Player</th><th className="p-3">Tier</th>
-            <th className="p-3 text-right">Yahoo Rank</th><th className="p-3 text-right">Yahoo ADP</th><th className="p-3 text-right">Season Rank</th><th className="p-3">Comparison</th>
-            <th className="p-3 text-right">Value</th><th className="p-3 text-right">Proj/gm</th>
-            {hasPeriod && <th className="p-3 text-right">Period</th>}
-            <th className="p-3 text-right">Scarcity</th><th className="p-3">Fit</th>
-            {db.availabilityKnown && <th className="p-3">Availability</th>}
-            <th className="p-3 text-right">Owned</th><th className="p-3 text-right">Conf</th>
+            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="ProGM's league-specific draft rank">ProGM Rank</abbr></th><th className="p-3">Player</th>
+            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Yahoo's overall player rank">Yahoo Rank</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Average draft position in Yahoo drafts">Yahoo ADP</abbr></th><th className="w-52 p-3"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft timing guidance from existing ProGM and Yahoo ADP calculations">Recommendation</abbr></th>
           </tr></thead>
-          <tbody>{rows.map((p) => (
-            <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
-              <td className="p-3 text-dark-400">{p.overallRank}</td>
-              <td className="p-3"><div className="flex items-center gap-2"><PlayerLink player={p}>{p.name}</PlayerLink>{p.out && <span className="badge-red">OUT</span>}</div><p className="pl-11 text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
-              <td className="p-3"><span className="badge-blue">T{p.tier}</span></td>
-              <td className="p-3 text-right text-dark-300">{p.yahooOverallRank ?? '—'}</td>
-              <td className="p-3 text-right text-dark-300">{p.yahooAdp ?? '—'}</td>
-              <td className="p-3 text-right text-dark-300">{p.yahooSeasonRank ?? '—'}</td>
-              <td className="p-3"><span className="text-xs text-dark-300" title={p.rankReason}>{p.rankAgreement === 'progm_higher' ? 'ProGM higher' : p.rankAgreement === 'yahoo_higher' ? 'Yahoo higher' : p.rankAgreement === 'progm_lean' ? 'ProGM lean' : p.rankAgreement === 'yahoo_lean' ? 'Yahoo lean' : p.rankAgreement === 'aligned' ? 'Agreement' : '—'}</span></td>
-              <td className="p-3 text-right font-bold text-primary-400">{p.value?.toFixed(1)}</td>
-              <td className="p-3 text-right"><Proj value={p.projected} /></td>
-              {hasPeriod && <td className="p-3 text-right">{p.periodProjected != null ? <span className="text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
-              <td className="p-3 text-right text-dark-300">{p.scarcity != null ? `×${p.scarcity.toFixed(2)}` : '—'}</td>
-              <td className="p-3"><span className={FIT_BADGE[p.rosterFit] || 'text-dark-400'} title={p.rosterFitLabel}>{p.rosterFit === 'need' ? 'Need' : p.rosterFit === 'surplus' ? 'Surplus' : '—'}</span></td>
-              {db.availabilityKnown && <td className="p-3"><span className={AVAIL_BADGE[p.availability]}>{p.availability === 'available' ? 'Available' : p.availability === 'rostered' ? 'Rostered' : 'Unknown'}</span></td>}
-              <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
-              <td className="p-3 text-right text-dark-300">{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</td>
-            </tr>))}
-          </tbody>
+          <tbody>{rows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} hasPeriod={hasPeriod} availabilityKnown={db.availabilityKnown} />)}</tbody>
         </table>
         {!rows.length && <p className="p-8 text-center text-dark-400">No players match your filters.</p>}
       </section>
