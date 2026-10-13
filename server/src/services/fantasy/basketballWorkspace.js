@@ -25,6 +25,7 @@ import {
   extractStandings,
   extractPlayerList,
   yahooDraftPlayersPath,
+  yahooRosterPlayersPath,
 } from './normalize.js';
 import { scoringIsSupported } from './scoring.js';
 import { analyzeRoster } from './rosterAnalysis.js';
@@ -121,7 +122,10 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
     yahooFantasy(`/league/${leagueKey}/standings`, accessToken),
-    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken),
+    // Draft Helper also includes the user's roster. Request Yahoo's optional
+    // market/rank sub-resources here so rostered players do not lose metadata
+    // merely because the league-wide status=A query excludes them.
+    yahooFantasy(yahooRosterPlayersPath(teamKey), accessToken),
   ]);
 
   const league = normalizeLeagueSettings(settingsData);

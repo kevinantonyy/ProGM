@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePlayer, parseYahooRanks, yahooDraftPlayersPath } from './normalize.js';
+import { normalizePlayer, parseYahooRanks, yahooDraftPlayersPath, yahooRosterPlayersPath } from './normalize.js';
 
 // Build a Yahoo player tuple: [ [props...], {draft_analysis:[...]} ].
 function playerWithDraftAnalysis(da) {
@@ -105,10 +105,43 @@ test('normalizePlayer leaves yahooRanks null when the ranks sub-resource is abse
   assert.deepEqual(p.yahooSeasonRanks, {});
 });
 
+test('roster tuple preserves position and surfaces valid Yahoo draft metadata', () => {
+  const p = normalizePlayer([
+    [{ player_key: '466.p.5' }, { name: { full: 'Rostered Player' } }, { eligible_positions: [{ position: 'PG' }] }],
+    { selected_position: [{ position: 'PG' }] },
+    { draft_analysis: [{ average_pick: '4.2' }, { average_round: '1.0' }, { percent_drafted: '99.8' }] },
+    { player_ranks: RANKS },
+  ]);
+  assert.equal(p.selectedPosition, 'PG');
+  assert.equal(p.yahooAdp, 4.2);
+  assert.equal(p.yahooOverallRank, 65);
+  assert.equal(p.yahooSeasonRanks['2025'], 97);
+});
+
+test('roster tuple keeps missing and malformed Yahoo draft metadata null', () => {
+  const p = normalizePlayer([
+    [{ player_key: '466.p.6' }, { name: { full: 'Unranked Player' } }],
+    { selected_position: [{ position: 'BN' }] },
+    { draft_analysis: [{ average_pick: 'bad' }, { preseason_average_pick: '0' }] },
+    { player_ranks: [{ player_rank: { rank_type: 'OR', rank_value: 'NaN' } }] },
+  ]);
+  assert.equal(p.yahooAdp, null);
+  assert.equal(p.yahooOverallRank, null);
+  assert.deepEqual(p.yahooSeasonRanks, {});
+});
+
 test('Draft Helper batches ownership, ADP, and ranks in one players request', () => {
   const path = yahooDraftPlayersPath('466.l.123');
-  assert.equal(path, '/league/466.l.123/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis;ranks');
+  assert.equal(path, '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/percent_owned;draft_analysis;ranks');
   assert.equal((path.match(/\/players/g) || []).length, 1);
   assert.match(path, /[;/]ranks$/);
   assert.doesNotMatch(path, /player_ranks/);
+});
+
+test('rostered Draft Helper players request ADP and ranks in one team request', () => {
+  const path = yahooRosterPlayersPath('466.l.123.t.7');
+  assert.equal(path, '/team/466.l.123.t.7/roster/players/draft_analysis;ranks');
+  assert.equal((path.match(/\/players/g) || []).length, 1);
+  assert.match(path, /\/draft_analysis;ranks$/);
+  assert.doesNotMatch(path, /status=A/);
 });

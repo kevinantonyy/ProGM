@@ -136,7 +136,12 @@ function yahooNumOrNull(value) {
 
 /** One batched Draft Helper request: ownership + ADP + Yahoo ranks. */
 export function yahooDraftPlayersPath(leagueKey) {
-  return `/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis;ranks`;
+  return `/league/${leagueKey}/players;status=A;sort=OR;start=0;count=50/percent_owned;draft_analysis;ranks`;
+}
+
+/** Roster players plus the same Yahoo draft metadata, in one team request. */
+export function yahooRosterPlayersPath(teamKey) {
+  return `/team/${teamKey}/roster/players/draft_analysis;ranks`;
 }
 
 /**
