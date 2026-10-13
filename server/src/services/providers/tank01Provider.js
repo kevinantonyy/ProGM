@@ -147,28 +147,36 @@ function toStatLine(stats) {
   line.steals = num(stats.stl);
   line.blocks = num(stats.blk);
   line.turnovers = num(stats.TOV ?? stats.tov);
+  line.personalFouls = num(stats.pf ?? stats.PF);
   line.fgMade = num(stats.fgm);
   line.fgAtt = num(stats.fga);
   line.ftMade = num(stats.ftm);
   line.ftAtt = num(stats.fta);
   line.threesMade = num(stats.tptfgm ?? stats.fg3m);
+  line.doubleDoubles = num(stats.doubleDouble ?? stats.DD);
+  line.tripleDoubles = num(stats.tripleDouble ?? stats.TD);
   return line;
 }
 
 /** Average a list of game stat lines into a single per-game StatLine (or null). */
 function aggregateGames(list) {
   const sum = emptyStatLine();
-  const keys = ['minutes', 'points', 'rebounds', 'assists', 'steals', 'blocks', 'turnovers', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade'];
+  const keys = ['minutes', 'points', 'rebounds', 'assists', 'steals', 'blocks', 'turnovers', 'personalFouls', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade', 'doubleDoubles', 'tripleDoubles'];
+  const counts = Object.fromEntries(keys.map((key) => [key, 0]));
   for (const k of keys) sum[k] = 0;
   let n = 0;
   for (const g of list) {
     const line = toStatLine(g);
     if (!line) continue;
     n += 1;
-    for (const k of keys) sum[k] += line[k] || 0;
+    for (const k of keys) {
+      if (line[k] == null) continue;
+      sum[k] += line[k];
+      counts[k] += 1;
+    }
   }
   if (!n) return null;
-  for (const k of keys) sum[k] = Number((sum[k] / n).toFixed(2));
+  for (const k of keys) sum[k] = counts[k] ? Number((sum[k] / counts[k]).toFixed(2)) : null;
   sum.gamesPlayed = n;
   return sum;
 }

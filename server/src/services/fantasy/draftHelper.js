@@ -409,6 +409,9 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
             gamesPlayed: oneDecimal(proj.lastSeason.stats.gamesPlayed),
           }
         : null,
+      lastSeasonFantasy: proj?.lastSeasonFantasy
+        ? { season: proj.lastSeason?.season ?? null, ...proj.lastSeasonFantasy }
+        : null,
     });
     // Historical availability (optional) rides on the projection object.
     const history = proj?.history ?? null;

@@ -43,6 +43,7 @@ export const SEASON_WEIGHT = 0.65;
 const BLENDED_KEYS = [
   'minutes', 'points', 'rebounds', 'offRebounds', 'defRebounds', 'assists',
   'steals', 'blocks', 'turnovers', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade',
+  'personalFouls', 'doubleDoubles', 'tripleDoubles',
 ];
 
 /** Blend recent + season per-game stat lines into an expected stat line. */
@@ -105,6 +106,7 @@ export function projectPlayer({ stats, statCategories, availability = null }) {
   }
 
   const scored = scoreStatLine(expected, statCategories);
+  const historical = scoreStatLine(stats.season, statCategories);
   const weightedCount = (statCategories || []).filter((c) => c && c.enabled !== false && c.pointValue != null).length;
 
   const confidence = computeConfidence({
@@ -116,14 +118,20 @@ export function projectPlayer({ stats, statCategories, availability = null }) {
   });
 
   return {
-    projectedPoints: scored.points, // per-game league fantasy points
-    perGame: scored.points,
+    projectedPoints: scored.unsupportedStats.length ? null : scored.points,
+    perGame: scored.unsupportedStats.length ? null : scored.points,
     confidence,
     expected,
     breakdown: scored.breakdown,
     unsupportedStats: scored.unsupportedStats,
     availability,
-    method: stats.recent ? 'blended_recent_season' : 'season_only',
+    method: scored.unsupportedStats.length ? 'incomplete_scoring_data' : stats.recent ? 'blended_recent_season' : 'season_only',
+    lastSeasonFantasy: {
+      points: historical.unsupportedStats.length ? null : historical.points,
+      complete: historical.unsupportedStats.length === 0 && historical.points != null,
+      missingCategories: historical.unsupportedStats,
+      breakdown: historical.breakdown,
+    },
   };
 }
 

@@ -60,6 +60,9 @@ function toUiPlayer(p, ctx, ownerTeam = null, periodValues = null) {
     projectedPoints: proj?.projectedPoints ?? null,
     projectionConfidence: proj?.confidence ?? null,
     projectionBreakdown: proj?.breakdown ?? null,
+    lastSeasonFantasy: proj?.lastSeasonFantasy
+      ? { season: proj.lastSeason?.season ?? null, ...proj.lastSeasonFantasy }
+      : null,
     injuryStatus: p.status || 'Healthy',
     injuryDetail: p.statusFull || null,
     percentOwned: p.percentOwned ?? null,

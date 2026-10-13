@@ -52,7 +52,7 @@ test('projectPlayer returns null projection and 0 confidence with no data', () =
 });
 
 test('projectPlayer lower confidence with small sample and season only', () => {
-  const stats = { externalId: 'y', season: line({ points: 10, gamesPlayed: 4 }), recent: null, recentGameCount: null };
+  const stats = { externalId: 'y', season: line({ points: 10, assists: 2, rebounds: 3, gamesPlayed: 4 }), recent: null, recentGameCount: null };
   const proj = projectPlayer({ stats, statCategories: CATS });
   assert.equal(proj.method, 'season_only');
   assert.ok(proj.confidence < 0.5); // tiny sample, no recent
@@ -70,4 +70,30 @@ test('makeProjectionProvider bridges canonical ids to getProjectedValue', () => 
 
 test('weights are documented constants', () => {
   assert.equal(RECENT_WEIGHT + SEASON_WEIGHT, 1);
+});
+
+test('same historical stat line scores differently under two league configurations', () => {
+  const stats = { externalId: 'x', season: line({ points: 20, rebounds: 10, turnovers: 4, gamesPlayed: 64 }), recent: null };
+  const leagueA = [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }, { statId: 15, abbr: 'REB', pointValue: 1, enabled: true }];
+  const leagueB = [{ statId: 12, abbr: 'PTS', pointValue: 2, enabled: true }, { statId: 19, abbr: 'TO', pointValue: -2, enabled: true }];
+  assert.equal(projectPlayer({ stats, statCategories: leagueA }).lastSeasonFantasy.points, 30);
+  assert.equal(projectPlayer({ stats, statCategories: leagueB }).lastSeasonFantasy.points, 32);
+});
+
+test('negative league categories reduce historical and projected fantasy PPG', () => {
+  const stats = { externalId: 'x', season: line({ points: 20, turnovers: 4, personalFouls: 3, fgAtt: 10, gamesPlayed: 64 }), recent: null };
+  const cats = [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }, { statId: 5, abbr: 'FGA', pointValue: -0.25, enabled: true }, { statId: 19, abbr: 'TO', pointValue: -1, enabled: true }, { statId: 21, abbr: 'PF', pointValue: -0.5, enabled: true }];
+  const result = projectPlayer({ stats, statCategories: cats });
+  assert.equal(result.projectedPoints, 12);
+  assert.equal(result.lastSeasonFantasy.points, 12);
+});
+
+test('missing weighted historical category makes fantasy PPG unavailable, never partial', () => {
+  const stats = { externalId: 'x', season: line({ points: 20, gamesPlayed: 64 }), recent: null };
+  const cats = [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }, { statId: 21, abbr: 'PF', pointValue: -1, enabled: true }];
+  const result = projectPlayer({ stats, statCategories: cats });
+  assert.equal(result.projectedPoints, null);
+  assert.equal(result.lastSeasonFantasy.points, null);
+  assert.deepEqual(result.lastSeasonFantasy.missingCategories, ['PF']);
+  assert.equal(result.method, 'incomplete_scoring_data');
 });

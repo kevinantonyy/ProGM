@@ -360,7 +360,7 @@ test('human recommendation uses available-player comparison, roster need, and ve
     plRank('Other', ['C'], 30, { overall: 20, bySeason: { 2026: 18, 2025: 22 } }),
   ];
   const projections = new Map([
-    ['Star', { projectedPoints: 50, confidence: 0.9, lastSeason: { season: 2025, stats: { points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 } } }],
+    ['Star', { projectedPoints: 50, confidence: 0.9, lastSeason: { season: 2025, stats: { points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 } }, lastSeasonFantasy: { points: 61.7, complete: true, missingCategories: [], breakdown: [] } }],
     ['Other', { projectedPoints: 30, confidence: 0.8 }],
   ]);
   const res = buildDraftBoard({
@@ -375,6 +375,8 @@ test('human recommendation uses available-player comparison, roster need, and ve
   assert.equal(star.lastSeasonYahooRank, 2);
   assert.equal(star.yahooSeasonRank, 3); // current rank remains distinct
   assert.deepEqual(star.lastSeasonNba, { season: 2025, points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 });
+  assert.equal(star.lastSeasonFantasy.points, 61.7);
+  assert.equal(star.lastSeasonFantasy.season, 2025);
   assert.match(star.recommendation, /highest projected fantasy points per game among 2 available players/i);
   assert.match(star.recommendation, /fills a roster need at PG/i);
   assert.match(star.recommendation, /28.2 NBA points, 8.1 rebounds, and 7.4 assists/i);

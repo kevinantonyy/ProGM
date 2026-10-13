@@ -89,6 +89,7 @@ async function getSeasonStatsRaw(season) {
     line.steals = num(row[idx('STL')]);
     line.blocks = num(row[idx('BLK')]);
     line.turnovers = num(row[idx('TOV')]);
+    line.personalFouls = num(row[idx('PF')]);
     line.fgMade = num(row[idx('FGM')]);
     line.fgAtt = num(row[idx('FGA')]);
     line.ftMade = num(row[idx('FTM')]);

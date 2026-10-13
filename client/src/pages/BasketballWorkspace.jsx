@@ -476,7 +476,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
   const [expanded, setExpanded] = useState(false);
   const detailId = `draft-details-${String(player.playerKey || player.name).replace(/[^a-z0-9_-]/gi, '-')}`;
   const availability = player.availability === 'available' ? 'Available' : player.availability === 'rostered' ? 'Rostered' : 'Availability unknown';
-  const lastNbaSeason = seasonLabelFrom(player.lastSeasonNba?.season);
+  const lastFantasySeason = seasonLabelFrom(player.lastSeasonFantasy?.season);
   const lastYahooSeason = seasonLabelFrom(player.lastSeasonYahooRankSeason);
 
   return <>
@@ -497,7 +497,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
       <p className="mt-2 max-w-4xl text-sm leading-6 text-dark-300">{player.recommendation || 'A recommendation is unavailable because the supporting data is incomplete.'}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div><p className="stat-label">Projected Fantasy Points/Game</p><p className="mt-1 font-semibold tabular-nums">{player.projected != null ? player.projected.toFixed(1) : '—'}</p></div>
-        <div><p className="stat-label">Last Season NBA Points/Game{lastNbaSeason ? ` · ${lastNbaSeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonNba?.points != null ? player.lastSeasonNba.points.toFixed(1) : '—'}</p></div>
+        <div><p className="stat-label">Last Season Fantasy Points/Game{lastFantasySeason ? ` · ${lastFantasySeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonFantasy?.points != null ? player.lastSeasonFantasy.points.toFixed(1) : '—'}</p>{player.lastSeasonFantasy?.missingCategories?.length > 0 && <p className="mt-1 text-[11px] text-dark-500">Unavailable: missing {player.lastSeasonFantasy.missingCategories.join(', ')}</p>}</div>
         <div><p className="stat-label">Last Season Yahoo Rank{lastYahooSeason ? ` · ${lastYahooSeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonYahooRank != null ? `#${player.lastSeasonYahooRank}` : '—'}</p></div>
       </div>
     </td></tr>}

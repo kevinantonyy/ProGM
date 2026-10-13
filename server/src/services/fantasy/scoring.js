@@ -34,13 +34,10 @@ export const YAHOO_STAT_TO_STATLINE = {
   17: 'steals',       // ST
   18: 'blocks',       // BLK
   19: 'turnovers',    // TO
-  // Contingent/derived stats we cannot average from a per-game statline:
-  27: '__double_double__',
-  28: '__triple_double__',
+  21: 'personalFouls', // PF
+  27: 'doubleDoubles', // DD rate per game
+  28: 'tripleDoubles', // TD rate per game
 };
-
-// Stat ids that represent contingent counting achievements, not raw box stats.
-const CONTINGENT = new Set(['__double_double__', '__triple_double__']);
 
 /**
  * Compute league-specific projected fantasy points for a per-game statline.
@@ -66,14 +63,6 @@ export function scoreStatLine(statLine, statCategories = []) {
     if (!key) {
       // Weighted stat we don't have a mapping for.
       unsupportedStats.push(cat.abbr || String(cat.statId));
-      continue;
-    }
-
-    if (CONTINGENT.has(key)) {
-      // Double/triple-doubles can't be reliably derived from per-game averages
-      // without game-by-game data. Report as unsupported for projection rather
-      // than fabricate a frequency.
-      unsupportedStats.push(cat.abbr || key);
       continue;
     }
 
@@ -111,6 +100,6 @@ export function scoreStatLine(statLine, statCategories = []) {
 export function scoringIsSupported(settings) {
   if (!settings || settings.scoringFormat !== 'points') return false;
   return (settings.statCategories || []).some(
-    (c) => c.enabled !== false && c.pointValue != null && YAHOO_STAT_TO_STATLINE[c.statId] && !CONTINGENT.has(YAHOO_STAT_TO_STATLINE[c.statId])
+    (c) => c.enabled !== false && c.pointValue != null && YAHOO_STAT_TO_STATLINE[c.statId]
   );
 }

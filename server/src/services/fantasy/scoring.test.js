@@ -73,11 +73,12 @@ test('scoreStatLine ignores categories without a point value (category league)',
 test('scoringIsSupported true for points league with mappable weighted stats', () => {
   assert.equal(scoringIsSupported({ scoringFormat: 'points', statCategories: LEAGUE_CATS }), true);
   assert.equal(scoringIsSupported({ scoringFormat: 'category', statCategories: LEAGUE_CATS }), false);
-  assert.equal(scoringIsSupported({ scoringFormat: 'points', statCategories: [{ statId: 27, pointValue: 3, enabled: true }] }), false); // only DD
+  assert.equal(scoringIsSupported({ scoringFormat: 'points', statCategories: [{ statId: 27, pointValue: 3, enabled: true }] }), true);
 });
 
 test('stat map covers the core Yahoo NBA counting stats', () => {
   assert.equal(YAHOO_STAT_TO_STATLINE[12], 'points');
   assert.equal(YAHOO_STAT_TO_STATLINE[16], 'assists');
   assert.equal(YAHOO_STAT_TO_STATLINE[17], 'steals');
+  assert.equal(YAHOO_STAT_TO_STATLINE[21], 'personalFouls');
 });

@@ -118,11 +118,14 @@ export function espnStatMapToLine(m) {
   line.steals = m.avgSteals ?? null;
   line.blocks = m.avgBlocks ?? null;
   line.turnovers = m.avgTurnovers ?? null;
+  line.personalFouls = m.avgFouls ?? (m.fouls != null && m.gamesPlayed > 0 ? m.fouls / m.gamesPlayed : null);
   line.fgMade = m.avgFieldGoalsMade ?? null;
   line.fgAtt = m.avgFieldGoalsAttempted ?? null;
   line.ftMade = m.avgFreeThrowsMade ?? null;
   line.ftAtt = m.avgFreeThrowsAttempted ?? null;
   line.threesMade = m.avgThreePointFieldGoalsMade ?? null;
+  line.doubleDoubles = m.doubleDouble != null && m.gamesPlayed > 0 ? m.doubleDouble / m.gamesPlayed : null;
+  line.tripleDoubles = m.tripleDouble != null && m.gamesPlayed > 0 ? m.tripleDouble / m.gamesPlayed : null;
   return line;
 }
 
@@ -241,11 +244,18 @@ export function mapBoxscorePlayerLine(stats) {
   line.steals = num(stats.steals);
   line.blocks = num(stats.blocks);
   line.turnovers = num(stats.turnovers);
+  line.personalFouls = num(stats.foulsPersonal ?? stats.personalFouls);
   line.fgMade = num(stats.fieldGoalsMade);
   line.fgAtt = num(stats.fieldGoalsAttempted);
   line.ftMade = num(stats.freeThrowsMade);
   line.ftAtt = num(stats.freeThrowsAttempted);
   line.threesMade = num(stats.threePointersMade);
+  const doubleStats = [line.points, line.rebounds, line.assists, line.steals, line.blocks];
+  if (doubleStats.every((value) => value != null)) {
+    const doubles = doubleStats.filter((value) => value >= 10).length;
+    line.doubleDoubles = doubles >= 2 ? 1 : 0;
+    line.tripleDoubles = doubles >= 3 ? 1 : 0;
+  }
   return line;
 }
 
@@ -284,7 +294,7 @@ export function mapEspnInjuries(payload) {
 
 // --- Recent-form aggregation: pure --------------------------------------------
 
-const RECENT_KEYS = ['minutes', 'points', 'rebounds', 'offRebounds', 'defRebounds', 'assists', 'steals', 'blocks', 'turnovers', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade'];
+const RECENT_KEYS = ['minutes', 'points', 'rebounds', 'offRebounds', 'defRebounds', 'assists', 'steals', 'blocks', 'turnovers', 'personalFouls', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade', 'doubleDoubles', 'tripleDoubles'];
 
 /**
  * Average a list of single-game StatLines into one recent per-game StatLine.

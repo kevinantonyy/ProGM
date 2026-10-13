@@ -96,10 +96,11 @@ function PlayerProfile({ player, data, closeRef }) {
       <div className="divide-y divide-dark-700 bg-dark-800">
         <div className="grid grid-cols-2 sm:grid-cols-4">
           <Stat label="Projected FP/G" value={projection != null ? Number(projection).toFixed(1) : null} />
+          <Stat label="Last Season FP/G" value={player.lastSeasonFantasy?.points != null ? Number(player.lastSeasonFantasy.points).toFixed(1) : null} />
           <Stat label="Yahoo ADP" value={player.yahooAdp} />
           <Stat label="Season Rank" value={player.yahooSeasonRank} />
-          <Stat label="Owned" value={player.percentOwned != null ? `${player.percentOwned}%` : null} />
         </div>
+        {player.lastSeasonFantasy?.missingCategories?.length > 0 && <p className="px-4 pb-3 text-xs text-dark-400 sm:px-6">Historical fantasy points unavailable: missing {player.lastSeasonFantasy.missingCategories.join(', ')}.</p>}
 
         <section className="p-4 sm:p-6">
           <h3 className="text-xl font-bold">Player overview</h3>

@@ -26,6 +26,7 @@
  * @property {number|null} steals
  * @property {number|null} blocks
  * @property {number|null} turnovers
+ * @property {number|null} personalFouls
  * @property {number|null} fgMade
  * @property {number|null} fgAtt
  * @property {number|null} ftMade
@@ -68,7 +69,7 @@ export function emptyStatLine() {
   return {
     gamesPlayed: null, minutes: null, points: null, rebounds: null,
     offRebounds: null, defRebounds: null, assists: null, steals: null,
-    blocks: null, turnovers: null, fgMade: null, fgAtt: null, ftMade: null,
+    blocks: null, turnovers: null, personalFouls: null, fgMade: null, fgAtt: null, ftMade: null,
     ftAtt: null, threesMade: null, doubleDoubles: null, tripleDoubles: null,
   };
 }

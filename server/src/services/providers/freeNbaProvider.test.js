@@ -21,7 +21,7 @@ test('Yahoo/NBA season start-year maps to ESPN season end-year', () => {
 // Fixture mirroring the real ESPN byathlete payload (categories + values).
 const ESPN_BYATHLETE = {
   categories: [
-    { name: 'general', names: ['gamesPlayed', 'avgMinutes', 'rebounds', 'avgRebounds'] },
+    { name: 'general', names: ['gamesPlayed', 'avgMinutes', 'rebounds', 'avgRebounds', 'avgFouls', 'doubleDouble', 'tripleDouble'] },
     { name: 'offensive', names: ['avgPoints', 'avgFieldGoalsMade', 'avgFieldGoalsAttempted', 'avgThreePointFieldGoalsMade', 'avgFreeThrowsMade', 'avgFreeThrowsAttempted', 'avgAssists', 'avgTurnovers'] },
     { name: 'defensive', names: ['avgSteals', 'avgBlocks'] },
   ],
@@ -29,7 +29,7 @@ const ESPN_BYATHLETE = {
     {
       athlete: { id: '4278073', displayName: 'Shai Gilgeous-Alexander', teamShortName: 'OKC', position: { abbreviation: 'G' }, headshot: { href: 'https://a.espncdn.com/i/headshots/nba/players/full/4278073.png' } },
       categories: [
-        { name: 'general', values: [76, 34.2, 379, 5.0] },
+        { name: 'general', values: [76, 34.2, 379, 5.0, 2.4, 18, 2] },
         { name: 'offensive', values: [32.7, 11.3, 21.8, 2.1, 7.9, 8.8, 6.4, 2.4] },
         { name: 'defensive', values: [1.7, 1.0] },
       ],
@@ -62,7 +62,9 @@ test('espnStatMapToLine maps per-game averages into a StatLine (no fabrication)'
   assert.equal(line.ftAtt, 8.8);
   assert.equal(line.minutes, 34.2);
   assert.equal(line.gamesPlayed, 76);
-  assert.equal(line.doubleDoubles, null); // not provided -> null, not 0
+  assert.equal(line.personalFouls, 2.4);
+  assert.ok(Math.abs(line.doubleDoubles - 18 / 76) < 1e-9);
+  assert.ok(Math.abs(line.tripleDoubles - 2 / 76) < 1e-9);
 });
 
 test('mapEspnDirectory produces ProviderPlayerRef with no yahooId', () => {
