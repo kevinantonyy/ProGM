@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { avatarSources, initialAvatarState, avatarStateReducer, imageIsSharpEnough } from './basketballPlayerAvatar.js';
 
 const PlayerProfileContext = createContext(null);
 
@@ -19,15 +20,30 @@ function playerKey(player) {
 }
 
 export function PlayerAvatar({ player, size = 'h-9 w-9', className = '', alt = '' }) {
-  const sources = useMemo(() => [...new Set([player?.highResImage, player?.image, player?.headshotUrl].filter(Boolean))], [player?.highResImage, player?.image, player?.headshotUrl]);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  const sourceKey = sources.join('|');
-  useEffect(() => setSourceIndex(0), [sourceKey]);
-  const src = sources[sourceIndex] || null;
+  const sources = useMemo(() => avatarSources(player), [player?.highResImage, player?.image, player?.headshotUrl]);
+  const sourceKey = sources.map(({ url }) => url).join('|');
+  const [storedState, dispatch] = useReducer(avatarStateReducer, initialAvatarState(sourceKey, sources.length));
+  const state = storedState.sourceKey === sourceKey ? storedState : initialAvatarState(sourceKey, sources.length);
+  const source = sources[state.sourceIndex] || null;
+  useEffect(() => dispatch({ type: 'reset', sourceKey, sourceCount: sources.length }), [sourceKey, sources.length]);
+
+  const reject = () => dispatch({ type: 'reject', sourceKey, sourceIndex: state.sourceIndex, sourceCount: sources.length });
+  const loaded = (event) => {
+    const box = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!imageIsSharpEnough({
+      naturalWidth: event.currentTarget.naturalWidth,
+      naturalHeight: event.currentTarget.naturalHeight,
+      displayWidth: box?.width,
+      displayHeight: box?.height,
+      pixelRatio: window.devicePixelRatio,
+    })) return reject();
+    dispatch({ type: 'loaded', sourceKey, sourceIndex: state.sourceIndex });
+  };
+
   return (
     <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-dark-600 bg-dark-700 text-[10px] font-black text-dark-300 ${size} ${className}`}>
-      <span aria-hidden="true">{initials(player?.name)}</span>
-      {src && <img src={src} alt={alt} loading="lazy" decoding="async" draggable="false" className="absolute inset-0 h-full w-full object-contain object-bottom" onError={() => setSourceIndex((index) => Math.min(index + 1, sources.length))} />}
+      {state.status !== 'loaded' && <span aria-hidden="true">{initials(player?.name)}</span>}
+      {source && <img key={source.url} src={source.url} alt={alt} loading="lazy" decoding="async" draggable="false" className={`absolute inset-0 h-full w-full object-contain object-bottom ${state.status === 'loaded' ? 'visible' : 'invisible'}`} onLoad={loaded} onError={reject} />}
     </span>
   );
 }
