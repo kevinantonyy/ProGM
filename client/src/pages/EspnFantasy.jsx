@@ -16,7 +16,7 @@ export default function EspnFantasy() {
     } catch (err) { setError(err.response?.data?.error || 'Could not import roster'); }
   }
   return <div className="max-w-3xl">
-    <div className="mb-8 flex items-start justify-between gap-4"><div><h1 className="text-3xl font-bold text-white">ESPN Fantasy</h1><p className="mt-2 text-dark-400">Public league sync and private league manual import.</p></div><div className="rounded-xl bg-red-600 px-4 py-2 text-xl font-black text-white">E</div></div>
+    <div className="mb-8 flex items-start justify-between gap-4"><div><h1 className="text-3xl font-bold text-dark-50">ESPN Fantasy</h1><p className="mt-2 text-dark-400">Public league sync and private league manual import.</p></div><div className="rounded-xl bg-red-600 px-4 py-2 text-xl font-black text-white">E</div></div>
     {error && <div className="mb-5 rounded-lg border border-red-700/50 bg-red-900/30 p-4 text-red-400">{error}</div>}
     {message && <div className="mb-5 rounded-lg border border-green-700/50 bg-green-900/30 p-4 text-green-400">{message}</div>}
     {status?.connected && <div className="mb-6 space-y-3">{(status.connections || [status.connection]).map(connection => <div key={connection.sport} className="card"><p className="text-xs uppercase tracking-wide text-dark-400">Connected public {connection.sport} league</p><h2 className="mt-2 text-xl font-semibold">{connection.league_name}</h2><p className="mt-1 text-dark-300">{connection.team_name} · {connection.season}</p><Link to={`/${connection.sport}`} className="btn-primary mt-4 inline-block">Open Fantasy {connection.sport}</Link></div>)}</div>}

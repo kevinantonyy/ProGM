@@ -32,14 +32,14 @@ export default function Layout() {
   return (
     <div className="app-shell flex min-h-screen flex-col bg-dark-950 md:flex-row">
       {/* Sidebar */}
-      <aside className="flex w-full shrink-0 flex-col border-b border-dark-700 bg-dark-900 md:min-h-screen md:w-60 md:border-b-0 md:border-r">
+      <aside className="site-nav flex w-full shrink-0 flex-col border-b border-black bg-[#151515] text-white md:min-h-screen md:w-60 md:border-b-0 md:border-r">
         {/* Logo */}
-        <div className="flex items-center justify-between border-b border-dark-700 px-4 py-3 md:block md:px-5 md:py-5">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 md:block md:px-5 md:py-5">
           <h1 className="text-xl font-extrabold tracking-tight">
             <span className="text-primary-400">Pro</span>
-            <span className="text-dark-50">GM</span>
+            <span className="text-white">GM</span>
           </h1>
-          <p className="mt-1 hidden text-xs text-dark-400 md:block">Your personalized fantasy front office</p><button onClick={handleLogout} className="text-xs text-dark-400 hover:text-red-400 md:hidden">Sign Out</button>
+          <p className="mt-1 hidden text-xs text-[#a3a3a3] md:block">Your personalized fantasy front office</p><button onClick={handleLogout} className="text-xs text-[#a3a3a3] hover:text-white md:hidden">Sign Out</button>
         </div>
 
         {/* Navigation */}
@@ -52,8 +52,8 @@ export default function Layout() {
               className={({ isActive }) =>
                 `flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition-colors md:gap-3 ${
                   isActive
-                    ? 'border-primary-500/50 bg-primary-500/10 text-primary-400'
-                    : 'border-transparent text-dark-300 hover:border-dark-700 hover:bg-dark-800 hover:text-dark-50'
+                    ? 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-transparent text-[#d0d0d0] hover:border-white/10 hover:bg-[#242424] hover:text-white'
                 }`
               }
             >
@@ -64,17 +64,17 @@ export default function Layout() {
         </nav>
 
         {/* User section */}
-        <div className="hidden border-t border-dark-700 p-2 md:block md:p-4">
+        <div className="hidden border-t border-white/10 p-2 md:block md:p-4">
           <div className="mb-3 hidden items-center gap-3 md:flex">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md border border-primary-500/40 bg-primary-500/10 text-sm font-bold text-primary-400">
+            <div className="flex h-8 w-8 items-center justify-center rounded-sm border border-primary-500 bg-primary-500 text-sm font-bold text-white">
               {user?.username?.[0]?.toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-white truncate">{user?.username}</p>
-              <p className="text-xs text-dark-400 truncate">{user?.teamName}</p>
+              <p className="truncate text-xs text-[#a3a3a3]">{user?.teamName}</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="w-full text-center text-xs text-dark-400 transition-colors hover:text-red-400 md:text-left md:text-sm">
+          <button onClick={handleLogout} className="w-full text-center text-xs text-[#a3a3a3] transition-colors hover:text-white md:text-left md:text-sm">
             Sign Out
           </button>
         </div>

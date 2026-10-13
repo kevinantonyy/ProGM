@@ -41,7 +41,7 @@ export default function YahooFantasy() {
     <div>
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">Yahoo Fantasy</h1>
+          <h1 className="text-3xl font-bold text-dark-50">Yahoo Fantasy</h1>
           <p className="mt-2 text-dark-400">Your linked NBA leagues and teams.</p>
         </div>
         <div className="rounded-xl bg-[#6001d2] px-4 py-2 font-black text-white">Y!</div>
@@ -70,14 +70,14 @@ export default function YahooFantasy() {
           <section>
             <h2 className="mb-4 text-xl font-semibold">Leagues</h2>
             <div className="space-y-3">
-              {fantasy.leagues.map(league => <div key={league.leagueKey} className="card"><h3 className="font-semibold text-white">{league.name}</h3><p className="mt-1 text-sm text-dark-400">{league.season} · {league.scoringType || 'NBA'} · {league.numTeams || '—'} teams</p></div>)}
+              {fantasy.leagues.map(league => <div key={league.leagueKey} className="card"><h3 className="font-semibold text-dark-50">{league.name}</h3><p className="mt-1 text-sm text-dark-400">{league.season} · {league.scoringType || 'NBA'} · {league.numTeams || '—'} teams</p></div>)}
               {!fantasy.leagues.length && <p className="text-dark-400">No NBA leagues were returned by Yahoo.</p>}
             </div>
           </section>
           <section>
             <h2 className="mb-4 text-xl font-semibold">Teams</h2>
             <div className="space-y-3">
-              {fantasy.teams.map(team => <div key={team.teamKey} className="card"><h3 className="font-semibold text-white">{team.name}</h3><p className="mt-1 text-sm text-dark-400">Team ID {team.teamId}</p></div>)}
+              {fantasy.teams.map(team => <div key={team.teamKey} className="card"><h3 className="font-semibold text-dark-50">{team.name}</h3><p className="mt-1 text-sm text-dark-400">Team ID {team.teamId}</p></div>)}
               {!fantasy.teams.length && <p className="text-dark-400">No NBA teams were returned by Yahoo.</p>}
             </div>
           </section>

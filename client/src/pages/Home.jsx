@@ -52,9 +52,9 @@ function basketballOpportunities(data) {
 }
 
 const TYPE_STYLE = {
-  START: 'bg-green-900/50 text-green-400', ADD: 'bg-blue-900/50 text-blue-400',
-  TARGET: 'bg-purple-900/50 text-purple-300', WATCH: 'bg-orange-900/50 text-orange-400',
-  TRADE: 'bg-primary-900/50 text-primary-300',
+  START: 'bg-green-900/20 text-green-400', ADD: 'bg-primary-900/10 text-primary-400',
+  TARGET: 'bg-dark-900 text-dark-300', WATCH: 'bg-orange-900/20 text-orange-400',
+  TRADE: 'bg-primary-900/10 text-primary-400',
 };
 
 export default function Home() {
@@ -97,7 +97,7 @@ export default function Home() {
       <section className="overflow-hidden rounded-2xl border border-primary-500/30 bg-gradient-to-br from-primary-900/40 via-dark-800 to-dark-800 p-6 sm:p-8">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary-400">Your daily front office</p>
         <h1 className="mt-2 text-3xl font-black sm:text-4xl">{greeting}, {user?.username || 'GM'}</h1>
-        <p className="mt-3 text-lg text-dark-300">ProGM found <strong className="text-white">{totalOpps} opportunit{totalOpps === 1 ? 'y' : 'ies'}</strong> across your connected leagues.</p>
+        <p className="mt-3 text-lg text-dark-300">ProGM found <strong className="text-dark-50">{totalOpps} opportunit{totalOpps === 1 ? 'y' : 'ies'}</strong> across your connected leagues.</p>
       </section>
 
       {sections.map((sec) => (
