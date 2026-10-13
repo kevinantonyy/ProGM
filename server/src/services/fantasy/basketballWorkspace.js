@@ -24,10 +24,10 @@ import {
   normalizeLeagueSettings,
   extractStandings,
   extractPlayerList,
-  yahooDraftPlayersPath,
   yahooPlayerKeysPath,
   mergeYahooPlayerMetadata,
 } from './normalize.js';
+import { fetchYahooDraftPool } from './yahooPlayerPool.js';
 import { scoringIsSupported } from './scoring.js';
 import { analyzeRoster } from './rosterAnalysis.js';
 import { optimizeLineup } from './lineupOptimizer.js';
@@ -151,12 +151,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   //    These fields remain Draft Helper context and never affect ProGM ranking.
   let availablePlayers = [];
   try {
-    availablePlayers = extractLeaguePlayers(await yahooFantasy(yahooDraftPlayersPath(leagueKey, 'percent_owned'), accessToken));
-    const [draftAnalysis, ranks] = await Promise.all([
-      optionalPlayersRequest(yahooFantasy, accessToken, yahooDraftPlayersPath(leagueKey, 'draft_analysis')),
-      optionalPlayersRequest(yahooFantasy, accessToken, yahooDraftPlayersPath(leagueKey, 'ranks')),
-    ]);
-    availablePlayers = mergeYahooPlayerMetadata(availablePlayers, draftAnalysis, ranks);
+    availablePlayers = await fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey);
   } catch {
     availablePlayers = [];
   }

@@ -9,8 +9,14 @@ import assert from 'node:assert/strict';
 import {
   mapEspnDirectory, mapEspnSeasonStats, espnNamesByCategory, espnAthleteStatMap,
   espnStatMapToLine, mapNbaSchedule, toYmd, mapBoxscore, mapBoxscorePlayerLine, mapEspnInjuries,
-  parseIsoMinutes, aggregateRecentLines, mapNbaScheduleWithIds, recentCompletedGameIds, getRecentForm,
+  parseIsoMinutes, aggregateRecentLines, mapNbaScheduleWithIds, recentCompletedGameIds, getRecentForm, espnSeasonEndYear,
 } from './freeNbaProvider.js';
+
+test('Yahoo/NBA season start-year maps to ESPN season end-year', () => {
+  assert.equal(espnSeasonEndYear(2026), 2027);
+  assert.equal(espnSeasonEndYear('2025'), 2026);
+  assert.equal(espnSeasonEndYear('bad'), null);
+});
 
 // Fixture mirroring the real ESPN byathlete payload (categories + values).
 const ESPN_BYATHLETE = {

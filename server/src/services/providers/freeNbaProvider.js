@@ -343,7 +343,17 @@ export function mapNbaScheduleWithIds(payload) {
 
 // --- Network methods (thin; used only when explicitly invoked) --------------
 
-const BYATHLETE_URL = (yr) => `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?region=us&lang=en&contentorigin=espn&isqualified=false&limit=1000&season=${yr}&seasontype=2`;
+// ProGM/Yahoo identify an NBA season by its start year (2025 = 2025-26), while
+// ESPN's NBA endpoint uses the end year (2026 = 2025-26).
+export function espnSeasonEndYear(seasonStartYear) {
+  const start = Number(seasonStartYear);
+  return Number.isInteger(start) ? start + 1 : null;
+}
+
+const BYATHLETE_URL = (seasonStartYear) => {
+  const endYear = espnSeasonEndYear(seasonStartYear) ?? new Date().getFullYear() + 1;
+  return `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?region=us&lang=en&contentorigin=espn&isqualified=false&limit=1000&season=${endYear}&seasontype=2`;
+};
 
 export async function getPlayerIndex(season) {
   const yr = Number(season) || new Date().getFullYear();

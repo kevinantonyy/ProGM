@@ -16,6 +16,11 @@ import { computeDurability } from './durability.js';
 import { computeMarketContext, computeRankComparison } from './adpMarket.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
+const SHORT_TERM_STATUSES = new Set(['GTD', 'DTD', 'DAY_TO_DAY', 'Q', 'QUESTIONABLE', 'PROBABLE']);
+
+export function draftHealthMultiplier(status) {
+  return status && SHORT_TERM_STATUSES.has(String(status).toUpperCase()) ? 1 : healthMultiplier(status);
+}
 
 /**
  * Draft-value model (distinct from the trade/waiver playerValue model).
@@ -35,7 +40,8 @@ const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
  *   scarcity     (0..1)  league positional scarcity (rarer eligible slots)
  *   confidence   (0..1)  data-quality confidence (missing/thin data penalized,
  *                        never treated as zero production)
- *   healthMult   (mult)  injury availability multiplier (1 / 0.85 / 0.5)
+ *   healthMult   (mult)  season-long injury availability multiplier; transient
+ *                        Q/GTD/DTD tags remain context-only, OUT/IL is reduced
  *
  *   rawScore = 0.60*production + 0.30*replacement + 0.10*scarcity
  *   draftValue = rawScore
@@ -169,7 +175,9 @@ export function computeDraftValue({ perGame, confidence, status, eligiblePositio
   const confFactor = CONF_FLOOR + (1 - CONF_FLOOR) * conf;
 
   // 5. CURRENT injury availability multiplier (separate from durability).
-  const healthMult = healthMultiplier(status);
+  // A transient questionable/day-to-day tag should not discount an entire
+  // season-long draft projection. Long-term OUT/IL statuses still apply.
+  const healthMult = draftHealthMultiplier(status);
 
   // 6. Historical durability (season-level availability). Downside-only, capped.
   //    Missing/thin history => neutral (durabilityScore null => 0 penalty).
@@ -318,9 +326,8 @@ export function buildDraftRecommendation({ player, overallRank, market, projecti
  * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
  * @param {string|number|null} [params.currentSeason] Yahoo/NBA season for picking the current-season Yahoo rank
  */
-export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 150, currentPick = null, nextPick = null, currentSeason = null }) {
+export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
-  const weights = scarcityWeights(settings);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
   const overloadedSet = new Set((rosterAnalysis?.positions?.overloadedPositions || []).map((o) => o.position));
   const availabilityKnown = typeof availabilityOf === 'function';
@@ -410,6 +417,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
   }
 
   // Pool-wide references for normalization (computed from the pool itself).
+  const weights = scarcityWeights(settings, prelim);
   const poolMaxPerGame = prelim.reduce((m, r) => Math.max(m, r.perGame), 0);
   const replacement = computeReplacementBaselines(prelim, settings);
 
@@ -480,6 +488,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     position: position || null,
     board,
     noData, // players with no projection, listed honestly (not ranked)
+    totalEligible: pool.length,
+    totalProjected: board.length,
     dataBasis: {
       facts: ['player eligibility, team, injury status, ownership, availability (Yahoo)'],
       calculations: [

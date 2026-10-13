@@ -44,10 +44,10 @@ beforeEach(() => {
 
 afterEach(() => { global.fetch = originalFetch; });
 
-test('fetches last 3 COMPLETED seasons league-wide (one request each, never per-player)', async () => {
+test('fetches last 3 COMPLETED seasons league-wide with ESPN end-year mapping', async () => {
   const res = await providers.getHistoricalAvailability(2025, 3);
-  // current season 2025 EXCLUDED; last 3 completed = 2024, 2023, 2022.
-  assert.deepEqual([...seasonsRequested].sort(), [2022, 2023, 2024]);
+  // Yahoo start-years 2024/2023/2022 map to ESPN end-years 2025/2024/2023.
+  assert.deepEqual([...seasonsRequested].sort(), [2023, 2024, 2025]);
   assert.equal(byathleteCalls, 3); // exactly one league-wide request per season
   // Keyed by externalId with newest-season-first history rows.
   assert.ok(res.value['111']);
@@ -76,13 +76,31 @@ test('graceful: a failing season is omitted, others still returned, never throws
   global.fetch = async (url) => {
     const u = String(url);
     byathleteCalls += 1;
-    if (u.includes('season=2023')) return { ok: false, status: 500, headers: { get: () => '' }, text: async () => '' };
+    if (u.includes('season=2024')) return { ok: false, status: 500, headers: { get: () => '' }, text: async () => '' };
     return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(byathletePayload()) };
   };
   const res = await providers.getHistoricalAvailability(2025, 3);
   // 2023 failed; 2024 + 2022 survive -> 2 usable seasons for each player.
   assert.equal(res.value['111'].length, 2);
   assert.deepEqual(res.value['111'].map((r) => r.season).sort(), [2022, 2024]);
+});
+
+test('2026-27 Wembanyama history maps to verified 2025-26 / 2024-25 / 2023-24 games', async () => {
+  global.fetch = async (url) => {
+    const endYear = Number(new URL(String(url)).searchParams.get('season'));
+    const gamesByEspnYear = { 2026: 64, 2025: 46, 2024: 71 };
+    const payload = {
+      categories: [{ name: 'general', names: ['gamesPlayed'] }],
+      athletes: [{ athlete: { id: '6580', displayName: 'Victor Wembanyama', teamShortName: 'SA' }, categories: [{ name: 'general', values: [gamesByEspnYear[endYear]] }] }],
+    };
+    return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(payload) };
+  };
+  const res = await providers.getHistoricalAvailability(2026, 3);
+  assert.deepEqual(res.value['6580'], [
+    { season: 2025, gamesPlayed: 64, gameTotal: 82 },
+    { season: 2024, gamesPlayed: 46, gameTotal: 82 },
+    { season: 2023, gamesPlayed: 71, gameTotal: 82 },
+  ]);
 });
 
 test('total failure returns an empty map (never breaks, never penalizes)', async () => {

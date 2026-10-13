@@ -517,6 +517,8 @@ function DraftHelper({ data, leagueKey, active }) {
   const [pos, setPos] = useState('ALL');
   const [avail, setAvail] = useState('ALL');
   const [sortBy, setSortBy] = useState('progm');
+  const [visibleCount, setVisibleCount] = useState(50);
+  useEffect(() => setVisibleCount(50), [leagueKey, q, pos, avail, sortBy, isLive]);
 
   const liveBanner = <LiveDraftBanner live={live} />;
 
@@ -525,8 +527,9 @@ function DraftHelper({ data, leagueKey, active }) {
     <section className="space-y-4">{liveBanner}<section className="card border-orange-500/30"><h2 className="text-xl font-bold">Draft Helper</h2><p className="mt-2 text-dark-300">{db.note}</p></section></section>
   );
 
-  const positions = ['ALL', ...Array.from(new Set((db.board || []).flatMap((p) => p.eligiblePositions || []))).sort()];
-  let rows = [...(db.board || [])];
+  const allRows = [...(db.board || []), ...(db.noData || [])];
+  const positions = ['ALL', ...Array.from(new Set(allRows.flatMap((p) => p.eligiblePositions || []))).sort()];
+  let rows = [...allRows];
   if (q.trim()) { const s = q.trim().toLowerCase(); rows = rows.filter((p) => p.name.toLowerCase().includes(s) || (p.teamAbbr || '').toLowerCase().includes(s)); }
   if (pos !== 'ALL') rows = rows.filter((p) => (p.eligiblePositions || []).includes(pos));
   if (db.availabilityKnown && avail !== 'ALL') rows = rows.filter((p) => p.availability === avail);
@@ -541,6 +544,7 @@ function DraftHelper({ data, leagueKey, active }) {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     return (b.value ?? -1) - (a.value ?? -1); // default: ProGM value
   });
+  const visibleRows = rows.slice(0, visibleCount);
 
   const hasPeriod = data.scheduleAware;
   const sortBtns = [['progm', 'ProGM Rank', 'Your league-specific ProGM order'], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
@@ -583,18 +587,11 @@ function DraftHelper({ data, leagueKey, active }) {
             <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="ProGM's league-specific draft rank">ProGM Rank</abbr></th><th className="p-3">Player</th>
             <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Yahoo's overall player rank">Yahoo Rank</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Average draft position in Yahoo drafts">Yahoo ADP</abbr></th><th className="w-52 p-3"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft timing guidance from existing ProGM and Yahoo ADP calculations">Value</abbr></th>
           </tr></thead>
-          <tbody>{rows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} availabilityKnown={db.availabilityKnown} />)}</tbody>
+          <tbody>{visibleRows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} availabilityKnown={db.availabilityKnown} />)}</tbody>
         </table>
         {!rows.length && <p className="p-8 text-center text-dark-400">No players match your filters.</p>}
+        {rows.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dark-700 p-3 text-xs text-dark-400"><span>Showing {Math.min(visibleCount, rows.length)} of {rows.length} eligible players{db.noData?.length ? ` · ${db.noData.length} without projections` : ''}</span>{visibleCount < rows.length && <button type="button" className="btn-secondary" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button>}</div>}
       </section>
-
-      {db.noData?.length > 0 && (
-        <section className="card">
-          <h3 className="text-sm font-bold">No projection data ({db.noData.length})</h3>
-          <p className="mt-1 text-xs text-dark-500">Unranked rather than zeroed.</p>
-          <SecondaryDetails label="Show players" className="mt-2">{db.noData.slice(0, 30).map((p) => p.name).join(', ')}{db.noData.length > 30 ? ` +${db.noData.length - 30} more` : ''}</SecondaryDetails>
-        </section>
-      )}
     </div>
   );
 }

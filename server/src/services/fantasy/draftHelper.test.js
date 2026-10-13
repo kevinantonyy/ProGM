@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDraftBoard, computeDraftValue, computeReplacementBaselines, DRAFT_WEIGHTS } from './draftHelper.js';
+import { buildDraftBoard, computeDraftValue, computeReplacementBaselines, draftHealthMultiplier, DRAFT_WEIGHTS } from './draftHelper.js';
 
 const settings = {
   rosterSlots: [
@@ -142,6 +142,23 @@ test('injury status applies an availability multiplier to draft value', () => {
   assert.equal(hurt.components.healthMult, 0.5);
 });
 
+test('transient questionable status does not discount a season-long draft rank', () => {
+  assert.equal(draftHealthMultiplier('Q'), 1);
+  assert.equal(draftHealthMultiplier('GTD'), 1);
+  assert.equal(draftHealthMultiplier('OUT'), 0.5);
+  const players = [pl('Healthy', ['C'], 40), pl('Questionable', ['C'], 40, { status: 'Q' })];
+  const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  assert.equal(res.board[0].value, res.board[1].value);
+});
+
+test('complete projected pool is not truncated at the old 150-player limit', () => {
+  const players = Array.from({ length: 220 }, (_, i) => pl(`P${i}`, ['PG'], 300 - i));
+  const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
+  assert.equal(res.board.length, 220);
+  assert.equal(res.totalEligible, 220);
+  assert.equal(res.totalProjected, 220);
+});
+
 test('components are normalized so no single raw scale dominates (bounded 0..1)', () => {
   const players = [pl('A', ['C'], 50), pl('B', ['PG'], 30), pl('C', ['SG'], 10)];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
@@ -154,6 +171,18 @@ test('components are normalized so no single raw scale dominates (bounded 0..1)'
   assert.ok(Math.abs((DRAFT_WEIGHTS.production + DRAFT_WEIGHTS.replacement + DRAFT_WEIGHTS.scarcity) - 1) < 1e-9);
   assert.equal(DRAFT_WEIGHTS.production, 0.60);
   assert.equal(DRAFT_WEIGHTS.scarcity, 0.10);
+});
+
+test('draft scarcity reflects lineup demand relative to eligible player supply', () => {
+  const league = { ...settings, teamCount: 10 };
+  const players = [
+    pl('CenterStar', ['C'], 40),
+    ...Array.from({ length: 8 }, (_, i) => pl(`Guard${i}`, ['PG'], 20 + i)),
+  ];
+  const res = buildDraftBoard({ players, settings: league, projectionProvider: provider(players) });
+  const center = res.board.find((p) => p.name === 'CenterStar');
+  const guard = res.board.find((p) => p.name === 'Guard7');
+  assert.ok(center.components.scarcity > guard.components.scarcity);
 });
 
 test('roster fit does NOT reorder the global Best Available board', () => {

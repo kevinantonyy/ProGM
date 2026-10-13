@@ -36,18 +36,39 @@ export function healthMultiplier(status) {
 }
 
 /**
- * Positional scarcity weights from league settings. Positions that fill fewer
- * starting slots across the league are scarcer. Returns a map position -> a
- * small multiplier in roughly [1.0, 1.3].
+ * Positional scarcity weights from league settings. When the caller supplies
+ * a player pool, scarcity is lineup demand relative to eligible supply.
+ * Without a pool, the legacy demand-only calculation remains available to
+ * existing trade/waiver callers. Returns a small multiplier in [1.0, 1.18].
  *
  * @param {Object} settings normalized league settings (rosterSlots)
+ * @param {Array|null} playerPool optional eligible supply for demand/supply scarcity
  */
-export function scarcityWeights(settings) {
+export function scarcityWeights(settings, playerPool = null) {
   const slots = (settings?.rosterSlots || []).filter((s) => s.isStarting);
   const demand = {}; // position -> total starting slots that accept it directly
   for (const slot of slots) demand[slot.position] = (demand[slot.position] || 0) + slot.count;
   const positions = Object.keys(demand);
   if (!positions.length) return {};
+
+  // Slot count alone inverted scarcity (one required PG was always deemed
+  // scarcer than two required Cs, regardless of the eligible player supply).
+  if (Array.isArray(playerPool) && playerPool.length) {
+    const teamCount = settings?.teamCount || settings?.numTeams || settings?.raw?.maxTeams || 12;
+    const pressure = {};
+    for (const position of positions) {
+      const supply = playerPool.filter((p) => (p.eligiblePositions || []).includes(position)).length;
+      pressure[position] = supply > 0 ? (demand[position] * teamCount) / supply : 0;
+    }
+    const values = Object.values(pressure);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return Object.fromEntries(positions.map((position) => {
+      const normalized = max > min ? (pressure[position] - min) / (max - min) : 0;
+      return [position, Number((1 + 0.18 * normalized).toFixed(3))];
+    }));
+  }
+
   const maxDemand = Math.max(...positions.map((p) => demand[p]));
   const weights = {};
   for (const p of positions) {

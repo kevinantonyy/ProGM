@@ -13,8 +13,9 @@ import { authenticate } from '../middleware/auth.js';
 import { accessTokenFor, yahooFantasy } from './yahoo.js';
 import {
   extractUserLeagues, extractUserTeams, normalizeLeagueSettings,
-  extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath, yahooPlayerKeysPath, mergeYahooPlayerMetadata,
+  extractRosterPlayers, extractPlayerList, yahooPlayerKeysPath,
 } from '../services/fantasy/normalize.js';
+import { fetchYahooDraftPool } from '../services/fantasy/yahooPlayerPool.js';
 import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspace.js';
 import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
 import {
@@ -51,18 +52,7 @@ async function fetchAvailableWithAdp(leagueKey, token) {
   const key = `bball:availDraftMetadata:v2:${leagueKey}`;
   const cached = cache.get(key);
   if (cached && !cached.meta.stale) return cached.value;
-  const ownership = await yahooFantasy(yahooDraftPlayersPath(leagueKey, 'percent_owned'), token);
-  const optional = await Promise.allSettled([
-    yahooFantasy(yahooDraftPlayersPath(leagueKey, 'draft_analysis'), token),
-    yahooFantasy(yahooDraftPlayersPath(leagueKey, 'ranks'), token),
-  ]);
-  const normalizeResponse = (data) => {
-    const leagueNode = data?.fantasy_content?.league;
-    const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
-    return extractPlayerList(playersNode);
-  };
-  const metadataSets = optional.map((result) => (result.status === 'fulfilled' ? normalizeResponse(result.value) : []));
-  const players = mergeYahooPlayerMetadata(normalizeResponse(ownership), ...metadataSets);
+  const players = await fetchYahooDraftPool(yahooFantasy, token, leagueKey);
   cache.set(key, players, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
   return players;
 }

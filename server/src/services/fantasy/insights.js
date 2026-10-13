@@ -68,10 +68,16 @@ export async function buildProjectionContext({ season, players, statCategories, 
     return { ...base, reason: 'No players to project.' };
   }
 
+  const seasonYear = Number(season);
+  const lastCompletedSeason = Number.isInteger(seasonYear) ? seasonYear - 1 : null;
+  // Draft projections are anchored to the latest completed season. Current
+  // in-season form is blended separately below when real games are available.
+  const projectionSeason = lastCompletedSeason ?? season;
+
   // 1. Provider player index (cross-reference). Null => Yahoo-only mode.
   let indexResult;
   try {
-    indexResult = await providers.getPlayerIndex(season);
+    indexResult = await providers.getPlayerIndex(projectionSeason);
   } catch {
     indexResult = null;
   }
@@ -127,7 +133,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
   let statsResult = null;
   if (externalIds.length) {
     try {
-      statsResult = await providers.getSeasonStats(season, externalIds);
+      statsResult = await providers.getSeasonStats(projectionSeason, externalIds);
     } catch {
       statsResult = null;
     }
@@ -137,22 +143,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
     for (const s of statsResult.value) statsByExternalId.set(String(s.externalId), s);
   }
 
-  // 3a. Previous completed season stats for human-readable draft context.
-  // This is the same league-wide ESPN batch/cache path as current stats, never
-  // a per-player request and never substituted with current-season numbers.
-  const seasonYear = Number(season);
-  const previousSeason = Number.isInteger(seasonYear) ? seasonYear - 1 : null;
-  let previousStatsResult = null;
-  if (externalIds.length && previousSeason != null) {
-    try {
-      previousStatsResult = await providers.getSeasonStatsBulkOnly(previousSeason, externalIds);
-    } catch {
-      previousStatsResult = null;
-    }
-  }
-  const previousStatsByExternalId = new Map();
-  for (const s of previousStatsResult?.value || []) previousStatsByExternalId.set(String(s.externalId), s);
-
+  // 3a. The same explicitly selected completed-season dataset also powers the
+  // human-readable "Last Season" context; it is never silently substituted.
   // 3b. Recent form (OPTIONAL). Built from box scores of recently completed
   //     games (one request per game, shared). A failure here must NOT break
   //     season-stat projections — the model falls back to season-only cleanly.
@@ -195,15 +187,14 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
     projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
-    const previous = c.externalId ? previousStatsByExternalId.get(String(c.externalId)) || null : null;
-    projection.lastSeason = previous?.season
-      ? { season: previousSeason, stats: previous.season }
+    projection.lastSeason = base?.season
+      ? { season: projectionSeason, stats: base.season }
       : null;
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
-  const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, previousStatsResult?.meta, recentResult?.meta);
+  const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
   const recentCount = Object.keys(recentByExternalId).length;
   const historyCount = Object.keys(historyByExternalId).length;
@@ -222,7 +213,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
       available: true,
       sources: {
         seasonStats: Boolean(statsResult?.value?.length),
-        lastSeasonStats: Boolean(previousStatsResult?.value?.length),
+        lastSeasonStats: Boolean(statsResult?.value?.length),
         recentForm: recentCount > 0,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,

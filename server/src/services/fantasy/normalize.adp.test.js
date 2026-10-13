@@ -137,9 +137,9 @@ test('roster tuple keeps missing and malformed Yahoo draft metadata null', () =>
 });
 
 test('Draft Helper requests each Yahoo player sub-resource in a separate batch', () => {
-  assert.equal(yahooDraftPlayersPath('466.l.123', 'percent_owned'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/percent_owned');
-  assert.equal(yahooDraftPlayersPath('466.l.123', 'draft_analysis'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/draft_analysis');
-  assert.equal(yahooDraftPlayersPath('466.l.123', 'ranks'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/ranks');
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'percent_owned'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=25/percent_owned');
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'draft_analysis'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=25/draft_analysis');
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'ranks', 50, 25), '/league/466.l.123/players;status=A;sort=OR;start=50;count=25/ranks');
 });
 
 test('rostered Draft Helper metadata uses exact Yahoo player keys and league', () => {
