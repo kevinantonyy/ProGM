@@ -525,7 +525,8 @@ function DraftHelper({ data, leagueKey, active }) {
       <section className="card overflow-x-auto p-0">
         <table className="w-full text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr>
-            <th className="p-3">#</th><th className="p-3">Player</th><th className="p-3">Tier</th>
+            <th className="p-3">ProGM Rank</th><th className="p-3">Player</th><th className="p-3">Tier</th>
+            <th className="p-3 text-right">Yahoo Rank</th><th className="p-3 text-right">Yahoo ADP</th><th className="p-3 text-right">Season Rank</th><th className="p-3">Comparison</th>
             <th className="p-3 text-right">Value</th><th className="p-3 text-right">Proj/gm</th>
             {hasPeriod && <th className="p-3 text-right">Period</th>}
             <th className="p-3 text-right">Scarcity</th><th className="p-3">Fit</th>
@@ -537,6 +538,10 @@ function DraftHelper({ data, leagueKey, active }) {
               <td className="p-3 text-dark-400">{p.overallRank}</td>
               <td className="p-3"><p className="font-semibold">{p.name}{p.out && <span className="badge-red ml-2">OUT</span>}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
               <td className="p-3"><span className="badge-blue">T{p.tier}</span></td>
+              <td className="p-3 text-right text-dark-300">{p.yahooOverallRank ?? '—'}</td>
+              <td className="p-3 text-right text-dark-300">{p.yahooAdp ?? '—'}</td>
+              <td className="p-3 text-right text-dark-300">{p.yahooSeasonRank ?? '—'}</td>
+              <td className="p-3"><span className="text-xs text-dark-300" title={p.rankReason}>{p.rankAgreement === 'progm_higher' ? 'ProGM higher' : p.rankAgreement === 'yahoo_higher' ? 'Yahoo higher' : p.rankAgreement === 'progm_lean' ? 'ProGM lean' : p.rankAgreement === 'yahoo_lean' ? 'Yahoo lean' : p.rankAgreement === 'aligned' ? 'Agreement' : '—'}</span></td>
               <td className="p-3 text-right font-bold text-primary-400">{p.value?.toFixed(1)}</td>
               <td className="p-3 text-right"><Proj value={p.projected} /></td>
               {hasPeriod && <td className="p-3 text-right">{p.periodProjected != null ? <span className="text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}

@@ -277,10 +277,10 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       // Yahoo RANK (external signal; labeled "Yahoo Rank", NOT Expert Rank).
       // Overall (OR) + current-season (S) + prior seasons for explanation only.
       // Never feeds ProGM value/ranking; comparison is attached after sorting.
-      yahooRank: p.yahooRanks?.overall ?? null,
-      yahooSeasonRank: currentSeason != null ? (p.yahooRanks?.bySeason?.[String(currentSeason)] ?? null) : null,
-      yahooPriorSeasonRanks: p.yahooRanks?.bySeason
-        ? Object.entries(p.yahooRanks.bySeason)
+      yahooOverallRank: p.yahooOverallRank ?? p.yahooRanks?.overall ?? null,
+      yahooSeasonRank: currentSeason != null ? (p.yahooSeasonRanks?.[String(currentSeason)] ?? p.yahooRanks?.bySeason?.[String(currentSeason)] ?? null) : null,
+      yahooPriorSeasonRanks: (p.yahooSeasonRanks || p.yahooRanks?.bySeason)
+        ? Object.entries(p.yahooSeasonRanks || p.yahooRanks.bySeason)
             .filter(([yr]) => currentSeason == null || String(yr) !== String(currentSeason))
             .map(([yr, rank]) => ({ season: yr, rank }))
             .sort((a, b) => Number(b.season) - Number(a.season))
@@ -365,7 +365,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       nextPick,
     });
     // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
-    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooRank });
+    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooOverallRank });
     return {
       overallRank, // ProGM Rank (authoritative ordering)
       ...p,

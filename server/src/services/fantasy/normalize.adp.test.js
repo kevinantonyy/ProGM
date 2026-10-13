@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePlayer, parseYahooRanks } from './normalize.js';
+import { normalizePlayer, parseYahooRanks, yahooDraftPlayersPath } from './normalize.js';
 
 // Build a Yahoo player tuple: [ [props...], {draft_analysis:[...]} ].
 function playerWithDraftAnalysis(da) {
@@ -75,6 +75,8 @@ test('parseYahooRanks: missing/"-"/non-numeric values are omitted (never 0)', ()
     { player_rank: { rank_type: 'OR', rank_value: '-' } },
     { player_rank: { rank_type: 'S', rank_value: '', rank_season: '2025' } },
     { player_rank: { rank_type: 'S', rank_value: 'abc', rank_season: '2024' } },
+    { player_rank: { rank_type: 'S', rank_value: '0', rank_season: '2023' } },
+    { player_rank: { rank_type: 'S', rank_value: '   ', rank_season: '2022' } },
   ]);
   assert.equal(r, null); // nothing usable -> null, not { overall: 0 }
 });
@@ -92,9 +94,21 @@ test('normalizePlayer surfaces yahooRanks { overall, bySeason } via the ranks su
   ]);
   assert.equal(p.yahooRanks.overall, 65);
   assert.equal(p.yahooRanks.bySeason['2025'], 97);
+  assert.equal(p.yahooOverallRank, 65);
+  assert.equal(p.yahooSeasonRanks['2025'], 97);
 });
 
 test('normalizePlayer leaves yahooRanks null when the ranks sub-resource is absent', () => {
   const p = normalizePlayer([[{ player_key: '466.p.4' }, { name: { full: 'No Ranks' } }, { eligible_positions: [{ position: 'PG' }] }]]);
   assert.equal(p.yahooRanks, null);
+  assert.equal(p.yahooOverallRank, null);
+  assert.deepEqual(p.yahooSeasonRanks, {});
+});
+
+test('Draft Helper batches ownership, ADP, and ranks in one players request', () => {
+  const path = yahooDraftPlayersPath('466.l.123');
+  assert.equal(path, '/league/466.l.123/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis;ranks');
+  assert.equal((path.match(/\/players/g) || []).length, 1);
+  assert.match(path, /[;/]ranks$/);
+  assert.doesNotMatch(path, /player_ranks/);
 });

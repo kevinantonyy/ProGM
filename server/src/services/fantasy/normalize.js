@@ -129,9 +129,14 @@ function toNumberOrNull(value) {
  * callers see null when Yahoo had nothing.
  */
 function yahooNumOrNull(value) {
-  if (value === null || value === undefined || value === '' || value === '-') return null;
+  if (value === null || value === undefined || (typeof value === 'string' && (value.trim() === '' || value.trim() === '-'))) return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** One batched Draft Helper request: ownership + ADP + Yahoo ranks. */
+export function yahooDraftPlayersPath(leagueKey) {
+  return `/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned;draft_analysis;ranks`;
 }
 
 /**
@@ -156,8 +161,8 @@ export function parseYahooRanks(node) {
     if (value == null) continue;
     if (r.rank_type === 'OR') {
       if (overall == null) overall = value; // first OR wins
-    } else if (r.rank_type === 'S' && r.rank_season != null) {
-      bySeason[String(r.rank_season)] = value;
+    } else if (r.rank_type === 'S' && r.rank_season != null && String(r.rank_season).trim()) {
+      bySeason[String(r.rank_season).trim()] = value;
     }
   }
   if (overall == null && Object.keys(bySeason).length === 0) return null;
@@ -279,6 +284,8 @@ export function normalizePlayer(rawPlayer) {
     // "Expert Rank"). Season-agnostic here; the caller picks the current
     // season's S rank. null when absent (never 0). Does NOT feed ProGM rank.
     yahooRanks: yahooRanks || null,
+    yahooOverallRank: yahooRanks?.overall ?? null,
+    yahooSeasonRanks: yahooRanks?.bySeason || {},
   };
 }
 

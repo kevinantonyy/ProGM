@@ -312,9 +312,16 @@ test('Yahoo Rank (overall + current-season S) is exposed per board row', () => {
   const players = [plRank('A', ['PG'], 40, { overall: 5, bySeason: { 2025: 8, 2024: 5 } })];
   const res = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentSeason: 2025 });
   const row = res.board[0];
-  assert.equal(row.yahooRank, 5);
+  assert.equal(row.yahooOverallRank, 5);
   assert.equal(row.yahooSeasonRank, 8); // current season (2025) S rank
   assert.deepEqual(row.yahooPriorSeasonRanks, [{ season: '2024', rank: 5 }]);
+});
+
+test('season rank is null when Yahoo has no rank for the current league season', () => {
+  const players = [plRank('A', ['PG'], 40, { overall: 5, bySeason: { 2024: 8 } })];
+  const row = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentSeason: 2025 }).board[0];
+  assert.equal(row.yahooSeasonRank, null);
+  assert.deepEqual(row.yahooPriorSeasonRanks, [{ season: '2024', rank: 8 }]);
 });
 
 test('rank comparison is attached (ProGM rank vs Yahoo overall)', () => {
@@ -323,7 +330,7 @@ test('rank comparison is attached (ProGM rank vs Yahoo overall)', () => {
   const res = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players) });
   const a = res.board.find((p) => p.name === 'A');
   assert.equal(a.overallRank, 1);
-  assert.equal(a.yahooRank, 40);
+  assert.equal(a.yahooOverallRank, 40);
   assert.equal(a.rankGap, 39); // 40 - 1
   assert.equal(a.rankAgreement, 'progm_higher');
   assert.ok('rankReason' in a);
@@ -341,7 +348,7 @@ test('Yahoo Rank NEVER reorders the ProGM Best Available board', () => {
 test('missing Yahoo Rank yields null fields + unknown agreement (null-safe)', () => {
   const players = [pl('NoRank', ['PG'], 30)]; // pl() has no yahooRanks
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
-  assert.equal(res.board[0].yahooRank, null);
+  assert.equal(res.board[0].yahooOverallRank, null);
   assert.equal(res.board[0].yahooSeasonRank, null);
   assert.equal(res.board[0].rankGap, null);
   assert.equal(res.board[0].rankAgreement, 'unknown');

@@ -24,6 +24,7 @@ import {
   normalizeLeagueSettings,
   extractStandings,
   extractPlayerList,
+  yahooDraftPlayersPath,
 } from './normalize.js';
 import { scoringIsSupported } from './scoring.js';
 import { analyzeRoster } from './rosterAnalysis.js';
@@ -128,29 +129,17 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const myRoster = extractRosterPlayers(rosterData);
   const myStanding = standings.find((t) => t.teamKey === teamKey) || standings.find((t) => t.isOwnedByLogin) || null;
 
-  // 2. Available player pool (free agents / waivers) with ownership. Yahoo
-  //    returns only the FIRST appended sub-resource, so Yahoo Rank is fetched
-  //    via a SEPARATE batched /ranks call and merged by player key. Both are
-  //    league-wide batched, never per-player, and are external context for the
-  //    Draft Helper only — they never feed projections or the ProGM ranking.
+  // 2. Available player pool with ownership, Yahoo ADP, and Yahoo Rank in one
+  //    league-wide batch. These are Draft Helper context only.
   let availablePlayers = [];
   try {
-    const playersData = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/percent_owned`, accessToken);
+    const playersData = await yahooFantasy(yahooDraftPlayersPath(leagueKey), accessToken);
     const leagueNode = playersData?.fantasy_content?.league;
     const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
     availablePlayers = extractPlayerList(playersNode);
   } catch {
     availablePlayers = [];
   }
-  // Separate batched Yahoo Rank fetch, merged by player key (graceful).
-  try {
-    const ranksData = await yahooFantasy(`/league/${leagueKey}/players;status=A;sort=AR;start=0;count=50/ranks`, accessToken);
-    const rln = ranksData?.fantasy_content?.league;
-    const rpn = Array.isArray(rln) ? rln.find((el) => el && el.players)?.players : null;
-    const ranksMap = {};
-    for (const rp of extractPlayerList(rpn)) { if (rp.playerKey && rp.yahooRanks) ranksMap[rp.playerKey] = rp.yahooRanks; }
-    availablePlayers = availablePlayers.map((p) => (ranksMap[p.playerKey] ? { ...p, yahooRanks: ranksMap[p.playerKey] } : p));
-  } catch { /* ranks are optional external context */ }
 
   // 2b. Opponent rosters (Yahoo) fetched ONCE for the trade recommender +
   //     roster-strength rating. Bounded and cached by the 5-min workspace cache
