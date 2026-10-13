@@ -47,12 +47,13 @@ test('buildCanonicalPlayers matches by yahoo id first (highest confidence)', () 
 test('buildCanonicalPlayers falls back to name+team when no yahoo id', () => {
   const source = [{ playerKey: '454.p.1', playerId: '1', name: 'Luka Dončić', teamAbbr: 'DAL' }];
   const external = [
-    { externalId: 'X', name: 'Luka Doncic', teamAbbr: 'DAL', yahooId: null },
+    { externalId: 'X', name: 'Luka Doncic', teamAbbr: 'DAL', yahooId: null, imageUrl: 'https://example.test/luka.png' },
     { externalId: 'Y', name: 'Luka Doncic', teamAbbr: 'LAL', yahooId: null },
   ];
   const { players, diagnostics } = buildCanonicalPlayers(source, external);
   assert.equal(players[0].externalId, 'X');
   assert.equal(players[0].matchMethod, 'name_team');
+  assert.equal(players[0].imageUrl, 'https://example.test/luka.png');
   assert.equal(diagnostics.byMethod.name_team, 1);
 });
 
@@ -76,6 +77,7 @@ test('buildCanonicalPlayers falls back to unique name-only match', () => {
   const { players, diagnostics } = buildCanonicalPlayers(source, external);
   assert.equal(players[0].externalId, 'J');
   assert.equal(players[0].matchMethod, 'name_only');
+  assert.equal(players[0].imageUrl, null);
   assert.equal(diagnostics.byMethod.name_only, 1);
 });
 

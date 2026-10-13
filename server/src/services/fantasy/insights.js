@@ -54,6 +54,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     externalAvailable: false,
     projectionProvider: null,
     projectionByCanonicalId: new Map(),
+    imageByCanonicalId: new Map(),
     identityDiagnostics: null,
     freshness: null,
     providerStatus: providers.providerStatus(),
@@ -117,6 +118,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const { players: canonical, diagnostics } = buildCanonicalPlayers(source, indexResult.value);
   const matched = canonical.filter((c) => c.matched && c.externalId);
   const externalIds = matched.map((c) => c.externalId);
+  // Only identity-safe matches may supply images. The identity layer deliberately
+  // drops images for name-only matches, so no headshot is guessed from a name.
+  const imageByCanonicalId = new Map(canonical.filter((c) => c.imageUrl).map((c) => [c.canonicalId, c.imageUrl]));
 
   // 3. Season stats for matched players (ONE league-wide request via the free
   //    provider's bulk path; filtered to our ids). Budget-conscious + shared.
@@ -178,7 +182,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
-  const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, canonicalIdOf });
+  const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
   const recentCount = Object.keys(recentByExternalId).length;
@@ -188,6 +192,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     externalAvailable: true,
     projectionProvider,
     projectionByCanonicalId,
+    imageByCanonicalId,
     identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
     freshness,
     providerStatus: providers.providerStatus(),

@@ -19,6 +19,7 @@
  * @property {string} name                Provider full name
  * @property {string|null} teamAbbr       Provider NBA team abbreviation
  * @property {string|null} yahooId        Provider-supplied Yahoo cross-ref id (if any)
+ * @property {string|null} imageUrl       Provider-supplied headshot URL (if any)
  *
  * @typedef {Object} CanonicalPlayer
  * @property {string} canonicalId         ProGM canonical id (Yahoo player key when sourced from Yahoo)
@@ -113,7 +114,8 @@ function matchOne(sourcePlayer, index) {
 
   // Tier 1: exact yahoo id cross-reference.
   if (yahooId && index.byYahooId.has(yahooId)) {
-    return { externalId: index.byYahooId.get(yahooId).externalId, matchMethod: 'yahoo_id', matched: true, ambiguous: false };
+    const match = index.byYahooId.get(yahooId);
+    return { externalId: match.externalId, imageUrl: match.imageUrl || null, matchMethod: 'yahoo_id', matched: true, ambiguous: false };
   }
 
   const nName = normalizeName(sourcePlayer.name);
@@ -123,7 +125,7 @@ function matchOne(sourcePlayer, index) {
   if (nName && team) {
     const candidates = index.byNameTeam.get(`${nName}|${team}`) || [];
     if (candidates.length === 1) {
-      return { externalId: candidates[0].externalId, matchMethod: 'name_team', matched: true, ambiguous: false };
+      return { externalId: candidates[0].externalId, imageUrl: candidates[0].imageUrl || null, matchMethod: 'name_team', matched: true, ambiguous: false };
     }
     if (candidates.length > 1) {
       return { externalId: null, matchMethod: null, matched: false, ambiguous: true };
@@ -134,7 +136,7 @@ function matchOne(sourcePlayer, index) {
   if (nName) {
     const candidates = index.byName.get(nName) || [];
     if (candidates.length === 1) {
-      return { externalId: candidates[0].externalId, matchMethod: 'name_only', matched: true, ambiguous: false };
+      return { externalId: candidates[0].externalId, imageUrl: null, matchMethod: 'name_only', matched: true, ambiguous: false };
     }
     if (candidates.length > 1) {
       return { externalId: null, matchMethod: null, matched: false, ambiguous: true };
@@ -191,6 +193,7 @@ export function buildCanonicalPlayers(sourcePlayers, externalPlayers = []) {
       teamAbbr: normalizeTeam(sp.teamAbbr),
       yahooPlayerId,
       externalId: result.externalId,
+      imageUrl: result.imageUrl || null,
       matchMethod: result.matchMethod,
       matched: result.matched,
     });

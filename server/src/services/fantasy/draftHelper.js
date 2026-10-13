@@ -265,6 +265,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     return {
       playerKey: p.playerKey,
       name: p.name,
+      highResImage: projectionProvider?.getHeadshotUrl?.(p) || null,
       image: p.headshotUrl || null,
       teamAbbr: p.teamAbbr || null,
       eligiblePositions: p.eligiblePositions || [],

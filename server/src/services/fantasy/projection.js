@@ -135,7 +135,7 @@ export function projectPlayer({ stats, statCategories, availability = null }) {
  * @param {Map<string, Object>} params.projectionByCanonicalId  canonicalId -> projectPlayer() result
  * @param {(player) => string} params.canonicalIdOf              maps a Yahoo player to its canonicalId
  */
-export function makeProjectionProvider({ projectionByCanonicalId, canonicalIdOf }) {
+export function makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId = new Map(), canonicalIdOf }) {
   return {
     getProjectedValue(player) {
       const id = canonicalIdOf(player);
@@ -145,6 +145,10 @@ export function makeProjectionProvider({ projectionByCanonicalId, canonicalIdOf 
     getProjection(player) {
       const id = canonicalIdOf(player);
       return (id ? projectionByCanonicalId.get(id) : null) || null;
+    },
+    getHeadshotUrl(player) {
+      const id = canonicalIdOf(player);
+      return (id ? imageByCanonicalId.get(id) : null) || null;
     },
   };
 }

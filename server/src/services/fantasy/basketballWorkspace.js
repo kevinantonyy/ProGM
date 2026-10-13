@@ -51,6 +51,7 @@ function toUiPlayer(p, ctx, ownerTeam = null, periodValues = null) {
     name: p.name,
     position: p.primaryPosition || (p.eligiblePositions && p.eligiblePositions[0]) || 'NBA',
     eligiblePositions: p.eligiblePositions || [],
+    highResImage: ctx?.imageByCanonicalId?.get(canonicalIdOf(p)) || null,
     image: p.headshotUrl || null,
     teamAbbr: p.teamAbbr || null,
     // Per-game projected league fantasy points (ProGM). null when unavailable.

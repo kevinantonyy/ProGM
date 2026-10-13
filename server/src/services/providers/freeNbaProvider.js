@@ -144,6 +144,7 @@ export function mapEspnDirectory(payload) {
       name: a.athlete?.displayName || '',
       teamAbbr: a.athlete?.teamShortName || a.athlete?.team?.abbreviation || null,
       yahooId: null, // ESPN exposes no Yahoo cross-reference
+      imageUrl: typeof a.athlete?.headshot?.href === 'string' ? a.athlete.headshot.href : null,
     }))
     .filter((p) => p.externalId && p.name);
 }

@@ -21,7 +21,7 @@ const ESPN_BYATHLETE = {
   ],
   athletes: [
     {
-      athlete: { id: '4278073', displayName: 'Shai Gilgeous-Alexander', teamShortName: 'OKC', position: { abbreviation: 'G' } },
+      athlete: { id: '4278073', displayName: 'Shai Gilgeous-Alexander', teamShortName: 'OKC', position: { abbreviation: 'G' }, headshot: { href: 'https://a.espncdn.com/i/headshots/nba/players/full/4278073.png' } },
       categories: [
         { name: 'general', values: [76, 34.2, 379, 5.0] },
         { name: 'offensive', values: [32.7, 11.3, 21.8, 2.1, 7.9, 8.8, 6.4, 2.4] },
@@ -62,7 +62,7 @@ test('espnStatMapToLine maps per-game averages into a StatLine (no fabrication)'
 test('mapEspnDirectory produces ProviderPlayerRef with no yahooId', () => {
   const dir = mapEspnDirectory(ESPN_BYATHLETE);
   assert.equal(dir.length, 1);
-  assert.deepEqual(dir[0], { externalId: '4278073', name: 'Shai Gilgeous-Alexander', teamAbbr: 'OKC', yahooId: null });
+  assert.deepEqual(dir[0], { externalId: '4278073', name: 'Shai Gilgeous-Alexander', teamAbbr: 'OKC', yahooId: null, imageUrl: 'https://a.espncdn.com/i/headshots/nba/players/full/4278073.png' });
 });
 
 test('mapEspnSeasonStats yields PlayerStats keyed by externalId, recent null', () => {

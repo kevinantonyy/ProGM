@@ -19,13 +19,15 @@ function playerKey(player) {
 }
 
 export function PlayerAvatar({ player, size = 'h-9 w-9', className = '', alt = '' }) {
-  const src = player?.image || player?.headshotUrl || null;
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [src]);
+  const sources = useMemo(() => [...new Set([player?.highResImage, player?.image, player?.headshotUrl].filter(Boolean))], [player?.highResImage, player?.image, player?.headshotUrl]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const sourceKey = sources.join('|');
+  useEffect(() => setSourceIndex(0), [sourceKey]);
+  const src = sources[sourceIndex] || null;
   return (
     <span className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-dark-600 bg-dark-700 text-[10px] font-black text-dark-300 ${size} ${className}`}>
       <span aria-hidden="true">{initials(player?.name)}</span>
-      {src && !failed && <img src={src} alt={alt} loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-cover" onError={() => setFailed(true)} />}
+      {src && <img src={src} alt={alt} loading="lazy" decoding="async" draggable="false" className="absolute inset-0 h-full w-full object-contain object-bottom" onError={() => setSourceIndex((index) => Math.min(index + 1, sources.length))} />}
     </span>
   );
 }
