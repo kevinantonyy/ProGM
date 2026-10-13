@@ -112,6 +112,14 @@ test('Tank01 FALLBACK is used when free_nba season stats fail', async () => {
   assert.equal(res.value.length, 1); // tank01 supplied the player
 });
 
+test('optional historical stats remain bulk-only when the free source fails', async () => {
+  global.fetch = makeFetchStub({ failHosts: ['espn'] });
+  const res = await providers.getSeasonStatsBulkOnly('2024', ['111', '222']);
+  assert.equal(res, null);
+  assert.equal(hostCalls.espn, 1);
+  assert.equal(hostCalls.tank01 || 0, 0);
+});
+
 test('partial failure: injuries failing does NOT break season stats or schedule', async () => {
   global.fetch = makeFetchStub({ failHosts: [] });
   // Injuries endpoint fails, others succeed.

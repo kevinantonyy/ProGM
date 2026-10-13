@@ -145,6 +145,7 @@ test('Draft Helper requests each Yahoo player sub-resource in a separate batch',
 test('rostered Draft Helper metadata uses exact Yahoo player keys and league', () => {
   const path = yahooPlayerKeysPath('466.l.123', ['466.p.1', '466.p.2'], 'ranks');
   assert.equal(path, '/league/466.l.123/players;player_keys=466.p.1,466.p.2/ranks');
+  assert.equal(yahooPlayerKeysPath('466.l.123', ['466.p.1']), '/league/466.l.123/players;player_keys=466.p.1');
   assert.doesNotMatch(path, /status=A/);
 });
 

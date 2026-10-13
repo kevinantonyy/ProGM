@@ -186,6 +186,38 @@ export async function getSeasonStats(season, externalIds) {
 }
 
 /**
+ * Best-effort league-wide season stats without any per-player fallback.
+ * Intended for optional historical context where a missing bulk dataset is
+ * preferable to multiplying outbound requests by the draft-board size.
+ */
+export async function getSeasonStatsBulkOnly(season, externalIds) {
+  const ids = Array.isArray(externalIds) ? [...new Set(externalIds.map(String))] : [];
+  if (!ids.length) {
+    return { value: [], meta: { provider: 'cache', fetchedAt: new Date().toISOString(), expiresAt: new Date().toISOString(), stale: false, cacheHit: true } };
+  }
+
+  const candidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
+  for (const provider of candidates) {
+    try {
+      const result = await cache.remember(
+        `seasonStatsAll:${season}:${provider.name}`,
+        { provider: provider.name, ttl: cache.TTL.seasonStats },
+        () => provider.getSeasonStatsBulk(season),
+      );
+      if (!result.meta.cacheHit) health.recordSuccess(provider.name);
+      const all = Array.isArray(result.value) ? result.value : [];
+      if (all.length) {
+        const wanted = new Set(ids);
+        return { value: all.filter((s) => wanted.has(String(s.externalId))), meta: result.meta };
+      }
+    } catch (error) {
+      health.recordFailure(provider.name, error);
+    }
+  }
+  return null;
+}
+
+/**
  * League-wide recent-form map (externalId -> { recent StatLine, recentGameCount }),
  * built from NBA CDN box scores of recently completed games. One request per
  * completed game, shared across all players/users. Only providers exposing

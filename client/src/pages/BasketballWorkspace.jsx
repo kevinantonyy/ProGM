@@ -125,6 +125,7 @@ function nth(n) { const s = ['th', 'st', 'nd', 'rd']; const v = n % 100; return 
 
 // Yahoo season start-year -> "2025-26" label. Falls back to the raw value.
 function seasonLabelFrom(season) {
+  if (season == null || String(season).trim() === '') return '';
   const y = Number(season);
   if (!Number.isInteger(y)) return season || '';
   return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
@@ -471,26 +472,12 @@ function DraftRecommendation({ player }) {
   return <span className={className} title={player.marketReason}>{label}</span>;
 }
 
-function DraftPlayerRow({ player, hasPeriod, availabilityKnown }) {
+function DraftPlayerRow({ player, availabilityKnown }) {
   const [expanded, setExpanded] = useState(false);
   const detailId = `draft-details-${String(player.playerKey || player.name).replace(/[^a-z0-9_-]/gi, '-')}`;
-  const comparison = player.rankAgreement === 'progm_higher' ? 'ProGM ranks him much higher'
-    : player.rankAgreement === 'yahoo_higher' ? 'Yahoo ranks him much higher'
-      : player.rankAgreement === 'progm_lean' ? 'ProGM ranks him somewhat higher'
-        : player.rankAgreement === 'yahoo_lean' ? 'Yahoo ranks him somewhat higher'
-          : player.rankAgreement === 'aligned' ? 'ProGM and Yahoo agree' : 'Comparison unavailable';
   const availability = player.availability === 'available' ? 'Available' : player.availability === 'rostered' ? 'Rostered' : 'Availability unknown';
-  const details = [
-    ['Yahoo Season Rank', player.yahooSeasonRank != null ? `#${player.yahooSeasonRank}` : '—'],
-    ['Projected Fantasy Points/Game', player.projected != null ? player.projected.toFixed(1) : '—'],
-    hasPeriod && ['Projected Points This Period', player.periodProjected != null ? `${player.periodProjected.toFixed(1)}${player.expectedGames != null ? ` (${player.expectedGames} games)` : ''}` : '—'],
-    ['Positional Scarcity', player.scarcity != null ? `${player.scarcity.toFixed(2)}×` : '—'],
-    ['Projection Confidence', player.confidence != null ? `${Math.round(player.confidence * 100)}%` : '—'],
-    ['Historical Availability', player.components?.durabilityScore != null ? `${Math.round(player.components.durabilityScore * 100)}%` : '—'],
-    ['ProGM Draft Score', player.value != null ? player.value.toFixed(1) : '—'],
-    ['ProGM Tier', player.tier != null ? `Tier ${player.tier}` : '—'],
-    ['Yahoo Rostered', player.percentOwned != null ? `${player.percentOwned}%` : '—'],
-  ].filter(Boolean);
+  const lastNbaSeason = seasonLabelFrom(player.lastSeasonNba?.season);
+  const lastYahooSeason = seasonLabelFrom(player.lastSeasonYahooRankSeason);
 
   return <>
     <tr className="border-b border-dark-700">
@@ -506,8 +493,13 @@ function DraftPlayerRow({ player, hasPeriod, availabilityKnown }) {
       </td>
     </tr>
     {expanded && <tr id={detailId} className="border-b border-dark-700 bg-dark-900/50"><td colSpan="5" className="p-4 sm:pl-16">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{details.map(([label, value]) => <div key={label}><p className="stat-label">{label}</p><p className="mt-1 font-semibold tabular-nums">{value}</p></div>)}</div>
-      <div className="mt-4 border-t border-dark-700 pt-3 text-xs leading-5 text-dark-400"><p><span className="font-semibold text-dark-300">Ranking comparison:</span> {comparison}{player.rankReason ? `. ${player.rankReason}` : ''}</p>{player.marketReason && <p><span className="font-semibold text-dark-300">Draft recommendation:</span> {player.marketReason}</p>}{player.rosterFitLabel && <p><span className="font-semibold text-dark-300">Roster fit:</span> {player.rosterFitLabel}</p>}{player.yahooPriorSeasonRanks?.length > 0 && <p><span className="font-semibold text-dark-300">Prior Yahoo Season Ranks:</span> {player.yahooPriorSeasonRanks.map((row) => `${row.season}: #${row.rank}`).join(' · ')}</p>}</div>
+      <h3 className="font-display text-lg font-bold">Why Draft This Player?</h3>
+      <p className="mt-2 max-w-4xl text-sm leading-6 text-dark-300">{player.recommendation || 'A recommendation is unavailable because the supporting data is incomplete.'}</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div><p className="stat-label">Projected Fantasy Points/Game</p><p className="mt-1 font-semibold tabular-nums">{player.projected != null ? player.projected.toFixed(1) : '—'}</p></div>
+        <div><p className="stat-label">Last Season NBA Points/Game{lastNbaSeason ? ` · ${lastNbaSeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonNba?.points != null ? player.lastSeasonNba.points.toFixed(1) : '—'}</p></div>
+        <div><p className="stat-label">Last Season Yahoo Rank{lastYahooSeason ? ` · ${lastYahooSeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonYahooRank != null ? `#${player.lastSeasonYahooRank}` : '—'}</p></div>
+      </div>
     </td></tr>}
   </>;
 }
@@ -589,9 +581,9 @@ function DraftHelper({ data, leagueKey, active }) {
         <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr>
             <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="ProGM's league-specific draft rank">ProGM Rank</abbr></th><th className="p-3">Player</th>
-            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Yahoo's overall player rank">Yahoo Rank</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Average draft position in Yahoo drafts">Yahoo ADP</abbr></th><th className="w-52 p-3"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft timing guidance from existing ProGM and Yahoo ADP calculations">Recommendation</abbr></th>
+            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Yahoo's overall player rank">Yahoo Rank</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Average draft position in Yahoo drafts">Yahoo ADP</abbr></th><th className="w-52 p-3"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft timing guidance from existing ProGM and Yahoo ADP calculations">Value</abbr></th>
           </tr></thead>
-          <tbody>{rows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} hasPeriod={hasPeriod} availabilityKnown={db.availabilityKnown} />)}</tbody>
+          <tbody>{rows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} availabilityKnown={db.availabilityKnown} />)}</tbody>
         </table>
         {!rows.length && <p className="p-8 text-center text-dark-400">No players match your filters.</p>}
       </section>

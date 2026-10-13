@@ -235,6 +235,74 @@ function rosterFit(eligiblePositions, thinSet, overloadedSet) {
   return { fit: 'neutral', label: 'Neutral fit' };
 }
 
+function oneDecimal(value) {
+  return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(1)) : null;
+}
+
+function seasonLabel(season) {
+  const year = Number(season);
+  return Number.isInteger(year) ? `${year}–${String((year + 1) % 100).padStart(2, '0')}` : String(season || 'last season');
+}
+
+function nbaStatSentence(player) {
+  const last = player.lastSeasonNba;
+  if (!last) return null;
+  const stats = [
+    last.points != null ? `${last.points} NBA points` : null,
+    last.rebounds != null ? `${last.rebounds} rebounds` : null,
+    last.assists != null ? `${last.assists} assists` : null,
+  ].filter(Boolean);
+  if (!stats.length) return null;
+  const list = stats.length === 1 ? stats[0] : stats.length === 2 ? `${stats[0]} and ${stats[1]}` : `${stats[0]}, ${stats[1]}, and ${stats[2]}`;
+  let sentence = `In ${seasonLabel(last.season)}, ${player.name} averaged ${list} per game.`;
+  if (last.gamesPlayed != null && last.gamesPlayed < 60) sentence = sentence.replace(/\.$/, ` across ${last.gamesPlayed} games.`);
+  return sentence;
+}
+
+/** Deterministic, data-backed Draft Helper recommendation (no AI call). */
+export function buildDraftRecommendation({ player, overallRank, market, projectionRank, projectionCount, availabilityKnown }) {
+  const rostered = availabilityKnown && player.availability !== 'available';
+  let action;
+  if (rostered) {
+    action = `${player.name} is already rostered in this league, so do not treat this row as an available draft recommendation.`;
+  } else if (market?.label === 'DRAFT NOW') {
+    action = `Draft ${player.name} now; Yahoo ADP ${player.yahooAdp} suggests ${player.name} may not reach your next selection.`;
+  } else if (market?.label === 'WAIT') {
+    action = `Keep ${player.name} on your shortlist rather than reaching now; Yahoo ADP ${player.yahooAdp} suggests more time may be available.`;
+  } else if (market?.label === 'VALUE') {
+    action = `Target ${player.name} as a good value at ProGM Rank #${overallRank}; Yahoo ADP is ${player.yahooAdp}.`;
+  } else if (market?.label === 'REACH') {
+    action = `Consider waiting on ${player.name}; Yahoo ADP ${player.yahooAdp} is later than ProGM Rank #${overallRank}.`;
+  } else {
+    action = `Consider ${player.name} at ProGM Rank #${overallRank}${player.yahooAdp != null ? `, with a Yahoo ADP of ${player.yahooAdp}` : ''}.`;
+  }
+
+  const positions = (player.eligiblePositions || []).join('/') || 'their position';
+  const fit = player.rosterFit === 'need'
+    ? `fills a roster need at ${positions}`
+    : player.rosterFit === 'surplus'
+      ? `adds depth at ${positions}, where your roster is already strong`
+      : `adds ${positions} depth`;
+  let production;
+  if (projectionRank === 1 && projectionCount > 0) {
+    production = `${player.name} has the highest projected fantasy points per game among ${projectionCount} ${availabilityKnown ? 'available ' : ''}players with projections and ${fit}.`;
+  } else if (projectionRank != null && projectionCount > 0) {
+    production = `${player.name} projects #${projectionRank} of ${projectionCount} ${availabilityKnown ? 'available ' : ''}players in fantasy points per game and ${fit}.`;
+  } else {
+    production = `${player.name} ${fit}.`;
+  }
+
+  let context = nbaStatSentence(player);
+  const injured = player.status && !['Healthy', 'ACTIVE', 'NORMAL'].includes(player.status);
+  if (injured) {
+    const injury = `Yahoo currently lists ${player.name} as ${player.status}, so account for the availability risk.`;
+    context = context ? `${context.replace(/\.$/, '')}; Yahoo currently lists ${player.name} as ${player.status}.` : injury;
+  } else if (!context && player.lastSeasonYahooRank != null) {
+    context = `Yahoo ranked ${player.name} #${player.lastSeasonYahooRank} for the ${seasonLabel(player.lastSeasonYahooRankSeason)} season.`;
+  }
+  return [action, production, context].filter(Boolean).join(' ');
+}
+
 /**
  * @param {Object} params
  * @param {Array} params.players             candidate pool (normalized)
@@ -262,6 +330,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
 
   const decorate = (p, extra) => {
     const fit = rosterFit(p.eligiblePositions, thinSet, overloadedSet);
+    const previousSeason = Number.isFinite(Number(currentSeason)) ? String(Number(currentSeason) - 1) : null;
+    const seasonRanks = p.yahooSeasonRanks || p.yahooRanks?.bySeason || {};
     return {
       playerKey: p.playerKey,
       name: p.name,
@@ -281,6 +351,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       // Never feeds ProGM value/ranking; comparison is attached after sorting.
       yahooOverallRank: p.yahooOverallRank ?? p.yahooRanks?.overall ?? null,
       yahooSeasonRank: currentSeason != null ? (p.yahooSeasonRanks?.[String(currentSeason)] ?? p.yahooRanks?.bySeason?.[String(currentSeason)] ?? null) : null,
+      lastSeasonYahooRank: previousSeason != null ? (seasonRanks[previousSeason] ?? null) : null,
+      lastSeasonYahooRankSeason: previousSeason,
       yahooPriorSeasonRanks: (p.yahooSeasonRanks || p.yahooRanks?.bySeason)
         ? Object.entries(p.yahooSeasonRanks || p.yahooRanks.bySeason)
             .filter(([yr]) => currentSeason == null || String(yr) !== String(currentSeason))
@@ -321,6 +393,15 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       periodProjected: scheduleAware ? (period.periodProjectedPoints ?? null) : null, // display only
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
+      lastSeasonNba: proj?.lastSeason?.stats
+        ? {
+            season: proj.lastSeason.season,
+            points: oneDecimal(proj.lastSeason.stats.points),
+            rebounds: oneDecimal(proj.lastSeason.stats.rebounds),
+            assists: oneDecimal(proj.lastSeason.stats.assists),
+            gamesPlayed: oneDecimal(proj.lastSeason.stats.gamesPlayed),
+          }
+        : null,
     });
     // Historical availability (optional) rides on the projection object.
     const history = proj?.history ?? null;
@@ -356,6 +437,10 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
   // are attached for the UI but MUST NOT influence this global ordering (fit =>
   // "Best Fit" view; ADP => market label only). ProGM rank stays authoritative.
   const sorted = valued.sort((a, b) => b.value - a.value).slice(0, limit);
+  const projectionPool = valued
+    .filter((p) => !availabilityKnown || p.availability === 'available')
+    .sort((a, b) => b.perGame - a.perGame);
+  const projectionRankByKey = new Map(projectionPool.map((p, i) => [p.playerKey, i + 1]));
   const board = assignTiers(sorted).map((p, i) => {
     const overallRank = i + 1;
     // Market context compares ProGM rank (this board position) vs Yahoo ADP.
@@ -368,7 +453,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     });
     // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
     const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooOverallRank });
-    return {
+    const row = {
       overallRank, // ProGM Rank (authoritative ordering)
       ...p,
       adpVsProgm: market.adpVsProgm,
@@ -378,6 +463,15 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       rankAgreement: rankCmp.agreement,
       rankReason: rankCmp.reason,
     };
+    row.recommendation = buildDraftRecommendation({
+      player: row,
+      overallRank,
+      market,
+      projectionRank: projectionRankByKey.get(row.playerKey) ?? null,
+      projectionCount: projectionPool.length,
+      availabilityKnown,
+    });
+    return row;
   });
 
   return {

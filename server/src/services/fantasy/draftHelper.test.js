@@ -325,6 +325,45 @@ test('Yahoo Rank (overall + current-season S) is exposed per board row', () => {
   assert.deepEqual(row.yahooPriorSeasonRanks, [{ season: '2024', rank: 5 }]);
 });
 
+test('human recommendation uses available-player comparison, roster need, and verified last-season data', () => {
+  const players = [
+    { ...plRank('Star', ['PG'], 50, { overall: 3, bySeason: { 2026: 3, 2025: 2 } }), yahooAdp: 3.4 },
+    plRank('Other', ['C'], 30, { overall: 20, bySeason: { 2026: 18, 2025: 22 } }),
+  ];
+  const projections = new Map([
+    ['Star', { projectedPoints: 50, confidence: 0.9, lastSeason: { season: 2025, stats: { points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 } } }],
+    ['Other', { projectedPoints: 30, confidence: 0.8 }],
+  ]);
+  const res = buildDraftBoard({
+    players,
+    settings,
+    projectionProvider: { getProjection: (p) => projections.get(p.playerKey) || null },
+    rosterAnalysis: { positions: { thinPositions: [{ position: 'PG' }], overloadedPositions: [] } },
+    availabilityOf: () => true,
+    currentSeason: 2026,
+  });
+  const star = res.board.find((p) => p.name === 'Star');
+  assert.equal(star.lastSeasonYahooRank, 2);
+  assert.equal(star.yahooSeasonRank, 3); // current rank remains distinct
+  assert.deepEqual(star.lastSeasonNba, { season: 2025, points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 });
+  assert.match(star.recommendation, /highest projected fantasy points per game among 2 available players/i);
+  assert.match(star.recommendation, /fills a roster need at PG/i);
+  assert.match(star.recommendation, /28.2 NBA points, 8.1 rebounds, and 7.4 assists/i);
+});
+
+test('recommendation never presents a rostered player as available', () => {
+  const players = [plRank('Rostered Star', ['PG'], 50, { overall: 3, bySeason: { 2026: 3 } })];
+  const row = buildDraftBoard({
+    players,
+    settings,
+    projectionProvider: providerPlain(players),
+    availabilityOf: () => false,
+    currentSeason: 2026,
+  }).board[0];
+  assert.match(row.recommendation, /already rostered/i);
+  assert.doesNotMatch(row.recommendation, /highest projected.*available/i);
+});
+
 test('season rank is null when Yahoo has no rank for the current league season', () => {
   const players = [plRank('A', ['PG'], 40, { overall: 5, bySeason: { 2024: 8 } })];
   const row = buildDraftBoard({ players, settings, projectionProvider: providerPlain(players), currentSeason: 2025 }).board[0];

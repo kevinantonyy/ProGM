@@ -142,7 +142,7 @@ export function yahooDraftPlayersPath(leagueKey, subresource = 'percent_owned') 
 /** Fetch one Yahoo sub-resource for an exact, identity-safe player-key batch. */
 export function yahooPlayerKeysPath(leagueKey, playerKeys, subresource) {
   const keys = (playerKeys || []).filter(Boolean).map((key) => encodeURIComponent(key)).join(',');
-  return `/league/${leagueKey}/players;player_keys=${keys}/${subresource}`;
+  return `/league/${leagueKey}/players;player_keys=${keys}${subresource ? `/${subresource}` : ''}`;
 }
 
 /** Merge independently fetched Yahoo player sub-resources by stable player_key. */

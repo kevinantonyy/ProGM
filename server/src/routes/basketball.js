@@ -13,7 +13,7 @@ import { authenticate } from '../middleware/auth.js';
 import { accessTokenFor, yahooFantasy } from './yahoo.js';
 import {
   extractUserLeagues, extractUserTeams, normalizeLeagueSettings,
-  extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath, mergeYahooPlayerMetadata,
+  extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath, yahooPlayerKeysPath, mergeYahooPlayerMetadata,
 } from '../services/fantasy/normalize.js';
 import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspace.js';
 import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
@@ -246,9 +246,20 @@ router.get('/draft', authenticate, async (req, res) => {
     let board = { available: false, availabilityKnown: true, board: [], noData: [], note: 'Projections unavailable.' };
     let externalAvailable = false;
     if (settings && scoringIsSupported(settings)) {
-      const myRosterPlayers = allPicks
-        .filter((p) => myPickKeys.has(p.playerKey))
-        .map((p) => ({ playerKey: p.playerKey, name: '', eligiblePositions: [], teamAbbr: null }));
+      let myRosterPlayers = [];
+      if (myPickKeys.size) {
+        try {
+          const rosterPlayersData = await yahooFantasy(yahooPlayerKeysPath(leagueKey, [...myPickKeys]), token);
+          const leagueNode = rosterPlayersData?.fantasy_content?.league;
+          const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
+          myRosterPlayers = extractPlayerList(playersNode);
+        } catch {
+          // Preserve live sync if optional roster metadata is temporarily unavailable.
+          myRosterPlayers = allPicks
+            .filter((p) => myPickKeys.has(p.playerKey))
+            .map((p) => ({ playerKey: p.playerKey, name: '', eligiblePositions: [], teamAbbr: null }));
+        }
+      }
       const ctx = await buildProjectionContext({
         season: league?.season,
         players: [...availablePlayers, ...myRosterPlayers],
