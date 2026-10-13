@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import LoadingState from '../components/LoadingState';
 
 // Daily front office. Surfaces REAL opportunities from ProGM's analytics for
 // whichever leagues the user has connected. Football uses the ESPN workspace;
@@ -82,11 +83,11 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
-  if (loading) return <div className="space-y-5"><h1 className="text-3xl font-black">{greeting}, {user?.username || 'GM'}</h1><section className="card"><p className="text-dark-300 animate-pulse">Building your front-office briefing…</p></section></div>;
+  if (loading) return <div className="space-y-5"><h1 className="text-3xl font-black">{greeting}, {user?.username || 'GM'}</h1><LoadingState label="Building your front-office briefing…" /></div>;
 
   if (!sections.length) return (
     <div className="space-y-5"><h1 className="text-3xl font-black">{greeting}, {user?.username || 'GM'}</h1>
-      <section className="card"><p className="text-dark-300">Connect a league to unlock your daily front office.</p><Link to="/sync" className="btn-primary mt-4 inline-block">Sync a league</Link></section>
+      <section className="empty-state"><p>Connect a league to unlock your daily front office.</p><Link to="/sync" className="btn-primary mt-4">Sync a league</Link></section>
     </div>
   );
 

@@ -9,10 +9,11 @@ import SportWorkspace from './pages/SportWorkspace';
 import BasketballWorkspace from './pages/BasketballWorkspace';
 import Home from './pages/Home';
 import Settings from './pages/Settings';
+import LoadingState from './components/LoadingState';
 
 function ProtectedRoute({ children }) {
   const { token, loading } = useAuth();
-  if (loading) return <div className="flex items-center justify-center h-screen"><div className="text-primary-400 text-xl">Loading...</div></div>;
+  if (loading) return <div className="flex min-h-screen items-center justify-center bg-dark-950 p-4"><LoadingState label="Opening ProGM…" /></div>;
   if (!token) return <Navigate to="/login" />;
   return children;
 }

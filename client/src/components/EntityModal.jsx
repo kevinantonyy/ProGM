@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 const EntityContext = createContext(null);
@@ -38,6 +38,8 @@ function TeamProfile({ team, roster }) {
 
 export default function EntityModalProvider({ data, children }) {
   const [entity, setEntity] = useState(null);
+  const closeRef = useRef(null);
+  const previousFocus = useRef(null);
   const teams = useMemo(() => data.leagueHub.standings.map(team => ({ ...team, name: team.name })), [data]);
   const findTeam = name => teams.find(team => team.name === name);
   const context = { data, openPlayer: player => setEntity({ type: 'player', value: player }), openTeam: team => setEntity({ type: 'team', value: findTeam(team?.name || team?.teamName) || team }) };
@@ -50,5 +52,13 @@ export default function EntityModalProvider({ data, children }) {
     const team = findTeam(text);
     if (team) context.openTeam(team);
   }
-  return <EntityContext.Provider value={context}><div onClickCapture={openPlainEntity}>{children}</div>{entity && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm" onMouseDown={() => setEntity(null)}><div role="dialog" aria-modal="true" className="w-full max-w-2xl rounded-2xl border border-dark-600 bg-dark-800 p-4 shadow-2xl sm:p-6" onMouseDown={event => event.stopPropagation()}><div className="mb-4 flex justify-end"><button type="button" onClick={() => setEntity(null)} className="btn-secondary px-3 py-1.5 text-sm">Close</button></div>{entity.type === 'player' ? <PlayerProfile player={entity.value} findTeam={findTeam} /> : <TeamProfile team={entity.value} roster={rosterFor(entity.value)} />}</div></div>}</EntityContext.Provider>;
+  useEffect(() => {
+    if (!entity) return undefined;
+    previousFocus.current = document.activeElement;
+    closeRef.current?.focus();
+    const onKeyDown = (event) => { if (event.key === 'Escape') setEntity(null); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => { document.removeEventListener('keydown', onKeyDown); previousFocus.current?.focus?.(); };
+  }, [entity]);
+  return <EntityContext.Provider value={context}><div onClickCapture={openPlainEntity}>{children}</div>{entity && <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 backdrop-blur-sm" onMouseDown={() => setEntity(null)}><div role="dialog" aria-modal="true" aria-label={`${entity.type === 'player' ? entity.value.name : entity.value.name || entity.value.teamName} details`} className="w-full max-w-2xl rounded-2xl border border-dark-600 bg-dark-800 p-4 shadow-2xl sm:p-6" onMouseDown={event => event.stopPropagation()}><div className="mb-4 flex justify-end"><button ref={closeRef} type="button" onClick={() => setEntity(null)} className="btn-secondary px-3 py-1.5 text-sm">Close</button></div>{entity.type === 'player' ? <PlayerProfile player={entity.value} findTeam={findTeam} /> : <TeamProfile team={entity.value} roster={rosterFor(entity.value)} />}</div></div>}</EntityContext.Provider>;
 }

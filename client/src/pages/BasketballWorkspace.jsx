@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import BasketballPlayerProfileProvider, { PlayerLink } from '../components/BasketballPlayerProfile';
+import LoadingState from '../components/LoadingState';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -38,12 +39,12 @@ function Freshness({ external }) {
 }
 
 function SecondaryDetails({ label = 'Details', children, className = '' }) {
-  return <details className={`text-xs text-dark-400 ${className}`}><summary className="cursor-pointer font-semibold text-dark-400 hover:text-primary-400">{label}</summary><div className="mt-2 leading-5 text-dark-400">{children}</div></details>;
+  return <details className={`secondary-details text-xs ${className}`}><summary>{label}</summary><div className="mt-2 leading-5 text-dark-400">{children}</div></details>;
 }
 
 function PlayerRow({ player, showProj = true }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-dark-700 py-3 last:border-0">
+    <div className="player-row">
       <div className="flex min-w-0 items-center gap-3">
         <div className="min-w-0">
           <PlayerLink player={player}>{player.name}</PlayerLink>
@@ -65,10 +66,10 @@ function Overview({ data }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <div className="card"><p className="stat-label">Roster</p><p className="stat-value mt-1">{data.analysis.rosterSize}</p></div>
-        <div className="card"><p className="stat-label">Team projected</p><p className="stat-value mt-1">{data.analysis.totalProjected ?? '—'}</p></div>
-        <div className="card"><p className="stat-label">Injuries</p><p className={`stat-value mt-1 ${data.analysis.injured ? 'text-red-400' : 'text-green-400'}`}>{data.analysis.injured}</p></div>
-        <div className="card">
+        <div className="stat-card"><p className="stat-label">Roster</p><p className="stat-value mt-1">{data.analysis.rosterSize}</p></div>
+        <div className="stat-card"><p className="stat-label">Team projected</p><p className="stat-value mt-1">{data.analysis.totalProjected ?? '—'}</p></div>
+        <div className="stat-card"><p className="stat-label">Injuries</p><p className={`stat-value mt-1 ${data.analysis.injured ? 'text-red-400' : 'text-green-400'}`}>{data.analysis.injured}</p></div>
+        <div className="stat-card">
           <p className="stat-label">Team rating</p>
           {rating?.available && rating.overall != null ? (
             <><p className="stat-value mt-1">{rating.overall}<span className="text-base text-dark-500">/99</span></p><p className="text-xs text-dark-400">{rating.rank}{rating.rank ? nth(rating.rank) : ''} of {rating.teamCount} teams</p></>
@@ -109,7 +110,8 @@ function Overview({ data }) {
                 <p className="font-semibold">{rec.recommendation}</p>
                 {rec.projectedImpact && <span className="badge-green shrink-0">+{rec.projectedImpact.value} {rec.projectedImpact.metric}</span>}
               </div>
-              {rec.reasons?.length > 0 && <ul className="mt-2 space-y-0.5">{rec.reasons.map((r, j) => <li key={j} className="text-xs text-dark-400">· {r}</li>)}</ul>}
+              {rec.reasons?.[0] && <p className="mt-2 text-xs leading-5 text-dark-400">{rec.reasons[0]}</p>}
+              {rec.reasons?.length > 1 && <SecondaryDetails label="More context" className="mt-2">{rec.reasons.slice(1).map((reason) => <p key={reason}>· {reason}</p>)}</SecondaryDetails>}
               <div className="mt-2 flex flex-wrap gap-1.5">{(rec.dataSources || []).map((s) => <span key={s} className="badge-blue">{s}</span>)}</div>
             </div>))}
           </div>
@@ -729,7 +731,7 @@ export default function BasketballWorkspace() {
     return () => controller.abort();
   }, [leagueKey]);
 
-  if (loading && !data) return <div className="text-primary-400 animate-pulse">Loading your Fantasy Basketball…</div>;
+  if (loading && !data) return <LoadingState label="Loading Fantasy Basketball…" />;
   if (error && !data) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">Fantasy Basketball</h1><p className="mt-3 text-dark-300">{error}</p><Link to="/sync" className="btn-primary mt-5 inline-block">Sync your league</Link></div>;
   if (leagues && !leagues.length) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">No Yahoo leagues</h1><p className="mt-2 text-sm text-dark-400">Yahoo did not return an NBA fantasy league for this account.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Check Yahoo connection</Link></div>;
   if (!data) return null;
@@ -753,9 +755,9 @@ export default function BasketballWorkspace() {
         </div>
       </header>
 
-      <nav className="flex gap-5 overflow-x-auto border-b border-dark-700">
+      <nav aria-label="Basketball workspace" className="tab-bar">
         {SECTIONS.map(([key, label]) => (
-          <button key={key} onClick={() => navigate(`/basketball/${key}`)} className={`whitespace-nowrap border-b-2 px-0.5 py-3 text-sm font-semibold transition-colors ${active === key ? 'border-primary-500 text-primary-400' : 'border-transparent text-dark-400 hover:border-dark-600 hover:text-dark-50'}`}>{label}</button>
+          <button key={key} onClick={() => navigate(`/basketball/${key}`)} aria-current={active === key ? 'page' : undefined} className={`tab-button ${active === key ? 'tab-button-active' : ''}`}>{label}</button>
         ))}
       </nav>
 

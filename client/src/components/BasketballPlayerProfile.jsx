@@ -189,7 +189,7 @@ export default function BasketballPlayerProfileProvider({ data, children }) {
     <PlayerProfileContext.Provider value={context}>
       {children}
       {selected && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/75 sm:items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
           <div role="dialog" aria-modal="true" aria-labelledby="player-profile-title" className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-lg border border-dark-600 bg-dark-800 shadow-xl sm:rounded-md">
             <div onClick={(event) => { if (event.target.closest('[data-profile-close]')) close(); }}><PlayerProfile player={selected} data={data} closeRef={closeRef} /></div>
           </div>

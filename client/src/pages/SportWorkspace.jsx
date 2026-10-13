@@ -10,13 +10,14 @@ import StartSit from '../components/StartSit';
 import Rankings from '../components/Rankings';
 import AIManager from '../components/AIManager';
 import WaiverWire from '../components/WaiverWire';
+import LoadingState from '../components/LoadingState';
 
 const SECTIONS = [
   ['overview', 'My Team'], ['league', 'League Hub'], ['gm', 'Ask ProGM'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
 ];
 
 function PlayerRow({ player, detail }) {
-  return <div className="flex items-center justify-between gap-4 border-b border-dark-700 py-3 last:border-0">
+  return <div className="player-row">
     <div className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-600/20 text-xs font-bold text-primary-400">{player.position}</span><div className="min-w-0"><PlayerButton player={player} className="block max-w-full truncate">{player.name}</PlayerButton><p className="truncate text-xs text-dark-400">{detail || `${player.injuryStatus} · ${player.percentOwned.toFixed(1)}% rostered`}</p></div></div>
     <div className="shrink-0 text-right"><p className="font-bold text-primary-400">{player.projectedPoints.toFixed(1)}</p><p className="text-xs text-dark-400">projected</p></div>
   </div>;
@@ -40,12 +41,12 @@ export default function SportWorkspace() {
   useEffect(() => { if (active === 'league') load(true, true); }, [active, sport]);
   useEffect(() => { if (!liveDraft || active !== 'draft') return undefined; const timer = setInterval(() => load(true, true), 15000); return () => clearInterval(timer); }, [liveDraft, active, sport]);
   const filteredPlayers = useMemo(() => data?.players || [], [data]);
-  if (loading) return <div className="text-primary-400 animate-pulse">Loading your real league data…</div>;
+  if (loading) return <LoadingState label="Loading your league data…" />;
   if (error) return <div className="card max-w-2xl"><p className="text-4xl">{icon}</p><h1 className="mt-3 text-2xl font-bold">{label}</h1><p className="mt-3 text-dark-300">{error}</p><p className="mt-2 text-sm text-dark-400">Sync the matching ESPN league to unlock your roster, players, personalized trades, waivers, and draft board.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Sync your league</Link></div>;
   if (matchupId) return <EntityModalProvider data={data}><MatchupDetails data={data} matchupId={matchupId} /></EntityModalProvider>;
   return <EntityModalProvider data={data}><div className="space-y-7">
     <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-semibold uppercase tracking-widest text-primary-400">{icon} {label}</p><h1 className="mt-1 text-3xl font-bold">{data.connection.teamName}</h1><p className="mt-1 text-dark-400">{data.connection.leagueName} · {data.connection.season}</p></div><button onClick={() => load(true)} className="btn-secondary">↻ Refresh ESPN data</button></header>
-    <nav className="flex gap-5 overflow-x-auto border-b border-dark-700">{SECTIONS.map(([key, text]) => <button key={key} onClick={() => navigate(`/${sport}/${key}`)} className={`whitespace-nowrap border-b-2 px-0.5 py-3 text-sm font-semibold transition-colors ${active === key ? 'border-primary-500 text-primary-400' : 'border-transparent text-dark-400 hover:border-dark-600 hover:text-dark-50'}`}>{text}</button>)}</nav>
+    <nav aria-label={`${label} workspace`} className="tab-bar">{SECTIONS.map(([key, text]) => <button key={key} onClick={() => navigate(`/${sport}/${key}`)} aria-current={active === key ? 'page' : undefined} className={`tab-button ${active === key ? 'tab-button-active' : ''}`}>{text}</button>)}</nav>
     {active === 'overview' && <div className="space-y-6"><div className="grid grid-cols-2 gap-4 lg:grid-cols-4"><div className="card"><p className="stat-label">Roster Size</p><p className="stat-value mt-1">{data.analysis.rosterSize}</p></div><div className="card"><p className="stat-label">Projected Points</p><p className="stat-value mt-1">{data.analysis.totalProjected}</p></div><div className="card"><p className="stat-label">Average</p><p className="stat-value mt-1">{data.analysis.avgProjected}</p></div><div className="card"><p className="stat-label">Injury Concerns</p><p className={`stat-value mt-1 ${data.analysis.injured ? 'text-red-400' : 'text-green-400'}`}>{data.analysis.injured}</p></div></div><div className="grid gap-6 xl:grid-cols-2"><section className="card"><h2 className="mb-3 text-xl font-bold">My roster</h2>{data.myTeam.roster.sort((a,b)=>b.projectedPoints-a.projectedPoints).map(player => <PlayerRow key={player.id} player={player} />)}</section><section className="card"><h2 className="text-xl font-bold">Personalization profile</h2><p className="mt-2 text-sm leading-6 text-dark-300">Every recommendation uses this league's scoring, available player pool, your roster construction, injuries, ESPN projections, and expert draft ranks.</p><div className="mt-5"><p className="stat-label">Top roster needs</p><div className="mt-2 flex flex-wrap gap-2">{data.needs.slice(0,5).map(need => <span key={need} className="badge-blue">{need}</span>)}</div></div><div className="mt-5 grid grid-cols-2 gap-3 text-sm"><div className="rounded-lg bg-dark-900 p-3"><p className="text-dark-400">Scoring</p><p className="mt-1 font-semibold">{data.settings.scoringType}</p></div><div className="rounded-lg bg-dark-900 p-3"><p className="text-dark-400">League teams</p><p className="mt-1 font-semibold">{data.settings.teamCount || data.opponents.length + 1}</p></div></div></section></div></div>}
     {active === 'league' && <LeagueHub data={data} onRefresh={() => load(true, true)} />}
     {active === 'gm' && <AIManager data={data} />}

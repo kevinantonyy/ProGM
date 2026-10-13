@@ -31,6 +31,7 @@ export default function Layout() {
 
   return (
     <div className="app-shell flex min-h-screen flex-col bg-dark-950 md:flex-row">
+      <a href="#main-content" className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-sm bg-primary-500 px-3 py-2 text-sm font-bold text-white transition-transform focus:translate-y-0">Skip to content</a>
       {/* Sidebar */}
       <aside className="site-nav flex w-full shrink-0 flex-col border-b border-black bg-[#151515] text-white md:min-h-screen md:w-60 md:border-b-0 md:border-r">
         {/* Logo */}
@@ -43,7 +44,7 @@ export default function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex flex-1 gap-1 overflow-x-auto p-2 md:block md:space-y-1 md:p-3">
+        <nav aria-label="Primary navigation" className="flex flex-1 gap-1 overflow-x-auto p-2 md:block md:space-y-1 md:p-3">
           {navItems.map(item => (
             <NavLink
               key={item.to}
@@ -81,8 +82,8 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1600px] p-4 md:p-6">
+      <main id="main-content" tabIndex="-1" className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1600px] p-4 sm:p-5 md:p-7">
           <Outlet />
         </div>
       </main>

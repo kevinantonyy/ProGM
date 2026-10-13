@@ -33,12 +33,20 @@
     @apply bg-dark-950 text-dark-50 antialiased;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-feature-settings: 'tnum' 1, 'cv02' 1, 'cv03' 1, 'cv04' 1;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
   }
 
   h1, h2, h3 {
     font-family: 'Barlow Condensed', 'Inter', sans-serif;
     letter-spacing: 0.01em;
+    line-height: 1.12;
   }
+
+  button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+  button:not(:disabled), summary { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  ::selection { background: rgb(var(--primary-500) / 24%); }
 
   :focus-visible {
     outline: 2px solid rgb(var(--primary-500));
@@ -54,13 +62,14 @@
     box-shadow: var(--surface-shadow);
   }
   .card-hover {
-    @apply card transition-colors duration-150 hover:border-primary-500;
+    @apply card transition duration-150 hover:-translate-y-0.5 hover:border-primary-500;
+    box-shadow: var(--surface-shadow);
   }
   .btn-primary {
-    @apply rounded-sm border border-primary-500 bg-primary-500 px-4 py-2 font-semibold text-white transition-colors duration-150 hover:border-primary-600 hover:bg-primary-600;
+    @apply inline-flex min-h-10 items-center justify-center rounded-sm border border-primary-500 bg-primary-500 px-4 py-2 text-sm font-semibold text-white transition duration-150 hover:border-primary-600 hover:bg-primary-600 active:translate-y-px disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-secondary {
-    @apply rounded-sm border border-dark-600 bg-dark-800 px-4 py-2 font-semibold text-dark-200 transition-colors duration-150 hover:border-primary-500 hover:bg-dark-900 hover:text-dark-50;
+    @apply inline-flex min-h-10 items-center justify-center rounded-sm border border-dark-600 bg-dark-800 px-4 py-2 text-sm font-semibold text-dark-200 transition duration-150 hover:border-primary-500 hover:bg-dark-900 hover:text-dark-50 active:translate-y-px disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-danger {
     @apply rounded-sm px-4 py-2 font-semibold transition-colors duration-150;
@@ -69,7 +78,7 @@
     color: rgb(var(--semantic-red));
   }
   .input-field {
-    @apply w-full rounded-sm border border-dark-600 bg-dark-800 px-3 py-2 text-dark-50 placeholder-dark-500 transition-colors focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
+    @apply min-h-10 w-full rounded-sm border border-dark-600 bg-dark-800 px-3 py-2 text-sm text-dark-50 placeholder-dark-500 transition-colors focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
   }
   .badge {
     @apply inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold;
@@ -101,6 +110,55 @@
   .stat-label {
     @apply text-xs font-semibold uppercase tracking-wide text-dark-400;
   }
+  .stat-card {
+    @apply card min-h-24;
+  }
+  .player-row {
+    @apply flex items-center justify-between gap-3 border-b border-dark-700 py-3 transition-colors last:border-0 hover:bg-dark-900/60 sm:gap-4 sm:px-2;
+  }
+  .tab-bar {
+    @apply flex gap-1 overflow-x-auto border-b border-dark-700;
+    scrollbar-width: thin;
+  }
+  .tab-button {
+    @apply relative shrink-0 whitespace-nowrap border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-dark-400 transition-colors duration-150 hover:bg-dark-900 hover:text-dark-50;
+  }
+  .tab-button-active {
+    @apply border-primary-500 text-primary-400;
+    background: rgb(var(--primary-500) / 6%);
+  }
+  .loading-state {
+    @apply card mx-auto mt-4 max-w-3xl p-5 sm:p-6;
+  }
+  .loading-mark {
+    @apply h-3 w-3 rounded-full bg-primary-500;
+    animation: progm-pulse 1.2s ease-in-out infinite;
+  }
+  .skeleton-block {
+    @apply block rounded-sm bg-dark-700;
+    animation: progm-skeleton 1.4s ease-in-out infinite;
+  }
+  .empty-state {
+    @apply card flex min-h-36 flex-col items-center justify-center text-center text-sm text-dark-400;
+  }
+  .secondary-details {
+    @apply text-sm text-dark-400;
+  }
+  .secondary-details > summary {
+    @apply w-fit rounded-sm font-semibold text-dark-400 transition-colors hover:text-primary-400;
+  }
+  .secondary-details[open] > summary {
+    @apply text-primary-400;
+  }
+
+  .app-shell table { border-collapse: collapse; }
+  .app-shell thead { background: rgb(var(--dark-900) / 78%); }
+  .app-shell th { @apply text-xs uppercase tracking-wide text-dark-400; }
+  .app-shell tbody tr { @apply transition-colors duration-150 hover:bg-dark-900/70; }
+  .app-shell td { line-height: 1.35; }
+
+  .modal-backdrop { animation: progm-fade-in 140ms ease-out both; }
+  [role='dialog'] { animation: progm-dialog-in 180ms ease-out both; }
 }
 
 @layer utilities {
@@ -130,8 +188,6 @@
   }
 
   .app-shell .backdrop-blur-sm { backdrop-filter: none; }
-  .app-shell main [class*='hover:-translate']:hover { transform: none; }
-
   .app-shell .rounded-2xl,
   .app-shell .rounded-xl {
     border-radius: 6px;
@@ -141,5 +197,19 @@
   .app-shell .shadow-xl,
   .app-shell .shadow-2xl {
     box-shadow: var(--surface-shadow);
+  }
+}
+
+@keyframes progm-pulse { 50% { opacity: .35; transform: scale(.82); } }
+@keyframes progm-skeleton { 0%, 100% { opacity: .5; } 50% { opacity: .9; } }
+@keyframes progm-fade-in { from { opacity: 0; } }
+@keyframes progm-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
