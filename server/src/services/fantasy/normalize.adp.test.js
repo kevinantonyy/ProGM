@@ -4,7 +4,13 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePlayer, parseYahooRanks, yahooDraftPlayersPath, yahooRosterPlayersPath } from './normalize.js';
+import {
+  mergeYahooPlayerMetadata,
+  normalizePlayer,
+  parseYahooRanks,
+  yahooDraftPlayersPath,
+  yahooPlayerKeysPath,
+} from './normalize.js';
 
 // Build a Yahoo player tuple: [ [props...], {draft_analysis:[...]} ].
 function playerWithDraftAnalysis(da) {
@@ -130,18 +136,36 @@ test('roster tuple keeps missing and malformed Yahoo draft metadata null', () =>
   assert.deepEqual(p.yahooSeasonRanks, {});
 });
 
-test('Draft Helper batches ownership, ADP, and ranks in one players request', () => {
-  const path = yahooDraftPlayersPath('466.l.123');
-  assert.equal(path, '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/percent_owned;draft_analysis;ranks');
-  assert.equal((path.match(/\/players/g) || []).length, 1);
-  assert.match(path, /[;/]ranks$/);
-  assert.doesNotMatch(path, /player_ranks/);
+test('Draft Helper requests each Yahoo player sub-resource in a separate batch', () => {
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'percent_owned'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/percent_owned');
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'draft_analysis'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/draft_analysis');
+  assert.equal(yahooDraftPlayersPath('466.l.123', 'ranks'), '/league/466.l.123/players;status=A;sort=OR;start=0;count=50/ranks');
 });
 
-test('rostered Draft Helper players request ADP and ranks in one team request', () => {
-  const path = yahooRosterPlayersPath('466.l.123.t.7');
-  assert.equal(path, '/team/466.l.123.t.7/roster/players/draft_analysis;ranks');
-  assert.equal((path.match(/\/players/g) || []).length, 1);
-  assert.match(path, /\/draft_analysis;ranks$/);
+test('rostered Draft Helper metadata uses exact Yahoo player keys and league', () => {
+  const path = yahooPlayerKeysPath('466.l.123', ['466.p.1', '466.p.2'], 'ranks');
+  assert.equal(path, '/league/466.l.123/players;player_keys=466.p.1,466.p.2/ranks');
   assert.doesNotMatch(path, /status=A/);
+});
+
+test('separate Yahoo ADP and rank responses merge only by stable player key', () => {
+  const base = [{ playerKey: '466.p.1', name: 'One', yahooAdp: null, yahooOverallRank: null }, { playerKey: '466.p.2', name: 'Two' }];
+  const adp = [{ playerKey: '466.p.1', yahooAdp: 3.4, yahooAvgRound: 1, yahooPercentDrafted: 99.8 }];
+  const ranks = [{ playerKey: '466.p.1', yahooRanks: { overall: 3, bySeason: { 2026: 3 } }, yahooOverallRank: 3, yahooSeasonRanks: { 2026: 3 } }];
+  const merged = mergeYahooPlayerMetadata(base, adp, ranks);
+  assert.equal(merged[0].yahooAdp, 3.4);
+  assert.equal(merged[0].yahooOverallRank, 3);
+  assert.equal(merged[0].yahooSeasonRanks['2026'], 3);
+  assert.equal(merged[1].yahooAdp, undefined);
+  assert.equal(merged[1].yahooOverallRank, undefined);
+});
+
+test('malformed or missing Yahoo metadata never overwrites valid values with zero', () => {
+  const base = [{ playerKey: '466.p.1', yahooAdp: null, yahooOverallRank: null }];
+  const malformed = [normalizePlayer([
+    [{ player_key: '466.p.1' }, { name: { full: 'Test' } }],
+    { draft_analysis: [{ average_pick: 'bad' }] },
+    { player_ranks: [{ player_rank: { rank_type: 'OR', rank_value: '0' } }] },
+  ])];
+  assert.deepEqual(mergeYahooPlayerMetadata(base, malformed), base);
 });

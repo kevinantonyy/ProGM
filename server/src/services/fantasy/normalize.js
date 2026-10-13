@@ -134,14 +134,38 @@ function yahooNumOrNull(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** One batched Draft Helper request: ownership + ADP + Yahoo ranks. */
-export function yahooDraftPlayersPath(leagueKey) {
-  return `/league/${leagueKey}/players;status=A;sort=OR;start=0;count=50/percent_owned;draft_analysis;ranks`;
+/** One available-player batch for a single Yahoo player sub-resource. */
+export function yahooDraftPlayersPath(leagueKey, subresource = 'percent_owned') {
+  return `/league/${leagueKey}/players;status=A;sort=OR;start=0;count=50/${subresource}`;
 }
 
-/** Roster players plus the same Yahoo draft metadata, in one team request. */
-export function yahooRosterPlayersPath(teamKey) {
-  return `/team/${teamKey}/roster/players/draft_analysis;ranks`;
+/** Fetch one Yahoo sub-resource for an exact, identity-safe player-key batch. */
+export function yahooPlayerKeysPath(leagueKey, playerKeys, subresource) {
+  const keys = (playerKeys || []).filter(Boolean).map((key) => encodeURIComponent(key)).join(',');
+  return `/league/${leagueKey}/players;player_keys=${keys}/${subresource}`;
+}
+
+/** Merge independently fetched Yahoo player sub-resources by stable player_key. */
+export function mergeYahooPlayerMetadata(players, ...metadataSets) {
+  const metadataByKey = new Map();
+  for (const set of metadataSets) {
+    for (const player of set || []) {
+      if (!player?.playerKey) continue;
+      const metadata = metadataByKey.get(player.playerKey) || {};
+      for (const field of ['percentOwned', 'yahooAdp', 'yahooAvgRound', 'yahooPercentDrafted']) {
+        if (player[field] != null) metadata[field] = player[field];
+      }
+      if (player.yahooRanks) {
+        metadata.yahooRanks = player.yahooRanks;
+        metadata.yahooOverallRank = player.yahooOverallRank ?? player.yahooRanks.overall ?? null;
+        metadata.yahooSeasonRanks = player.yahooSeasonRanks || player.yahooRanks.bySeason || {};
+      }
+      metadataByKey.set(player.playerKey, metadata);
+    }
+  }
+  return (players || []).map((player) => (
+    metadataByKey.has(player.playerKey) ? { ...player, ...metadataByKey.get(player.playerKey) } : player
+  ));
 }
 
 /**

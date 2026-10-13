@@ -13,7 +13,7 @@ import { authenticate } from '../middleware/auth.js';
 import { accessTokenFor, yahooFantasy } from './yahoo.js';
 import {
   extractUserLeagues, extractUserTeams, normalizeLeagueSettings,
-  extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath,
+  extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath, mergeYahooPlayerMetadata,
 } from '../services/fantasy/normalize.js';
 import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspace.js';
 import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
@@ -44,17 +44,27 @@ const ADP_FETCH_TTL = 60 * 1000;
 
 /**
  * Fetch the available-player pool with ownership, Yahoo ADP, and Yahoo Rank in
- * one batched request (count=50), cached briefly and shared. Never per-player.
+ * separate batched sub-resource requests (Yahoo only returns the first appended
+ * sub-resource), cached briefly and shared. Never per-player.
  */
 async function fetchAvailableWithAdp(leagueKey, token) {
-  const key = `bball:availAdp:${leagueKey}`;
+  const key = `bball:availDraftMetadata:v2:${leagueKey}`;
   const cached = cache.get(key);
   if (cached && !cached.meta.stale) return cached.value;
-  // Ownership, ADP, and Yahoo Rank arrive in the existing league-wide batch.
-  // Never fetch these signals per player or let them affect ProGM ordering.
-  const data = await yahooFantasy(yahooDraftPlayersPath(leagueKey), token);
-  cache.set(key, data, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
-  return data;
+  const ownership = await yahooFantasy(yahooDraftPlayersPath(leagueKey, 'percent_owned'), token);
+  const optional = await Promise.allSettled([
+    yahooFantasy(yahooDraftPlayersPath(leagueKey, 'draft_analysis'), token),
+    yahooFantasy(yahooDraftPlayersPath(leagueKey, 'ranks'), token),
+  ]);
+  const normalizeResponse = (data) => {
+    const leagueNode = data?.fantasy_content?.league;
+    const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
+    return extractPlayerList(playersNode);
+  };
+  const metadataSets = optional.map((result) => (result.status === 'fulfilled' ? normalizeResponse(result.value) : []));
+  const players = mergeYahooPlayerMetadata(normalizeResponse(ownership), ...metadataSets);
+  cache.set(key, players, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
+  return players;
 }
 
 async function requireToken(req, res) {
@@ -216,11 +226,8 @@ router.get('/draft', authenticate, async (req, res) => {
     // even mid-draft (Yahoo marks players taken as they are picked).
     let availablePlayers = [];
     try {
-      // One batched request (count=50) for ownership, ADP, and Yahoo Rank.
-      const playersData = await fetchAvailableWithAdp(leagueKey, token);
-      const leagueNode = playersData?.fantasy_content?.league;
-      const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
-      availablePlayers = extractPlayerList(playersNode);
+      // Separate cached batches for ownership, ADP, and Yahoo Rank.
+      availablePlayers = await fetchAvailableWithAdp(leagueKey, token);
     } catch {
       availablePlayers = [];
     }

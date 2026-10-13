@@ -25,7 +25,8 @@ import {
   extractStandings,
   extractPlayerList,
   yahooDraftPlayersPath,
-  yahooRosterPlayersPath,
+  yahooPlayerKeysPath,
+  mergeYahooPlayerMetadata,
 } from './normalize.js';
 import { scoringIsSupported } from './scoring.js';
 import { analyzeRoster } from './rosterAnalysis.js';
@@ -109,6 +110,20 @@ async function fetchOpponentRoster(yahooFantasy, accessToken, teamKey) {
   }
 }
 
+function extractLeaguePlayers(data) {
+  const leagueNode = data?.fantasy_content?.league;
+  const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
+  return extractPlayerList(playersNode);
+}
+
+async function optionalPlayersRequest(yahooFantasy, accessToken, path) {
+  try {
+    return extractLeaguePlayers(await yahooFantasy(path, accessToken));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Build the full basketball workspace.
  * @param {Object} params
@@ -122,28 +137,39 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
     yahooFantasy(`/league/${leagueKey}/standings`, accessToken),
-    // Draft Helper also includes the user's roster. Request Yahoo's optional
-    // market/rank sub-resources here so rostered players do not lose metadata
-    // merely because the league-wide status=A query excludes them.
-    yahooFantasy(yahooRosterPlayersPath(teamKey), accessToken),
+    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken),
   ]);
 
   const league = normalizeLeagueSettings(settingsData);
   const settings = league?.settings || null;
   const standings = extractStandings(standingsData);
-  const myRoster = extractRosterPlayers(rosterData);
+  let myRoster = extractRosterPlayers(rosterData);
   const myStanding = standings.find((t) => t.teamKey === teamKey) || standings.find((t) => t.isOwnedByLogin) || null;
 
-  // 2. Available player pool with ownership, Yahoo ADP, and Yahoo Rank in one
-  //    league-wide batch. These are Draft Helper context only.
+  // 2. Yahoo returns only the first appended player sub-resource. Fetch each
+  //    dataset in its own league-wide batch, then merge strictly by player_key.
+  //    These fields remain Draft Helper context and never affect ProGM ranking.
   let availablePlayers = [];
   try {
-    const playersData = await yahooFantasy(yahooDraftPlayersPath(leagueKey), accessToken);
-    const leagueNode = playersData?.fantasy_content?.league;
-    const playersNode = Array.isArray(leagueNode) ? leagueNode.find((el) => el && el.players)?.players : null;
-    availablePlayers = extractPlayerList(playersNode);
+    availablePlayers = extractLeaguePlayers(await yahooFantasy(yahooDraftPlayersPath(leagueKey, 'percent_owned'), accessToken));
+    const [draftAnalysis, ranks] = await Promise.all([
+      optionalPlayersRequest(yahooFantasy, accessToken, yahooDraftPlayersPath(leagueKey, 'draft_analysis')),
+      optionalPlayersRequest(yahooFantasy, accessToken, yahooDraftPlayersPath(leagueKey, 'ranks')),
+    ]);
+    availablePlayers = mergeYahooPlayerMetadata(availablePlayers, draftAnalysis, ranks);
   } catch {
     availablePlayers = [];
+  }
+
+  // The status=A collection excludes rostered players. Request their metadata
+  // in two exact-key batches so identity and league season remain unambiguous.
+  const rosterKeys = myRoster.map((player) => player.playerKey).filter(Boolean);
+  if (rosterKeys.length) {
+    const [draftAnalysis, ranks] = await Promise.all([
+      optionalPlayersRequest(yahooFantasy, accessToken, yahooPlayerKeysPath(leagueKey, rosterKeys, 'draft_analysis')),
+      optionalPlayersRequest(yahooFantasy, accessToken, yahooPlayerKeysPath(leagueKey, rosterKeys, 'ranks')),
+    ]);
+    myRoster = mergeYahooPlayerMetadata(myRoster, draftAnalysis, ranks);
   }
 
   // 2b. Opponent rosters (Yahoo) fetched ONCE for the trade recommender +
