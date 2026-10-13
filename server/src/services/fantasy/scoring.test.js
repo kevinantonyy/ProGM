@@ -58,6 +58,24 @@ test('scoreStatLine handles negative weights (turnovers)', () => {
   assert.equal(res.points, -4);
 });
 
+test('total and split rebounds are each scored exactly once when Yahoo configures them', () => {
+  const line = { rebounds: 10, offRebounds: 3, defRebounds: 7 };
+  const splitsOnly = scoreStatLine(line, [
+    { statId: 13, abbr: 'OREB', pointValue: 1, enabled: true },
+    { statId: 14, abbr: 'DREB', pointValue: 1, enabled: true },
+  ]);
+  assert.equal(splitsOnly.points, 10);
+  assert.equal(splitsOnly.breakdown.length, 2);
+
+  const yahooExplicitlyScoresAll = scoreStatLine(line, [
+    { statId: 13, abbr: 'OREB', pointValue: 1, enabled: true },
+    { statId: 14, abbr: 'DREB', pointValue: 1, enabled: true },
+    { statId: 15, abbr: 'REB', pointValue: 1, enabled: true },
+  ]);
+  assert.equal(yahooExplicitlyScoresAll.points, 20);
+  assert.equal(yahooExplicitlyScoresAll.breakdown.length, 3);
+});
+
 test('scoreStatLine returns null points when nothing scorable', () => {
   const res = scoreStatLine(emptyStatLine(), LEAGUE_CATS);
   assert.equal(res.points, null);

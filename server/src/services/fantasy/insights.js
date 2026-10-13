@@ -39,6 +39,19 @@ function toSource(player) {
   };
 }
 
+/** Fill only missing rebound splits; total rebounds remain untouched. */
+export function supplementReboundSplits(stats, split) {
+  if (!stats?.season || !split) return stats;
+  return {
+    ...stats,
+    season: {
+      ...stats.season,
+      offRebounds: stats.season.offRebounds ?? split.offRebounds ?? null,
+      defRebounds: stats.season.defRebounds ?? split.defRebounds ?? null,
+    },
+  };
+}
+
 /**
  * Build a projection context for a set of normalized Yahoo players.
  *
@@ -143,6 +156,40 @@ export async function buildProjectionContext({ season, players, statCategories, 
     for (const s of statsResult.value) statsByExternalId.set(String(s.externalId), s);
   }
 
+  // ESPN's league-wide season feed omits player OREB/DREB. Supplement those
+  // two fields from one cached official NBA league-wide totals request. Match
+  // through the same ambiguity-safe identity layer; never guess an id/name.
+  const weightedStatIds = new Set((statCategories || [])
+    .filter((cat) => cat?.enabled !== false && cat?.pointValue != null)
+    .map((cat) => Number(cat.statId)));
+  const needsReboundSplits = (weightedStatIds.has(13) && [...statsByExternalId.values()].some((s) => s?.season?.offRebounds == null))
+    || (weightedStatIds.has(14) && [...statsByExternalId.values()].some((s) => s?.season?.defRebounds == null));
+  let reboundResult = null;
+  if (needsReboundSplits) {
+    try {
+      reboundResult = await providers.getSeasonReboundSplits(projectionSeason);
+    } catch {
+      reboundResult = null;
+    }
+  }
+  const reboundRows = Array.isArray(reboundResult?.value) ? reboundResult.value : [];
+  const reboundByCanonicalId = new Map();
+  if (reboundRows.length) {
+    const reboundRefs = reboundRows.map((row) => ({
+      externalId: row.externalId,
+      name: row.name,
+      teamAbbr: row.teamAbbr,
+      yahooId: null,
+    }));
+    const reboundMatches = buildCanonicalPlayers(source, reboundRefs).players;
+    const reboundByExternalId = new Map(reboundRows.map((row) => [String(row.externalId), row]));
+    for (const match of reboundMatches) {
+      if (!match.matched || !match.externalId) continue;
+      const row = reboundByExternalId.get(String(match.externalId));
+      if (row) reboundByCanonicalId.set(match.canonicalId, row);
+    }
+  }
+
   // 3a. The same explicitly selected completed-season dataset also powers the
   // human-readable "Last Season" context; it is never silently substituted.
   // 3b. Recent form (OPTIONAL). Built from box scores of recently completed
@@ -176,19 +223,20 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const projectionByCanonicalId = new Map();
   for (const c of canonical) {
     const base = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
-    let stats = base;
+    const reboundSplit = reboundByCanonicalId.get(c.canonicalId) || null;
+    let stats = supplementReboundSplits(base, reboundSplit);
     if (base && c.externalId) {
       const rec = recentByExternalId[String(c.externalId)];
       if (rec && rec.recent) {
-        stats = { ...base, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null };
+        stats = { ...stats, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null };
       }
     }
     const projection = projectPlayer({ stats, statCategories });
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
     projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
-    projection.lastSeason = base?.season
-      ? { season: projectionSeason, stats: base.season }
+    projection.lastSeason = stats?.season
+      ? { season: projectionSeason, stats: stats.season }
       : null;
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
@@ -214,6 +262,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
       sources: {
         seasonStats: Boolean(statsResult?.value?.length),
         lastSeasonStats: Boolean(statsResult?.value?.length),
+        reboundSplits: reboundByCanonicalId.size > 0,
         recentForm: recentCount > 0,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,

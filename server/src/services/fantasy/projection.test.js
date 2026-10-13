@@ -97,3 +97,21 @@ test('missing weighted historical category makes fantasy PPG unavailable, never 
   assert.deepEqual(result.lastSeasonFantasy.missingCategories, ['PF']);
   assert.equal(result.method, 'incomplete_scoring_data');
 });
+
+test('missing historical rebound splits do not invalidate a complete forward projection', () => {
+  const stats = {
+    externalId: 'x',
+    season: line({ points: 20, rebounds: 10, gamesPlayed: 64 }),
+    recent: line({ points: 24, rebounds: 11, offRebounds: 3, defRebounds: 8 }),
+    recentGameCount: 10,
+  };
+  const cats = [
+    { statId: 12, abbr: 'PTS', pointValue: 1, enabled: true },
+    { statId: 13, abbr: 'OREB', pointValue: 1.5, enabled: true },
+    { statId: 14, abbr: 'DREB', pointValue: 1.2, enabled: true },
+  ];
+  const result = projectPlayer({ stats, statCategories: cats });
+  assert.equal(result.projectedPoints, 35.5);
+  assert.equal(result.lastSeasonFantasy.points, null);
+  assert.deepEqual(result.lastSeasonFantasy.missingCategories, ['OREB', 'DREB']);
+});

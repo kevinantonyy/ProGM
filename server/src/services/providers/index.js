@@ -218,6 +218,29 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
 }
 
 /**
+ * Official NBA league-wide OREB/DREB totals, normalized to per-game values.
+ * This is a single cached request per completed season and is independent of
+ * the general nba.com fallback flag because ESPN's bulk feed omits the splits.
+ */
+export async function getSeasonReboundSplits(season) {
+  const cacheKey = `seasonReboundSplits:${season}:nba_stats`;
+  if (cache.isFresh(cacheKey)) return cache.get(cacheKey);
+  if (!health.canAttempt('nba_stats')) return cache.get(cacheKey) || null;
+  try {
+    const result = await cache.remember(
+      cacheKey,
+      { provider: 'nba_stats', ttl: cache.TTL.seasonStats },
+      () => nbaStatsProvider.getSeasonReboundSplits(season),
+    );
+    if (!result.meta.cacheHit) health.recordSuccess('nba_stats');
+    return result;
+  } catch (error) {
+    health.recordFailure('nba_stats', error);
+    return cache.get(cacheKey) || null;
+  }
+}
+
+/**
  * League-wide recent-form map (externalId -> { recent StatLine, recentGameCount }),
  * built from NBA CDN box scores of recently completed games. One request per
  * completed game, shared across all players/users. Only providers exposing
