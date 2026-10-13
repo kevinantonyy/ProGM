@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseSeasonYear, gameIdOf, seasonLabel, dedupeLeagues,
-  sortLeaguesNewestFirst, orderLeaguesForDisplay, currentSeasonLeagues, chooseDefaultLeague,
+  sortLeaguesNewestFirst, orderLeaguesForDisplay, chooseDefaultLeague,
 } from './leagueOrdering.js';
 
 const L = (key, season, name = 'League') => ({ leagueKey: key, season, name });
@@ -75,24 +75,23 @@ test('honors an in-session manual pick when it is not an older season', () => {
   assert.equal(r.reason, 'honored_manual_selection');
 });
 
-test('stale older-season selection is superseded by a newer season', () => {
+test('historical manual selection remains selected', () => {
   const leagues = [L('454.l.old', '2024'), L('466.l.new', '2025')];
-  const r = chooseDefaultLeague(leagues, '454.l.old'); // user previously picked 2024
-  assert.equal(r.selectedLeagueKey, '466.l.new');
-  assert.equal(r.reason, 'superseded_by_newer_season');
+  const r = chooseDefaultLeague(leagues, '454.l.old');
+  assert.equal(r.selectedLeagueKey, '454.l.old');
+  assert.equal(r.reason, 'honored_manual_selection');
 });
 
-test('FUTURE season appearing later automatically becomes default (no code change)', () => {
+test('newer seasons sort first without overriding a persisted historical selection', () => {
   // Before: newest is 2025; user is on 2025.
   const before = [L('466.l.cur', '2025'), L('454.l.old', '2024')];
   assert.equal(chooseDefaultLeague(before, '466.l.cur').selectedLeagueKey, '466.l.cur');
-  // Later: Yahoo exposes the 2026 league. With the SAME persisted pick (2025),
-  // the newer season must take over as the sensible default.
+  // Later: Yahoo exposes the 2026 league. The explicit persisted pick remains.
   const after = [L('478.l.future', '2026'), L('466.l.cur', '2025'), L('454.l.old', '2024')];
   const r = chooseDefaultLeague(after, '466.l.cur');
-  assert.equal(r.selectedLeagueKey, '478.l.future');
-  assert.equal(r.reason, 'superseded_by_newer_season');
-  // And the newest league is correctly first in the ordered list.
+  assert.equal(r.selectedLeagueKey, '466.l.cur');
+  assert.equal(r.reason, 'honored_manual_selection');
+  // The newest league is still first in the ordered list.
   assert.equal(r.leagues[0].leagueKey, '478.l.future');
   assert.equal(r.leagues[0].seasonLabel, '2026-27');
 });
@@ -136,20 +135,4 @@ test('orderLeaguesForDisplay adds seasonYear + seasonLabel', () => {
   const out = orderLeaguesForDisplay([L('466.l.1', '2025')]);
   assert.equal(out[0].seasonYear, 2025);
   assert.equal(out[0].seasonLabel, '2025-26');
-});
-
-test('currentSeasonLeagues keeps every league in Yahoo newest season and excludes history', () => {
-  const leagues = [
-    { ...L('466.l.1', '2025'), status: 'predraft' },
-    { ...L('466.l.2', '2025'), status: 'inseason' },
-    { ...L('466.l.3', '2025'), status: 'postseason' },
-    L('454.l.4', '2024'),
-  ];
-  assert.deepEqual(currentSeasonLeagues(leagues).map((league) => league.leagueKey), ['466.l.1', '466.l.2', '466.l.3']);
-});
-
-test('currentSeasonLeagues handles zero, one, and missing-season metadata', () => {
-  assert.deepEqual(currentSeasonLeagues([]), []);
-  assert.deepEqual(currentSeasonLeagues([L('466.l.1', '2025')]).map((league) => league.leagueKey), ['466.l.1']);
-  assert.deepEqual(currentSeasonLeagues([L('466.l.1', ''), L('466.l.2', ''), L('454.l.3', '')]).map((league) => league.leagueKey), ['466.l.1', '466.l.2']);
 });

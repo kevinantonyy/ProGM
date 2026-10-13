@@ -677,6 +677,15 @@ export default function BasketballWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const workspaceRequest = useRef(0);
+  const leagueGroups = useMemo(() => {
+    const groups = new Map();
+    for (const league of leagues || []) {
+      const label = league.seasonLabel ? league.seasonLabel.replace('-', '–') : league.season ? String(league.season) : 'Season unavailable';
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(league);
+    }
+    return [...groups.entries()].map(([label, items]) => ({ label, items }));
+  }, [leagues]);
 
   useEffect(() => {
     // Send the remembered in-session selection so the server can honor it —
@@ -722,7 +731,7 @@ export default function BasketballWorkspace() {
 
   if (loading && !data) return <div className="text-primary-400 animate-pulse">Loading your Fantasy Basketball…</div>;
   if (error && !data) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">Fantasy Basketball</h1><p className="mt-3 text-dark-300">{error}</p><Link to="/sync" className="btn-primary mt-5 inline-block">Sync your league</Link></div>;
-  if (leagues && !leagues.length) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">No current-season leagues</h1><p className="mt-2 text-sm text-dark-400">Yahoo did not return an NBA league for its newest fantasy season.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Check Yahoo connection</Link></div>;
+  if (leagues && !leagues.length) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">No Yahoo leagues</h1><p className="mt-2 text-sm text-dark-400">Yahoo did not return an NBA fantasy league for this account.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Check Yahoo connection</Link></div>;
   if (!data) return null;
 
   return (
@@ -737,7 +746,7 @@ export default function BasketballWorkspace() {
         <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           {leagues?.length > 1 && (
             <select value={leagueKey} onChange={(e) => selectLeague(e.target.value)} aria-label="Select fantasy basketball league" className="input-field w-full max-w-xs sm:w-auto">
-              {leagues.map((l) => <option key={l.leagueKey} value={l.leagueKey}>{l.myTeam?.name || l.name} — {l.seasonLabel || l.season}</option>)}
+              {leagueGroups.map((group) => <optgroup key={group.label} label={group.label}>{group.items.map((l) => <option key={l.leagueKey} value={l.leagueKey}>{l.myTeam?.name && l.myTeam.name !== l.name ? `${l.myTeam.name} — ${l.name}` : l.myTeam?.name || l.name}</option>)}</optgroup>)}
             </select>
           )}
           <Freshness external={data.externalData} />

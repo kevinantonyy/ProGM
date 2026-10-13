@@ -7,8 +7,7 @@
  *   - deduplicate by stable Yahoo league key (not name),
  *   - auto-select the newest league by default,
  *   - keep older leagues accessible,
- *   - honor a user's in-session manual selection, BUT never let a stale
- *     selection permanently block a newer season from becoming the default.
+ *   - honor any still-valid persisted manual selection.
  *
  * Nothing here is sport-specific; it works for any Yahoo game.
  */
@@ -105,30 +104,12 @@ export function orderLeaguesForDisplay(leagues) {
 }
 
 /**
- * Return only leagues from Yahoo's newest fantasy season metadata. League
- * status is intentionally ignored so predraft, active, and completed leagues
- * from that season remain selectable. If Yahoo omits every season value, use
- * the newest Yahoo game-id group rather than guessing from the calendar.
- */
-export function currentSeasonLeagues(leagues) {
-  const ordered = orderLeaguesForDisplay(leagues);
-  if (!ordered.length) return [];
-  const newestWithSeason = ordered.find((league) => league.seasonYear != null);
-  if (newestWithSeason) return ordered.filter((league) => league.seasonYear === newestWithSeason.seasonYear);
-  const newestGameId = gameIdOf(ordered[0]);
-  return newestGameId == null ? ordered.slice(0, 1) : ordered.filter((league) => gameIdOf(league) === newestGameId);
-}
-
-/**
  * Choose which league should be selected.
  *
  * Rules:
  *   - Default = the newest league (first after sorting).
- *   - If the user made an in-session manual selection AND that league is not
- *     older than the newest available season, honor it.
- *   - If the user's persisted selection belongs to an OLDER season than the
- *     newest available, fall back to the newest (a newer season must be able to
- *     become the sensible default without a code change).
+ *   - If the user made a persisted manual selection and that league still
+ *     exists, honor it even when it is historical.
  *
  * @param {Array} leagues
  * @param {string|null} persistedLeagueKey  the user's in-session manual choice
@@ -139,18 +120,10 @@ export function chooseDefaultLeague(leagues, persistedLeagueKey = null) {
   if (!ordered.length) return { selectedLeagueKey: null, reason: 'no_leagues', leagues: ordered };
 
   const newest = ordered[0];
-  const newestYear = newest.seasonYear;
-
   if (persistedLeagueKey) {
     const chosen = ordered.find((l) => l.leagueKey === persistedLeagueKey);
     if (chosen) {
-      // Honor the manual pick unless it's from an older season than the newest.
-      const chosenYear = chosen.seasonYear;
-      const isOlderSeason = newestYear != null && chosenYear != null && chosenYear < newestYear;
-      if (!isOlderSeason) {
-        return { selectedLeagueKey: chosen.leagueKey, reason: 'honored_manual_selection', leagues: ordered };
-      }
-      return { selectedLeagueKey: newest.leagueKey, reason: 'superseded_by_newer_season', leagues: ordered };
+      return { selectedLeagueKey: chosen.leagueKey, reason: 'honored_manual_selection', leagues: ordered };
     }
     // Persisted key no longer exists among the user's leagues.
     return { selectedLeagueKey: newest.leagueKey, reason: 'persisted_not_found', leagues: ordered };
