@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseSeasonYear, gameIdOf, seasonLabel, dedupeLeagues,
-  sortLeaguesNewestFirst, orderLeaguesForDisplay, chooseDefaultLeague,
+  sortLeaguesNewestFirst, orderLeaguesForDisplay, currentSeasonLeagues, chooseDefaultLeague,
 } from './leagueOrdering.js';
 
 const L = (key, season, name = 'League') => ({ leagueKey: key, season, name });
@@ -136,4 +136,20 @@ test('orderLeaguesForDisplay adds seasonYear + seasonLabel', () => {
   const out = orderLeaguesForDisplay([L('466.l.1', '2025')]);
   assert.equal(out[0].seasonYear, 2025);
   assert.equal(out[0].seasonLabel, '2025-26');
+});
+
+test('currentSeasonLeagues keeps every league in Yahoo newest season and excludes history', () => {
+  const leagues = [
+    { ...L('466.l.1', '2025'), status: 'predraft' },
+    { ...L('466.l.2', '2025'), status: 'inseason' },
+    { ...L('466.l.3', '2025'), status: 'postseason' },
+    L('454.l.4', '2024'),
+  ];
+  assert.deepEqual(currentSeasonLeagues(leagues).map((league) => league.leagueKey), ['466.l.1', '466.l.2', '466.l.3']);
+});
+
+test('currentSeasonLeagues handles zero, one, and missing-season metadata', () => {
+  assert.deepEqual(currentSeasonLeagues([]), []);
+  assert.deepEqual(currentSeasonLeagues([L('466.l.1', '2025')]).map((league) => league.leagueKey), ['466.l.1']);
+  assert.deepEqual(currentSeasonLeagues([L('466.l.1', ''), L('466.l.2', ''), L('454.l.3', '')]).map((league) => league.leagueKey), ['466.l.1', '466.l.2']);
 });

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
+import BasketballPlayerProfileProvider, { PlayerLink } from '../components/BasketballPlayerProfile';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -36,13 +37,16 @@ function Freshness({ external }) {
   return <span className="text-xs text-dark-400">{f?.stale ? 'Data may be stale' : 'Data current'}{when ? ` · updated ${when.toLocaleTimeString()}` : ''}</span>;
 }
 
+function SecondaryDetails({ label = 'Details', children, className = '' }) {
+  return <details className={`text-xs text-dark-400 ${className}`}><summary className="cursor-pointer font-semibold text-dark-400 hover:text-primary-400">{label}</summary><div className="mt-2 leading-5 text-dark-400">{children}</div></details>;
+}
+
 function PlayerRow({ player, showProj = true }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-dark-700 py-3 last:border-0">
       <div className="flex min-w-0 items-center gap-3">
-        {player.image ? <img src={player.image} alt="" className="h-9 w-9 rounded-full bg-dark-700 object-cover" /> : <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600/20 text-xs font-bold text-primary-400">{player.position}</span>}
         <div className="min-w-0">
-          <p className="truncate font-semibold">{player.name}</p>
+          <PlayerLink player={player}>{player.name}</PlayerLink>
           <p className="truncate text-xs text-dark-400">{player.teamAbbr || 'FA'} · {player.eligiblePositions?.join('/') || player.position}{player.selectedPosition ? ` · ${player.selectedPosition}` : ''}</p>
         </div>
       </div>
@@ -71,7 +75,7 @@ function Overview({ data }) {
           ) : (<p className="mt-1 text-sm text-dark-400">Unavailable</p>)}
         </div>
       </div>
-      {rating?.note && <p className="text-xs text-dark-500">{rating.note}</p>}
+      {rating?.note && <SecondaryDetails label="Team Rating method">{rating.note}</SecondaryDetails>}
 
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="card">
@@ -79,8 +83,7 @@ function Overview({ data }) {
           {roster.map((p) => <PlayerRow key={p.id} player={p} />)}
         </section>
         <section className="card">
-          <h2 className="text-xl font-bold">Standings</h2>
-          <p className="mt-1 text-sm text-dark-400">Reported by Yahoo</p>
+          <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-bold">Standings</h2><span className="badge-blue">Yahoo</span></div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-dark-600 text-left text-dark-400"><tr><th className="pb-2">#</th><th className="pb-2">Team</th><th className="pb-2 text-right">Record</th><th className="pb-2 text-right">PF</th></tr></thead>
@@ -155,7 +158,7 @@ function StartSit({ data }) {
       {lu.swaps?.length ? (
         <section><h2 className="mb-3 text-xl font-bold">Suggested swaps</h2><div className="grid gap-3 md:grid-cols-2">{lu.swaps.map((s, i) => (
           <div key={i} className="card"><div className="flex items-center justify-between"><span className="badge-blue">{s.slot}</span>{s.projectedGain != null && <span className="badge-green">+{s.projectedGain} proj</span>}</div>
-            <div className="mt-3 flex items-center justify-between gap-2 text-sm"><div><p className="text-[10px] uppercase text-green-400">Start</p><p className="font-semibold">{s.in?.name}</p><Proj value={s.in?.proj} /></div><span className="text-dark-500">↔</span><div className="text-right"><p className="text-[10px] uppercase text-red-400">Bench</p><p className="font-semibold">{s.out?.name || '—'}</p>{s.out && <Proj value={s.out?.proj} />}</div></div>
+            <div className="mt-3 flex items-center justify-between gap-2 text-sm"><div><p className="text-[10px] uppercase text-green-400">Start</p><PlayerLink player={s.in} avatarSize="h-7 w-7">{s.in?.name}</PlayerLink><Proj value={s.in?.proj} /></div><span className="text-dark-500">↔</span><div className="text-right"><p className="text-[10px] uppercase text-red-400">Bench</p>{s.out ? <PlayerLink player={s.out} avatarSize="h-7 w-7">{s.out.name}</PlayerLink> : <p className="font-semibold">—</p>}{s.out && <Proj value={s.out?.proj} />}</div></div>
             {s.reasons?.length > 0 && <ul className="mt-2 space-y-0.5">{s.reasons.map((r, j) => <li key={j} className="text-xs text-dark-400">· {r}</li>)}</ul>}
           </div>))}
         </div></section>
@@ -190,9 +193,9 @@ function Waivers({ data }) {
                 {m.netImprovement != null && <span className="badge-green">+{m.netImprovement} proj</span>}
               </div>
               <div className="mt-3 flex items-center justify-between gap-2 text-sm">
-                <div className="min-w-0"><p className="text-[10px] uppercase text-green-400">Add</p><p className="truncate font-semibold">{m.add?.name}</p><Proj value={m.add?.projectedPoints} /></div>
+                <div className="min-w-0"><p className="text-[10px] uppercase text-green-400">Add</p><PlayerLink player={m.add} avatarSize="h-7 w-7">{m.add?.name}</PlayerLink><Proj value={m.add?.projectedPoints} /></div>
                 <span className="text-dark-500">↔</span>
-                <div className="min-w-0 text-right"><p className="text-[10px] uppercase text-red-400">{m.drop ? 'Drop' : 'Open slot'}</p><p className="truncate font-semibold">{m.drop?.name || 'No drop needed'}</p>{m.drop && <Proj value={m.drop?.projectedPoints} />}</div>
+                <div className="min-w-0 text-right"><p className="text-[10px] uppercase text-red-400">{m.drop ? 'Drop' : 'Open slot'}</p>{m.drop ? <PlayerLink player={m.drop} avatarSize="h-7 w-7">{m.drop.name}</PlayerLink> : <p className="truncate font-semibold">No drop needed</p>}{m.drop && <Proj value={m.drop?.projectedPoints} />}</div>
               </div>
               {m.reason && <p className="mt-2 border-t border-dark-700 pt-2 text-xs text-dark-400">{m.reason}</p>}
               {m.drop && m.drop.projectionKnown === false && <p className="mt-1 text-[11px] text-orange-300/80">Drop candidate has no projection — confirm before dropping.</p>}
@@ -201,13 +204,13 @@ function Waivers({ data }) {
       )}
       {view !== 'addDrop' && (
         <>
-          <section className="card overflow-hidden p-0">
-            <table className="w-full text-sm">
+          <section className="card overflow-x-auto p-0">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3 text-right">{view === 'bestFit' ? 'Fit' : 'Proj'}</th><th className="p-3 text-right">Owned</th><th className="p-3 text-right">Status</th></tr></thead>
               <tbody>{rows.map((p) => (
                 <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
                   <td className="p-3 text-dark-400">{p.rank}</td>
-                  <td className="p-3"><p className="font-semibold">{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}{view === 'bestFit' && p.fitReason ? ` · ${p.fitReason}` : ''}</p></td>
+                  <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><p className="text-xs text-dark-400" title={view === 'bestFit' ? p.fitReason : undefined}>{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}{view === 'bestFit' && p.fitReason ? ' · Fit details available' : ''}</p></td>
                   <td className="p-3 text-right">{view === 'bestFit' ? <span className="font-bold text-primary-400">{p.fitScore?.toFixed(1)}</span> : <Proj value={p.projectedPoints} />}</td>
                   <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
                   <td className="p-3 text-right"><StatusBadge status={p.status} /></td>
@@ -216,7 +219,7 @@ function Waivers({ data }) {
             </table>
             {!rows.length && <p className="p-8 text-center text-dark-400">No ranked available players.</p>}
           </section>
-          <p className="text-xs text-dark-500">Best Available ranks by projected league fantasy points. Best Fit adjusts for your roster's positional needs. Ownership % is context only, not a quality signal.</p>
+          <SecondaryDetails label="How waiver rankings work">Best Available uses projected league fantasy points. Best Fit adjusts for positional need. Ownership is context only.</SecondaryDetails>
         </>
       )}
     </div>
@@ -255,7 +258,7 @@ function Trades({ data, leagueKey }) {
     <div className="card p-0"><div className="border-b border-dark-700 px-4 py-3"><h3 className="text-sm font-semibold">{title}</h3></div>
       <div className="max-h-72 overflow-y-auto">{players.length ? players.map((p) => {
         const key = p.playerKey || p.id; const sel = selected.includes(key);
-        return <button key={key} onClick={() => onToggle(key)} className={`flex w-full items-center justify-between border-b border-dark-700 px-4 py-2.5 text-left last:border-0 ${sel ? 'bg-primary-600/15' : 'hover:bg-dark-900'}`}><div><p className={`text-sm font-medium ${sel ? 'text-primary-300' : ''}`}>{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {(p.eligiblePositions || []).join('/') || p.primaryPosition}</p></div><span className={`flex h-5 w-5 items-center justify-center rounded border text-xs ${sel ? 'border-primary-400 bg-primary-500 text-white' : 'border-dark-600 text-transparent'}`}>✓</span></button>;
+        return <div key={key} className={`flex w-full items-center justify-between gap-3 border-b border-dark-700 px-4 py-2.5 last:border-0 ${sel ? 'bg-primary-600/15' : 'hover:bg-dark-900'}`}><div className="min-w-0"><PlayerLink player={p} avatarSize="h-8 w-8" className={sel ? 'text-primary-300' : ''}>{p.name}</PlayerLink><p className="pl-10 text-xs text-dark-400">{p.teamAbbr || 'FA'} · {(p.eligiblePositions || []).join('/') || p.primaryPosition}</p></div><button type="button" onClick={() => onToggle(key)} aria-pressed={sel} aria-label={`${sel ? 'Remove' : 'Select'} ${p.name}`} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border text-xs ${sel ? 'border-primary-400 bg-primary-500 text-white' : 'border-dark-600 text-transparent hover:border-primary-400'}`}>✓</button></div>;
       }) : <p className="px-4 py-6 text-center text-sm text-dark-500">No players.</p>}</div>
     </div>
   );
@@ -268,8 +271,7 @@ function Trades({ data, leagueKey }) {
 
       {/* ProGM AI trade recommender (found for you, not fabricated). */}
       <section>
-        <h2 className="mb-1 text-xl font-bold">ProGM trade ideas</h2>
-        <p className="mb-3 text-sm text-dark-400">Found by ProGM from real rosters + projections. Improvement and fairness are separate questions; ProGM never predicts acceptance.</p>
+        <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">ProGM trade ideas</h2><span className="badge-blue">Real rosters</span><span className="badge-orange">Acceptance not predicted</span></div>
         {recs && !recs.available && <div className="card border-orange-500/30 text-sm text-dark-300">{recs.reason}</div>}
         {recs?.available && !recs.recommendations.length && <div className="card text-sm text-dark-400">No trade clearly improves your team right now without being lopsided. ProGM will not suggest a move just to churn.</div>}
         {recs?.available && recs.recommendations.length > 0 && (
@@ -283,11 +285,11 @@ function Trades({ data, leagueKey }) {
                 </div>
               </div>
               <div className="flex items-stretch justify-between gap-2 text-sm">
-                <div className="min-w-0 flex-1"><p className="text-[10px] uppercase text-red-400">You send</p>{t.send.map((p) => <p key={p.id} className="truncate font-semibold">{p.name}</p>)}</div>
+                <div className="min-w-0 flex-1"><p className="text-[10px] uppercase text-red-400">You send</p>{t.send.map((p) => <PlayerLink key={p.id || p.playerKey} player={p} avatarSize="h-7 w-7" className="mt-1 flex">{p.name}</PlayerLink>)}</div>
                 <span className="self-center text-dark-500">↔</span>
-                <div className="min-w-0 flex-1 text-right"><p className="text-[10px] uppercase text-green-400">You receive</p>{t.receive.map((p) => <p key={p.id} className="truncate font-semibold">{p.name}</p>)}</div>
+                <div className="min-w-0 flex-1 text-right"><p className="text-[10px] uppercase text-green-400">You receive</p>{t.receive.map((p) => <PlayerLink key={p.id || p.playerKey} player={p} avatarSize="h-7 w-7" className="mt-1 flex">{p.name}</PlayerLink>)}</div>
               </div>
-              {t.whyForMe?.length > 0 && <ul className="space-y-0.5 border-t border-dark-700 pt-2">{t.whyForMe.slice(0, 3).map((r, j) => <li key={j} className="text-xs text-dark-400">· {r}</li>)}</ul>}
+              {t.whyForMe?.length > 0 && <div className="border-t border-dark-700 pt-2"><p className="text-xs text-dark-300">{t.whyForMe[0]}</p>{t.whyForMe.length > 1 && <SecondaryDetails label="More reasons" className="mt-2">{t.whyForMe.slice(1, 3).map((reason) => <p key={reason}>· {reason}</p>)}</SecondaryDetails>}</div>}
               {t.risks?.length > 0 && <p className="text-[11px] text-orange-300/80">Risk: {t.risks[0]}</p>}
               <p className="text-[11px] text-dark-500">Confidence {Math.round((t.confidence ?? 0) * 100)}% · based on how much of the package has projection data.</p>
             </div>))}
@@ -295,7 +297,7 @@ function Trades({ data, leagueKey }) {
         )}
       </section>
 
-      <div className="border-t border-dark-700 pt-5"><h2 className="text-xl font-bold">Analyze a specific trade</h2><p className="mt-1 mb-1 text-sm text-dark-400">Build any package manually and get ProGM's assessment.</p></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-dark-700 pt-5"><h2 className="text-xl font-bold">Analyze a specific trade</h2><span className="badge-blue">Projected assessment</span></div>
       <div className="flex flex-wrap items-center gap-3"><label className="text-sm text-dark-300">Trade with</label><select value={theirTeamKey} onChange={(e) => pickOpponent(e.target.value)} className="input-field max-w-xs"><option value="">Select a team…</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Picker title="You send" players={myRoster} selected={sendKeys} onToggle={toggle(sendKeys, setSendKeys)} />
@@ -308,7 +310,7 @@ function Trades({ data, leagueKey }) {
             <div className="card"><div className="flex items-center justify-between"><p className="font-semibold">Trade assessment</p><span className={ASSESS[result.valuation.assessment]?.[1] || 'badge-orange'}>{ASSESS[result.valuation.assessment]?.[0]}</span></div>
               {result.valuation.production && <div className="mt-3 grid grid-cols-3 gap-3 text-center"><div><p className="text-xs text-dark-400">Give</p><p className="font-bold">{result.valuation.production.sendTotal}</p></div><div><p className="text-xs text-dark-400">Receive</p><p className="font-bold">{result.valuation.production.receiveTotal}</p></div><div><p className="text-xs text-dark-400">Net</p><p className={`font-bold ${result.valuation.production.net > 0 ? 'text-green-400' : result.valuation.production.net < 0 ? 'text-red-400' : ''}`}>{result.valuation.production.net > 0 ? '+' : ''}{result.valuation.production.net}</p></div></div>}
               {result.valuation.reasons?.length > 0 && <ul className="mt-3 space-y-0.5 border-t border-dark-700 pt-3">{result.valuation.reasons.map((r, i) => <li key={i} className="text-xs text-dark-400">· {r}</li>)}</ul>}
-              <p className="mt-2 text-[11px] text-dark-500">{result.valuation.note}</p>
+              {result.valuation.note && <SecondaryDetails label="Assessment method" className="mt-3">{result.valuation.note}</SecondaryDetails>}
             </div>
           )}
         </section>
@@ -336,13 +338,13 @@ function Rankings({ data }) {
         <span className="text-sm text-dark-400">Sort by</span>
         {cols.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
       </div>
-      <section className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
+      <section className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[620px] text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
           <tbody>{players.map((p, i) => (
             <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
               <td className="p-3 text-dark-400">{i + 1}</td>
-              <td className="p-3"><p className="font-semibold">{p.name}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
               <td className="p-3 text-right"><Proj value={p.projected} /></td>
               {data.scheduleAware && <td className="p-3 text-right">{p.periodProjected != null ? <span className="font-bold text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
               <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
@@ -350,7 +352,7 @@ function Rankings({ data }) {
           </tbody>
         </table>
       </section>
-      <p className="text-xs text-dark-500">{r.note}</p>
+      <SecondaryDetails label="Ranking method">{r.note}</SecondaryDetails>
     </div>
   );
 }
@@ -498,8 +500,8 @@ function DraftHelper({ data, leagueKey, active }) {
     <div className="space-y-4">
       {liveBanner}
       <div>
-        <h2 className="text-xl font-bold">Draft Helper</h2>
-        <p className="mt-1 text-sm text-dark-400">{isLive ? 'LIVE draft — best available is recomputed from undrafted players after every pick. Read-only: ProGM never drafts for you.' : db.note}</p>
+        <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">Draft Helper</h2><span className="badge-blue">League-specific</span>{isLive && <span className="badge-green">Read-only live board</span>}</div>
+        {isLive ? <p className="mt-1 text-xs text-dark-400">Recomputed after every pick.</p> : <SecondaryDetails label="Board method" className="mt-2">{db.note}</SecondaryDetails>}
       </div>
 
       {isLive && <LiveDraftRoster live={live} />}
@@ -536,7 +538,7 @@ function DraftHelper({ data, leagueKey, active }) {
           <tbody>{rows.map((p) => (
             <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
               <td className="p-3 text-dark-400">{p.overallRank}</td>
-              <td className="p-3"><p className="font-semibold">{p.name}{p.out && <span className="badge-red ml-2">OUT</span>}</p><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3"><div className="flex items-center gap-2"><PlayerLink player={p}>{p.name}</PlayerLink>{p.out && <span className="badge-red">OUT</span>}</div><p className="pl-11 text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
               <td className="p-3"><span className="badge-blue">T{p.tier}</span></td>
               <td className="p-3 text-right text-dark-300">{p.yahooOverallRank ?? '—'}</td>
               <td className="p-3 text-right text-dark-300">{p.yahooAdp ?? '—'}</td>
@@ -559,8 +561,8 @@ function DraftHelper({ data, leagueKey, active }) {
       {db.noData?.length > 0 && (
         <section className="card">
           <h3 className="text-sm font-bold">No projection data ({db.noData.length})</h3>
-          <p className="mt-1 text-xs text-dark-500">These players lack projection data, so ProGM does not assign them a value or rank them (never zeroed or faked).</p>
-          <p className="mt-2 text-xs text-dark-400">{db.noData.slice(0, 30).map((p) => p.name).join(', ')}{db.noData.length > 30 ? ` +${db.noData.length - 30} more` : ''}</p>
+          <p className="mt-1 text-xs text-dark-500">Unranked rather than zeroed.</p>
+          <SecondaryDetails label="Show players" className="mt-2">{db.noData.slice(0, 30).map((p) => p.name).join(', ')}{db.noData.length > 30 ? ` +${db.noData.length - 30} more` : ''}</SecondaryDetails>
         </section>
       )}
     </div>
@@ -574,8 +576,7 @@ function LeagueHub({ data }) {
   return (
     <div className="grid gap-6 xl:grid-cols-2">
       <section className="card">
-        <h2 className="text-xl font-bold">Standings</h2>
-        <p className="mt-1 text-sm text-dark-400">Reported by Yahoo</p>
+        <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-bold">Standings</h2><span className="badge-blue">Yahoo</span></div>
         <div className="mt-4 overflow-x-auto"><table className="w-full text-sm">
           <thead className="border-b border-dark-600 text-left text-dark-400"><tr><th className="pb-2">#</th><th className="pb-2">Team</th><th className="pb-2 text-right">Record</th><th className="pb-2 text-right">PF</th></tr></thead>
           <tbody>{hub.standings.map((t) => (
@@ -588,8 +589,7 @@ function LeagueHub({ data }) {
           </tbody></table></div>
       </section>
       <section className="card">
-        <h2 className="text-xl font-bold">Power Ranking</h2>
-        <p className="mt-1 text-sm text-dark-400">ProGM · 65% record + 35% league-relative scoring</p>
+        <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-bold">Power Ranking</h2><span className="badge-blue">65% record · 35% scoring</span></div>
         {hub.powerRankings.length ? (
           <div className="mt-4 space-y-2">{hub.powerRankings.map((t) => (
             <div key={t.teamKey} className={`flex items-center justify-between rounded-lg border border-dark-700 px-4 py-2.5 ${t.isMine ? 'bg-primary-600/10' : 'bg-dark-900'}`}>
@@ -605,7 +605,7 @@ function LeagueHub({ data }) {
 
 // --- Tab: Ask ProGM (basketball context) ---
 function AskProGM({ data }) {
-  const [messages, setMessages] = useState([{ role: 'gm', text: `I'm your AI GM for ${data.connection.teamName}. I explain ProGM's basketball analysis — lineups, waivers, trades, and roster strengths. What are you weighing?` }]);
+  const [messages, setMessages] = useState([{ role: 'gm', text: `${data.connection.teamName} is loaded. Ask about a lineup, waiver, trade, or roster decision.` }]);
   const [text, setText] = useState(''); const [sending, setSending] = useState(false); const [error, setError] = useState('');
   async function send(value = text) {
     const clean = value.trim().slice(0, 800); if (!clean || sending) return;
@@ -676,6 +676,7 @@ export default function BasketballWorkspace() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const workspaceRequest = useRef(0);
 
   useEffect(() => {
     // Send the remembered in-session selection so the server can honor it —
@@ -683,33 +684,49 @@ export default function BasketballWorkspace() {
     // default. This keeps a stale pick from blocking a newer season.
     let remembered = null;
     try { remembered = sessionStorage.getItem('progm-bball-league'); } catch { /* ignore */ }
-    api.get('/basketball/leagues', { params: remembered ? { selected: remembered } : {} })
+    const controller = new AbortController();
+    api.get('/basketball/leagues', { params: remembered ? { selected: remembered } : {}, signal: controller.signal })
       .then((r) => {
-        setLeagues(r.data.leagues || []);
-        setLeagueKey(r.data.defaultLeagueKey || (r.data.leagues || [])[0]?.leagueKey || '');
+        const currentLeagues = r.data.leagues || [];
+        const nextKey = r.data.defaultLeagueKey || currentLeagues[0]?.leagueKey || '';
+        setLeagues(currentLeagues);
+        setLeagueKey(nextKey);
+        try { if (nextKey) sessionStorage.setItem('progm-bball-league', nextKey); else sessionStorage.removeItem('progm-bball-league'); } catch { /* ignore */ }
+        if (!nextKey) setLoading(false);
       })
-      .catch((err) => { setError(err.response?.data?.error || 'Connect Yahoo to load your basketball leagues.'); setLoading(false); });
+      .catch((err) => { if (err.code !== 'ERR_CANCELED') { setError(err.response?.data?.error || 'Connect Yahoo to load your basketball leagues.'); setLoading(false); } });
+    return () => controller.abort();
   }, []);
 
   function selectLeague(key) {
+    if (!key || key === leagueKey) return;
+    workspaceRequest.current += 1;
+    setData(null);
+    setError('');
+    setLoading(true);
     setLeagueKey(key);
     try { sessionStorage.setItem('progm-bball-league', key); } catch { /* ignore */ }
   }
 
   useEffect(() => {
-    if (!leagueKey) return;
+    if (!leagueKey) return undefined;
+    const requestId = ++workspaceRequest.current;
+    const controller = new AbortController();
     setLoading(true); setError('');
-    api.get('/basketball/workspace', { params: { leagueKey } })
-      .then((r) => setData(r.data))
-      .catch((err) => setError(err.response?.data?.error || 'Could not load Fantasy Basketball'))
-      .finally(() => setLoading(false));
+    api.get('/basketball/workspace', { params: { leagueKey }, signal: controller.signal })
+      .then((r) => { if (requestId === workspaceRequest.current) setData(r.data); })
+      .catch((err) => { if (err.code !== 'ERR_CANCELED' && requestId === workspaceRequest.current) setError(err.response?.data?.error || 'Could not load Fantasy Basketball'); })
+      .finally(() => { if (!controller.signal.aborted && requestId === workspaceRequest.current) setLoading(false); });
+    return () => controller.abort();
   }, [leagueKey]);
 
   if (loading && !data) return <div className="text-primary-400 animate-pulse">Loading your Fantasy Basketball…</div>;
   if (error && !data) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">Fantasy Basketball</h1><p className="mt-3 text-dark-300">{error}</p><Link to="/sync" className="btn-primary mt-5 inline-block">Sync your league</Link></div>;
+  if (leagues && !leagues.length) return <div className="card max-w-2xl"><h1 className="text-2xl font-bold">No current-season leagues</h1><p className="mt-2 text-sm text-dark-400">Yahoo did not return an NBA league for its newest fantasy season.</p><Link to="/sync" className="btn-primary mt-5 inline-block">Check Yahoo connection</Link></div>;
   if (!data) return null;
 
   return (
+    <BasketballPlayerProfileProvider key={leagueKey} data={data}>
     <div className="space-y-7">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -717,9 +734,9 @@ export default function BasketballWorkspace() {
           <h1 className="mt-1 text-3xl font-bold">{data.connection.teamName}</h1>
           <p className="mt-1 text-dark-400">{data.connection.leagueName} · {seasonLabelFrom(data.connection.season)}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
           {leagues?.length > 1 && (
-            <select value={leagueKey} onChange={(e) => selectLeague(e.target.value)} className="input-field max-w-xs">
+            <select value={leagueKey} onChange={(e) => selectLeague(e.target.value)} aria-label="Select fantasy basketball league" className="input-field w-full max-w-xs sm:w-auto">
               {leagues.map((l) => <option key={l.leagueKey} value={l.leagueKey}>{l.myTeam?.name || l.name} — {l.seasonLabel || l.season}</option>)}
             </select>
           )}
@@ -743,5 +760,6 @@ export default function BasketballWorkspace() {
       {active === 'league' && <LeagueHub data={data} />}
       {active === 'gm' && <AskProGM data={data} />}
     </div>
+    </BasketballPlayerProfileProvider>
   );
 }

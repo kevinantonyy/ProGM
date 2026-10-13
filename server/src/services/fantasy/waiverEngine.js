@@ -113,6 +113,7 @@ function decorateOwnRoster(myRoster, projectionProvider) {
     return {
       playerKey: p.playerKey,
       name: p.name,
+      image: p.headshotUrl || null,
       teamAbbr: p.teamAbbr,
       eligiblePositions: p.eligiblePositions || [],
       status: p.status || null,
@@ -175,6 +176,7 @@ function pairAddDrops({ rankableAdds, ownRoster, openSlots, settings, limit }) {
         add: {
           playerKey: add.playerKey,
           name: add.name,
+          image: add.image || null,
           teamAbbr: add.teamAbbr,
           eligiblePositions: add.eligiblePositions,
           projectedPoints: add.projectedPoints,
@@ -210,6 +212,7 @@ function pairAddDrops({ rankableAdds, ownRoster, openSlots, settings, limit }) {
       add: {
         playerKey: add.playerKey,
         name: add.name,
+        image: add.image || null,
         teamAbbr: add.teamAbbr,
         eligiblePositions: add.eligiblePositions,
         projectedPoints: add.projectedPoints,
@@ -218,6 +221,7 @@ function pairAddDrops({ rankableAdds, ownRoster, openSlots, settings, limit }) {
       drop: {
         playerKey: drop.playerKey,
         name: drop.name,
+        image: drop.image || null,
         teamAbbr: drop.teamAbbr,
         eligiblePositions: drop.eligiblePositions,
         projectedPoints: drop.projectedPoints,
@@ -258,6 +262,7 @@ export function rankWaivers({ availablePlayers, projectionProvider, rosterAnalys
     return {
       playerKey: p.playerKey,
       name: p.name,
+      image: p.headshotUrl || null,
       teamAbbr: p.teamAbbr,
       eligiblePositions: p.eligiblePositions,
       status: p.status,

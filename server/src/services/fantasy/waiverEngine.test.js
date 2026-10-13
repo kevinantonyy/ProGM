@@ -49,6 +49,14 @@ test('degrades gracefully without projections (facts only)', () => {
   assert.equal(res.players[0].percentOwned, 40); // ownership fact still shown
 });
 
+test('passes through Yahoo headshots and keeps missing images null', () => {
+  const pictured = { ...fa('Pictured', ['PG'], 20), headshotUrl: 'https://example.test/player.png' };
+  const missing = fa('Missing', ['C'], 10);
+  const res = rankWaivers({ availablePlayers: [pictured, missing], projectionProvider: provider([pictured, missing]) });
+  assert.equal(res.bestAvailable.find((p) => p.playerKey === 'Pictured').image, pictured.headshotUrl);
+  assert.equal(res.bestAvailable.find((p) => p.playerKey === 'Missing').image, null);
+});
+
 // --- Paired ADD/DROP ---------------------------------------------------------
 
 function rosterPlayer(key, elig, proj, { slot = 'BN', isStarting = false, status = null } = {}) {

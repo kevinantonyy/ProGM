@@ -37,6 +37,14 @@ test('players without projection go to noData, never valued', () => {
   assert.equal(res.noData[0].value, null);
 });
 
+test('passes through Yahoo headshots and keeps missing images null', () => {
+  const pictured = { ...pl('Pictured', ['PG'], 20), headshotUrl: 'https://example.test/player.png' };
+  const missing = pl('Missing', ['C'], 10);
+  const res = buildDraftBoard({ players: [pictured, missing], settings, projectionProvider: provider([pictured, missing]) });
+  assert.equal(res.board.find((p) => p.playerKey === 'Pictured').image, pictured.headshotUrl);
+  assert.equal(res.board.find((p) => p.playerKey === 'Missing').image, null);
+});
+
 test('assigns tiers so a big value gap starts a new tier', () => {
   const players = [pl('A', ['C'], 50), pl('B', ['C'], 48), pl('C', ['C'], 20)];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });

@@ -16,7 +16,7 @@ import {
   extractRosterPlayers, extractPlayerList, yahooDraftPlayersPath,
 } from '../services/fantasy/normalize.js';
 import { buildBasketballWorkspace } from '../services/fantasy/basketballWorkspace.js';
-import { orderLeaguesForDisplay, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
+import { currentSeasonLeagues, chooseDefaultLeague } from '../services/fantasy/leagueOrdering.js';
 import {
   extractDraftResults, detectNewPicks, draftedPlayerKeys, removeDrafted,
   deriveDraftState, picksForTeam, deriveNextPick,
@@ -84,11 +84,10 @@ router.get('/leagues', authenticate, async (req, res) => {
     const teams = extractUserTeams(teamsData);
     const teamByLeague = new Map(teams.map((t) => [t.leagueKey, t]));
 
-    // Newest season first, deduped by stable key, with season labels. The
-    // client may pass its remembered selection so we can compute the default
-    // that yields to a newer season when one appears.
+    // Keep only Yahoo's newest season metadata group. Status is deliberately
+    // not filtered: predraft, active, and completed leagues all remain valid.
     const persisted = typeof req.query.selected === 'string' ? req.query.selected : null;
-    const { selectedLeagueKey, reason, leagues: ordered } = chooseDefaultLeague(orderLeaguesForDisplay(rawLeagues), persisted);
+    const { selectedLeagueKey, reason, leagues: ordered } = chooseDefaultLeague(currentSeasonLeagues(rawLeagues), persisted);
 
     res.json({
       connected: true,

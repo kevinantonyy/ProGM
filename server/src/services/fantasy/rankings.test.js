@@ -61,3 +61,11 @@ test('degrades without projections (facts only)', () => {
   assert.equal(res.projectionsAvailable, false);
   assert.equal(res.players[0].percentOwned, 40);
 });
+
+test('passes through Yahoo headshots and keeps missing images null', () => {
+  const pictured = { ...pl('Pictured', ['PG'], 20), headshotUrl: 'https://example.test/player.png' };
+  const missing = pl('Missing', ['C'], 10);
+  const res = buildRankings({ players: [pictured, missing], projectionProvider: provider([pictured, missing]) });
+  assert.equal(res.players.find((p) => p.playerKey === 'Pictured').image, pictured.headshotUrl);
+  assert.equal(res.players.find((p) => p.playerKey === 'Missing').image, null);
+});

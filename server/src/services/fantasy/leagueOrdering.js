@@ -105,6 +105,21 @@ export function orderLeaguesForDisplay(leagues) {
 }
 
 /**
+ * Return only leagues from Yahoo's newest fantasy season metadata. League
+ * status is intentionally ignored so predraft, active, and completed leagues
+ * from that season remain selectable. If Yahoo omits every season value, use
+ * the newest Yahoo game-id group rather than guessing from the calendar.
+ */
+export function currentSeasonLeagues(leagues) {
+  const ordered = orderLeaguesForDisplay(leagues);
+  if (!ordered.length) return [];
+  const newestWithSeason = ordered.find((league) => league.seasonYear != null);
+  if (newestWithSeason) return ordered.filter((league) => league.seasonYear === newestWithSeason.seasonYear);
+  const newestGameId = gameIdOf(ordered[0]);
+  return newestGameId == null ? ordered.slice(0, 1) : ordered.filter((league) => gameIdOf(league) === newestGameId);
+}
+
+/**
  * Choose which league should be selected.
  *
  * Rules:
