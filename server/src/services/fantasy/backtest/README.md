@@ -51,3 +51,14 @@ Provider facts as of 2026-10-14. The docs and terms pages could not be loaded fr
 - Unverified: whether the NBA stats path is `/v1/stats` or `/nba/v1/stats` (use `--base-url`), whether `seasons[]` filters the stats endpoint, and how far back historical coverage really goes. Check all three with a one-page run.
 - Terms summary: commercial use, storage and caching, and AI/model training appear to be permitted. Building a competing product and reselling unmodified data are prohibited. Data is provided "as is" with no accuracy guarantee. The docs also say "We do not store historical data", which is unclear next to the terms. These permissions do not raise tier or rate limits. Have a person review the full terms and record that review in the authorization file; this summary is not legal advice.
 - Season lines from this source have no age or experience, so the age-development model's age curve has no effect on this data.
+
+## Brescou licensing assessment (2026-10-14)
+
+Status: **unverified; no import or training.** The gate stays on.
+
+- Coverage: regular-season traditional stats for 1996-97 to 2022-23 (27 seasons; `player/player_stats_traditionnal_rs.csv`, about 3.7 MB) plus `player/player_index.csv`. These are season-level per-game lines per player and team, not game logs.
+- Fantasy fields present: GP, MIN, PTS, REB/OREB/DREB, AST, STL, BLK, TOV, PF, FGM/FGA, FTM/FTA, FG3M/FG3A, and DD2/TD3 season totals; AGE; FROM_YEAR (gives experience); static POSITION. Missing: game-level rows (dates, back-to-backs, injuries, rest), historical positions, and any projections.
+- Provenance evidence: the README says only "drawn from NBA game statistics" and names no source. The headers exactly match NBA.com stats endpoints (`leaguedashplayerstats`, with its `*_RANK`, `NBA_FANTASY_PTS` and `WNBA_FANTASY_PTS` columns, and `playerindex`, with `PLAYER_SLUG`, `STATS_TIMEFRAME` and `ROSTER_STATUS`). The upstream source is therefore almost certainly stats.nba.com.
+- Why MIT is not enough: the repository's MIT licence can only grant rights the publisher holds. It does not show that NBA.com's terms permit storing the statistics or using them for commercial model training. NBA.com's terms could not be loaded or verified.
+- Evidence needed to proceed (either is enough): written permission from the NBA (or a licensed distributor) for commercial storage and ML use; or a reply from the Brescou publisher showing an upstream licence that covers it. Record it as `commercialModelTrainingAuthorized: true` plus `rightsEvidenceUrl` in the provenance file.
+- Ready once rights exist: `npm run backtest:historical -- --format brescou --data <stats.csv> --player-index <index.csv> --provenance <provenance.json> --scoring <scoring.json> --evaluate`. Tests run this exact path on synthetic data in the real column layout.
