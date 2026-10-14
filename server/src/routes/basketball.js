@@ -28,6 +28,7 @@ import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insig
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
 import { cache } from '../services/providers/index.js';
+import { loadBaselineReference, referenceKey } from '../services/fantasy/baselineReference.js';
 
 const router = Router();
 const LEAGUE_KEY_RE = /^\d+\.l\.\d+$/;
@@ -326,10 +327,15 @@ router.get('/draft', authenticate, async (req, res) => {
         getProjectedValue: (pl) => (ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || {}).projectedPoints ?? null,
       };
       const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
+      // Reuse the baseline captured pre-draft so Overall Rank stays stable as
+      // other teams draft; without it ranks are labelled relative to available players.
+      const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories });
       board = buildDraftBoard({
         players: availablePlayers,
         settings,
         projectionProvider,
+        poolComplete: false,
+        baselineReference: loadBaselineReference(cache, refKey),
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentPick,
@@ -338,6 +344,7 @@ router.get('/draft', authenticate, async (req, res) => {
       });
     }
 
+    delete board.baselineReference; // internal normalization data, not sent to the client
     return res.json({
       leagueKey,
       teamKey,

@@ -37,6 +37,7 @@ import { buildProjectionContext, canonicalIdOf } from './insights.js';
 import { analyzeStartSit } from './startSit.js';
 import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
+import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { buildDraftBoard } from './draftHelper.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
@@ -231,7 +232,6 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const waivers = rankWaivers({ availablePlayers, projectionProvider, rosterAnalysis: analysis, myRoster, settings });
   const startSit = settings ? analyzeStartSit({ players: myRoster, settings, projectionProvider }) : null;
   const leagueHub = buildLeagueHub({ standings, myTeamKey: teamKey });
-  const rankings = buildRankings({ players: availablePlayers, projectionProvider, sortBy: periodWindow ? 'period' : 'projected' });
 
   // Draft Helper (research tool). Pool = available free agents (availability is a
   // Yahoo fact here since they came from the status=A query) + my rostered players
@@ -239,16 +239,31 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   // never implies a rostered player is draftable.
   const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
   const draftPool = [...availablePlayers, ...myRoster];
+  // Frozen overall-rank reference: captured pre-draft, reused while others draft.
+  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories });
   const draftBoard = settings
     ? buildDraftBoard({
         players: draftPool,
         settings,
         projectionProvider,
+        poolComplete: league?.draftStatus === 'predraft',
+        baselineReference: loadBaselineReference(providers.cache, refKey),
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentSeason: league?.season || null, // for current-season Yahoo rank
       })
     : { available: false, availabilityKnown: true, board: [], noData: [], note: 'League settings unavailable.' };
+  if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
+  delete draftBoard.baselineReference; // internal; not sent to the client
+  // Rankings tab shares the Draft Helper's baseline: same Overall Rank per player.
+  const overallRanks = new Map((draftBoard.board || []).map((row) => [row.playerKey, row.overallRank]));
+  const rankings = buildRankings({
+    players: availablePlayers,
+    projectionProvider,
+    overallRanks,
+    rankScope: draftBoard.rankScope || null,
+    sortBy: overallRanks.size ? 'overall' : (periodWindow ? 'period' : 'projected'),
+  });
 
   // 4b. AI trade recommender (ProGM-generated + scored). Uses uiPlayer shapes so
   //     it can read weeklyProjectedPoints. Opponent rosters mapped to uiPlayers.

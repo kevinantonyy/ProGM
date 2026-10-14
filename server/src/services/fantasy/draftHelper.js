@@ -239,6 +239,27 @@ const AVAILABILITY_TEXT = Object.freeze({
   no_history: 'no availability history (cohort baseline)',
 });
 
+/** 1-based rank of `value` among `sortedDesc` reference values (ties share a rank). */
+export function rankAmong(sortedDesc, value) {
+  if (value == null) return null;
+  let lo = 0;
+  let hi = sortedDesc.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedDesc[mid] > value) lo = mid + 1; else hi = mid;
+  }
+  return lo + 1;
+}
+
+/** Explain a meaningful gap between Overall (baseline) order and Draft Priority order. */
+export function describePriorityDifference({ personalized, poolPosition, draftPriority, fit }) {
+  if (!personalized) return 'Draft Priority equals Overall order until you have a roster.';
+  const moved = poolPosition - draftPriority; // positive = moved up by roster fit
+  if (!moved) return null;
+  const why = fit === 'need' ? 'fills a thin position on your roster' : fit === 'surplus' ? 'your roster already has depth here' : 'neighbouring players moved with roster needs';
+  return `${moved > 0 ? 'Up' : 'Down'} ${Math.abs(moved)} vs Overall order: ${why}.`;
+}
+
 /** Concise, data-only explanation of the main ranking factors. */
 export function describeRankingFactors(row, seasonPointsRank, poolSize) {
   const c = row.components || {};
@@ -320,7 +341,7 @@ export function buildDraftRecommendation({ player, overallRank, market, seasonPr
  * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
  * @param {string|number|null} [params.currentSeason] Yahoo/NBA season for picking the current-season Yahoo rank
  */
-export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
+export function buildDraftBoard({ players, settings, projectionProvider, poolComplete = null, baselineReference = null, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
   const overloadedSet = new Set((rosterAnalysis?.positions?.overloadedPositions || []).map((o) => o.position));
@@ -453,13 +474,18 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
   });
 
   // Pool-wide references for normalization (computed from the pool itself).
-  const weights = scarcityWeights(settings, seasonRows);
-  const poolMaxSeasonPoints = seasonRows.reduce((m, r) => Math.max(m, r.seasonPoints), 0);
-  const replacement = computeReplacementBaselines(seasonRows, settings);
+  // A frozen reference (captured while the full pool was visible) keeps the
+  // baseline stable as other teams draft; otherwise derive it from this pool.
+  const weights = baselineReference?.weights || scarcityWeights(settings, seasonRows);
+  const poolMaxSeasonPoints = baselineReference?.poolMaxSeasonPoints
+    ?? seasonRows.reduce((m, r) => Math.max(m, r.seasonPoints), 0);
+  const replacement = baselineReference?.replacement || computeReplacementBaselines(seasonRows, settings);
+  // Personalized roster fit applies only once the user has a roster.
+  const personalized = rosterAnalysis?.counts?.rosterSize !== 0;
 
   // Pass 2: compute season-total-anchored draft value + explainability.
   const valued = seasonRows.map((r) => {
-    const dv = computeDraftValue({
+    const common = {
       seasonPoints: r.seasonPoints,
       perGame: r.perGame,
       expectedGames: r.expectedSeasonGames,
@@ -468,11 +494,15 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       weights,
       poolMaxSeasonPoints,
       replacement,
-      rosterFitScore: rosterFitScore(r.rosterFit),
       availabilityModel: r.availabilityModel,
-    });
+    };
+    // Overall (baseline) value: same formula with a NEUTRAL roster-fit input
+    // for everyone. Draft Priority value: actual roster fit once a roster exists.
+    const baseline = computeDraftValue({ ...common, rosterFitScore: 0.5 });
+    const dv = personalized ? computeDraftValue({ ...common, rosterFitScore: rosterFitScore(r.rosterFit) }) : baseline;
     return {
       ...r,
+      baselineValue: baseline.value,
       value: dv.value,
       scarcity: dv.components.scarcityWeight,
       components: dv.components, // explainability: why this player ranks here
@@ -482,25 +512,32 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
   // Global BEST AVAILABLE order: season production is primary; positional
   // replacement, scarcity, and roster fit are explicitly secondary. Yahoo ADP
   // remains market context only and never changes ProGM order.
+  // Overall Rank: rank of the baseline value among the reference values (the
+  // frozen full pool when available, else this pool). Roster-independent.
+  const referenceValues = baselineReference?.values
+    || valued.map((v) => v.baselineValue).filter((v) => v != null).sort((a, b) => b - a);
+  const poolOverallPosition = new Map([...valued].sort((a, b) => b.baselineValue - a.baselineValue).map((v, i) => [v.playerKey, i + 1]));
   const sorted = valued.sort((a, b) => b.value - a.value).slice(0, limit);
   const projectionPool = valued
     .filter((p) => !availabilityKnown || p.availability === 'available')
     .sort((a, b) => b.projectedSeasonPoints - a.projectedSeasonPoints);
   const projectionRankByKey = new Map(projectionPool.map((p, i) => [p.playerKey, i + 1]));
   const board = assignTiers(sorted).map((p, i) => {
-    const overallRank = i + 1;
+    const draftPriority = i + 1; // position on this board by Draft Priority value
+    const overallRank = rankAmong(referenceValues, p.baselineValue);
     // Market context compares ProGM rank (this board position) vs Yahoo ADP.
     // DRAFT NOW/WAIT only when a reliable nextPick was supplied.
     const market = computeMarketContext({
-      progmRank: overallRank,
+      progmRank: draftPriority,
       yahooAdp: p.yahooAdp,
       currentPick,
       nextPick,
     });
     // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
-    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooOverallRank });
+    const rankCmp = computeRankComparison({ progmRank: draftPriority, yahooOverallRank: p.yahooOverallRank });
     const row = {
-      overallRank, // ProGM Rank (authoritative ordering)
+      overallRank, // stable baseline rank (no roster fit); same value in Rankings
+      draftPriority, // order of this board (adds roster fit once a roster exists)
       ...p,
       adpVsProgm: market.adpVsProgm,
       marketLabel: market.label,
@@ -509,10 +546,13 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       rankAgreement: rankCmp.agreement,
       rankReason: rankCmp.reason,
     };
+    row.priorityNote = describePriorityDifference({
+      personalized, poolPosition: poolOverallPosition.get(p.playerKey), draftPriority, fit: p.rosterFit,
+    });
     row.rankingFactors = describeRankingFactors(row, projectionRankByKey.get(row.playerKey) ?? null, projectionPool.length);
     row.recommendation = buildDraftRecommendation({
       player: row,
-      overallRank,
+      overallRank: draftPriority,
       market,
       seasonProjectionRank: projectionRankByKey.get(row.playerKey) ?? null,
       projectionCount: projectionPool.length,
@@ -521,10 +561,17 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     return row;
   });
 
+  const reference = baselineReference || {
+    weights, poolMaxSeasonPoints, replacement,
+    values: referenceValues, size: valued.length, complete: poolComplete === true,
+  };
   return {
     available: true,
     availabilityKnown,
     position: position || null,
+    rankScope: reference.complete ? 'full_pool' : 'available_players',
+    rosterPersonalized: personalized,
+    baselineReference: reference,
     board,
     noData, // players with no projection, listed honestly (not ranked)
     totalEligible: pool.length,

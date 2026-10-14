@@ -12,18 +12,20 @@
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
 
-const SORT_KEYS = new Set(['projected', 'period', 'owned', 'name']);
+const SORT_KEYS = new Set(['overall', 'projected', 'period', 'owned', 'name']);
 
 /**
  * @param {Object} params
  * @param {Array} params.players            normalized players to rank
  * @param {Object} params.projectionProvider {getProjection(player), getPeriodValue?(player)}
- * @param {string} [params.sortBy]          'projected' | 'period' | 'owned' | 'name'
+ * @param {Map<string,number>} [params.overallRanks]  playerKey -> shared ProGM Overall Rank (from the Draft Helper baseline)
+ * @param {string} [params.rankScope]       'full_pool' | 'available_players' (how the overall ranks are relative)
+ * @param {string} [params.sortBy]          'overall' | 'projected' | 'period' | 'owned' | 'name'
  * @param {string} [params.position]        filter to players eligible at this position
  * @param {boolean}[params.includeOut]      include OUT players (default false)
  * @param {number} [params.limit]
  */
-export function buildRankings({ players, projectionProvider, sortBy = 'projected', position = null, includeOut = false, limit = 200 }) {
+export function buildRankings({ players, projectionProvider, overallRanks = null, rankScope = null, sortBy = 'projected', position = null, includeOut = false, limit = 200 }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const key = SORT_KEYS.has(sortBy) ? sortBy : 'projected';
 
@@ -45,6 +47,7 @@ export function buildRankings({ players, projectionProvider, sortBy = 'projected
       eligiblePositions: p.eligiblePositions || [],
       status: p.status || null,
       percentOwned: p.percentOwned ?? null, // context only
+      overallRank: overallRanks?.get?.(p.playerKey) ?? null,
       projected: proj?.projectedPoints ?? null,
       confidence: proj?.confidence ?? null,
       periodProjected: period?.scheduleAware ? (period.periodProjectedPoints ?? null) : null,
@@ -55,6 +58,8 @@ export function buildRankings({ players, projectionProvider, sortBy = 'projected
 
   // Comparator: known values first, then by the requested key. Name is A-Z.
   const cmp = {
+    overall: (a, b) => nullsLast(b.overallRank == null ? null : -b.overallRank, a.overallRank == null ? null : -a.overallRank)
+      || nullsLast(b.projected, a.projected),
     projected: (a, b) => nullsLast(b.projected, a.projected),
     period: (a, b) => nullsLast(b.periodProjected, a.periodProjected),
     owned: (a, b) => nullsLast(b.percentOwned, a.percentOwned),
@@ -66,11 +71,12 @@ export function buildRankings({ players, projectionProvider, sortBy = 'projected
   return {
     projectionsAvailable: hasProjections,
     sortBy: key,
+    rankScope: overallRanks ? rankScope : null,
     position: position || null,
     count: sorted.length,
     players: sorted,
     note: hasProjections
-      ? 'Rankings use ProGM projections computed under this league\'s scoring. Players without data are listed last (never zeroed). Ownership % is context only.'
+      ? 'ProGM Overall ranks players by projected season fantasy points (points per game × expected games) with positional replacement value and scarcity under this league\'s scoring; it ignores your roster. Projected PPG and This Period are separate sorts. Players without data are listed last (never zeroed). Ownership % is context only.'
       : 'Projection data is unavailable, so players are listed by availability/ownership facts only (no quality ranking).',
   };
 }
