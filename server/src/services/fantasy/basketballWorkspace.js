@@ -39,6 +39,7 @@ import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { buildDraftBoard } from './draftHelper.js';
+import { resolveRankingModel } from './rankingModel.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -240,7 +241,8 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
   const draftPool = [...availablePlayers, ...myRoster];
   // Frozen overall-rank reference: captured pre-draft, reused while others draft.
-  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories });
+  const rankingModel = resolveRankingModel();
+  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories, rankingModel });
   const draftBoard = settings
     ? buildDraftBoard({
         players: draftPool,
@@ -251,6 +253,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentSeason: league?.season || null, // for current-season Yahoo rank
+        rankingModel,
       })
     : { available: false, availabilityKnown: true, board: [], noData: [], note: 'League settings unavailable.' };
   if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
@@ -262,6 +265,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     projectionProvider,
     overallRanks,
     rankScope: draftBoard.rankScope || null,
+    rankingModel: draftBoard.rankingModel || null,
     sortBy: overallRanks.size ? 'overall' : (periodWindow ? 'period' : 'projected'),
   });
 

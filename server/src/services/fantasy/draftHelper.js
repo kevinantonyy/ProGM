@@ -8,6 +8,7 @@
  * draft. Every value comes from real projections; players without a projection
  * are listed separately as "no data", never assigned a fabricated value.
  */
+import { RANKING_MODELS, rankingModelInfo } from './rankingModel.js';
 import { scarcityWeights } from './playerValue.js';
 import { buildAvailabilityBaselineModel, estimateExpectedGames } from './durability.js';
 import { computeMarketContext, computeRankComparison } from './adpMarket.js';
@@ -41,7 +42,7 @@ const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
  * verified season-ending injury cap, so no separate durability or injury
  * multiplier is applied. This prevents double-counting availability risk.
  */
-export const DRAFT_WEIGHTS = Object.freeze({ production: 0.70, replacement: 0.20, scarcity: 0.05, rosterFit: 0.05 });
+export const DRAFT_WEIGHTS = RANKING_MODELS.A.weights; // Variant A (default); Variant B lives in rankingModel.js
 const CONF_FLOOR = 0.9; // data quality is a restrained 0-10% adjustment, never the primary ranking signal
 
 /** Max scarcity weight among a player's eligible positions (>=1). */
@@ -113,7 +114,8 @@ export function computeReplacementBaselines(rows, settings) {
  * @param {Object|null} [params.availabilityModel] expected-games explanation
  * @returns {{ value:number|null, components:Object }|{ value:null, components:Object }}
  */
-export function computeDraftValue({ seasonPoints, perGame, expectedGames, confidence, eligiblePositions, weights, poolMaxSeasonPoints, replacement, rosterFitScore = 0.5, availabilityModel = null }) {
+export function computeDraftValue({ seasonPoints, perGame, expectedGames, confidence, eligiblePositions, weights, poolMaxSeasonPoints, replacement, rosterFitScore = 0.5, availabilityModel = null, rankingModel = 'A' }) {
+  const W = rankingModelInfo(rankingModel).weights;
   if (seasonPoints == null) {
     return { value: null, components: { reason: 'no_projection' } };
   }
@@ -142,10 +144,10 @@ export function computeDraftValue({ seasonPoints, perGame, expectedGames, confid
   // 5. Roster need is intentionally small and secondary to season production.
   const fitComp = Math.max(0, Math.min(1, Number(rosterFitScore) || 0));
 
-  const blendedScore = DRAFT_WEIGHTS.production * production
-    + DRAFT_WEIGHTS.replacement * replacementComp
-    + DRAFT_WEIGHTS.scarcity * scarcityComp
-    + DRAFT_WEIGHTS.rosterFit * fitComp;
+  const blendedScore = W.production * production
+    + W.replacement * replacementComp
+    + W.scarcity * scarcityComp
+    + W.rosterFit * fitComp;
   const rawScore = seasonPoints > 0 ? blendedScore : 0;
 
   // Scale to 0..100. Availability already affects seasonPoints through
@@ -341,7 +343,9 @@ export function buildDraftRecommendation({ player, overallRank, market, seasonPr
  * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
  * @param {string|number|null} [params.currentSeason] Yahoo/NBA season for picking the current-season Yahoo rank
  */
-export function buildDraftBoard({ players, settings, projectionProvider, poolComplete = null, baselineReference = null, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
+export function buildDraftBoard({ players, settings, projectionProvider, poolComplete = null, baselineReference = null, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null, rankingModel = 'A' }) {
+  // A frozen reference built under another model must never be reused.
+  if (baselineReference && (baselineReference.model ?? 'A') !== rankingModelInfo(rankingModel).id) baselineReference = null;
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
   const overloadedSet = new Set((rosterAnalysis?.positions?.overloadedPositions || []).map((o) => o.position));
@@ -482,6 +486,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
   const replacement = baselineReference?.replacement || computeReplacementBaselines(seasonRows, settings);
   // Personalized roster fit applies only once the user has a roster.
   const personalized = rosterAnalysis?.counts?.rosterSize !== 0;
+  const model = rankingModelInfo(rankingModel);
 
   // Pass 2: compute season-total-anchored draft value + explainability.
   const valued = seasonRows.map((r) => {
@@ -495,6 +500,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
       poolMaxSeasonPoints,
       replacement,
       availabilityModel: r.availabilityModel,
+      rankingModel: model.id,
     };
     // Overall (baseline) value: same formula with a NEUTRAL roster-fit input
     // for everyone. Draft Priority value: actual roster fit once a roster exists.
@@ -563,7 +569,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
 
   const reference = baselineReference || {
     weights, poolMaxSeasonPoints, replacement,
-    values: referenceValues, size: valued.length, complete: poolComplete === true,
+    values: referenceValues, size: valued.length, complete: poolComplete === true, model: model.id,
   };
   return {
     available: true,
@@ -571,6 +577,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     position: position || null,
     rankScope: reference.complete ? 'full_pool' : 'available_players',
     rosterPersonalized: personalized,
+    rankingModel: model.id,
+    rankingModelLabel: model.label,
     baselineReference: reference,
     board,
     noData, // players with no projection, listed honestly (not ranked)
@@ -582,7 +590,9 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
         'projected season points = league-scored projected fantasy points/game × expected regular-season games',
         'expected games = 35% independent older-career availability + 40% recent availability + 25% historical age/experience baseline',
         'career and recent samples are disjoint and empirically shrunk by eligible games and independent seasons; missing/pre-debut seasons are not zero',
-        'draft value = normalized blend of projected season production (70%), positional replacement/VORP (20%), scarcity (5%), and roster fit (5%)',
+        model.id === 'B'
+          ? 'draft value (model B) = normalized blend of projected season production (70%), positional replacement/VORP (20%), and roster fit (5%); no separate scarcity bonus'
+          : 'draft value = normalized blend of projected season production (70%), positional replacement/VORP (20%), scarcity (5%), and roster fit (5%)',
         'confidence makes a restrained data-quality adjustment; expected games accounts for availability once, with no second durability/injury multiplier',
         'current-period schedule totals do NOT drive draft value',
         'Yahoo ADP shown as MARKET context (VALUE/REACH/DRAFT NOW/WAIT) — it never changes the ProGM ranking',

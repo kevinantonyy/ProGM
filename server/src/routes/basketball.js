@@ -24,6 +24,7 @@ import {
 } from '../services/fantasy/draftResults.js';
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
+import { resolveRankingModel } from '../services/fantasy/rankingModel.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
@@ -141,7 +142,7 @@ router.get('/workspace', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    const cacheKey = `bball:workspace:${req.userId}:${leagueKey}:${teamKey}`;
+    const cacheKey = `bball:workspace:${resolveRankingModel()}:${req.userId}:${leagueKey}:${teamKey}`;
     if (req.query.refresh !== 'true') {
       const cached = cache.get(cacheKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
@@ -329,7 +330,8 @@ router.get('/draft', authenticate, async (req, res) => {
       const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
       // Reuse the baseline captured pre-draft so Overall Rank stays stable as
       // other teams draft; without it ranks are labelled relative to available players.
-      const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories });
+      const rankingModel = resolveRankingModel();
+      const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories, rankingModel });
       board = buildDraftBoard({
         players: availablePlayers,
         settings,
@@ -341,6 +343,7 @@ router.get('/draft', authenticate, async (req, res) => {
         currentPick,
         nextPick, // null when snake slot not reliably recoverable -> no DRAFT NOW/WAIT
         currentSeason: league?.season || null, // for current-season Yahoo rank
+        rankingModel,
       });
     }
 

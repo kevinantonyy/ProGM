@@ -25,7 +25,7 @@ const SORT_KEYS = new Set(['overall', 'projected', 'period', 'owned', 'name']);
  * @param {boolean}[params.includeOut]      include OUT players (default false)
  * @param {number} [params.limit]
  */
-export function buildRankings({ players, projectionProvider, overallRanks = null, rankScope = null, sortBy = 'projected', position = null, includeOut = false, limit = 200 }) {
+export function buildRankings({ players, projectionProvider, overallRanks = null, rankScope = null, rankingModel = null, sortBy = 'projected', position = null, includeOut = false, limit = 200 }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const key = SORT_KEYS.has(sortBy) ? sortBy : 'projected';
 
@@ -72,6 +72,7 @@ export function buildRankings({ players, projectionProvider, overallRanks = null
     projectionsAvailable: hasProjections,
     sortBy: key,
     rankScope: overallRanks ? rankScope : null,
+    rankingModel: overallRanks ? rankingModel : null,
     position: position || null,
     count: sorted.length,
     players: sorted,
