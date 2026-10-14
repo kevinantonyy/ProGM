@@ -495,8 +495,10 @@ function DraftPlayerRow({ player, availabilityKnown }) {
     {expanded && <tr id={detailId} className="border-b border-dark-700 bg-dark-900/50"><td colSpan="5" className="p-4 sm:pl-16">
       <h3 className="font-display text-lg font-bold">Why Draft This Player?</h3>
       <p className="mt-2 max-w-4xl text-sm leading-6 text-dark-300">{player.recommendation || 'A recommendation is unavailable because the supporting data is incomplete.'}</p>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div><p className="stat-label">Projected Fantasy Points/Game</p><p className="mt-1 font-semibold tabular-nums">{player.projected != null ? player.projected.toFixed(1) : '—'}</p></div>
+        <div><p className="stat-label">Expected Games Played</p><p className="mt-1 font-semibold tabular-nums">{player.expectedSeasonGames != null ? player.expectedSeasonGames.toFixed(1) : '—'}</p></div>
+        <div><p className="stat-label">Projected Season Fantasy Points</p><p className="mt-1 font-semibold tabular-nums">{player.projectedSeasonPoints != null ? player.projectedSeasonPoints.toFixed(1) : '—'}</p></div>
         <div><p className="stat-label">Last Season Fantasy Points/Game{lastFantasySeason ? ` · ${lastFantasySeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonFantasy?.points != null ? player.lastSeasonFantasy.points.toFixed(1) : '—'}</p>{player.lastSeasonFantasy?.missingCategories?.length > 0 && <p className="mt-1 text-[11px] text-dark-500">Unavailable: missing {player.lastSeasonFantasy.missingCategories.join(', ')}</p>}</div>
         <div><p className="stat-label">Last Season Yahoo Rank{lastYahooSeason ? ` · ${lastYahooSeason}` : ''}</p><p className="mt-1 font-semibold tabular-nums">{player.lastSeasonYahooRank != null ? `#${player.lastSeasonYahooRank}` : '—'}</p></div>
       </div>
@@ -537,6 +539,7 @@ function DraftHelper({ data, leagueKey, active }) {
     if (sortBy === 'progm') return (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity);
     if (sortBy === 'yahooRank') return (a.yahooOverallRank ?? Infinity) - (b.yahooOverallRank ?? Infinity);
     if (sortBy === 'adp') return (a.yahooAdp ?? Infinity) - (b.yahooAdp ?? Infinity);
+    if (sortBy === 'seasonProjected') return (b.projectedSeasonPoints ?? -1) - (a.projectedSeasonPoints ?? -1);
     if (sortBy === 'projected') return (b.projected ?? -1) - (a.projected ?? -1);
     if (sortBy === 'period') return (b.periodProjected ?? -1) - (a.periodProjected ?? -1);
     if (sortBy === 'scarcity') return (b.scarcity ?? -1) - (a.scarcity ?? -1);
@@ -548,7 +551,7 @@ function DraftHelper({ data, leagueKey, active }) {
 
   const hasPeriod = data.scheduleAware;
   const sortBtns = [['progm', 'ProGM Rank', 'Your league-specific ProGM order'], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
-  const advancedSorts = [['projected', 'Projected Fantasy Points/Game', 'Projected production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
+  const advancedSorts = [['seasonProjected', 'Projected Season Fantasy Points', 'Projected fantasy points/game multiplied by expected regular-season games'], ['projected', 'Projected Fantasy Points/Game', 'Projected per-game production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
 
   return (
     <div className="space-y-4">
@@ -558,7 +561,7 @@ function DraftHelper({ data, leagueKey, active }) {
         {isLive ? <p className="mt-1 text-xs text-dark-400">Recomputed after every pick.</p> : <SecondaryDetails label="Board method" className="mt-2">{db.note}</SecondaryDetails>}
       </div>
 
-      <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">ProGM Rank</strong><br />League-specific order based on ProGM's existing model. This determines the default board order.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
+      <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">ProGM Rank</strong><br />League-specific order led by projected season fantasy points, then replacement value, roster fit, and scarcity.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
 
       {isLive && <LiveDraftRoster live={live} />}
 

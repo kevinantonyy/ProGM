@@ -40,8 +40,17 @@ test('projectPlayer produces league-specific per-game points', () => {
   // expected points = .35*25+.65*20 = 21.75; ast = .35*8+.65*6=6.7; reb=.35*10+.65*8=8.7
   // league pts = 21.75*1 + 6.7*1.5 + 8.7*1 = 21.75 + 10.05 + 8.7 = 40.5
   assert.equal(proj.projectedPoints, 40.5);
+  assert.equal(proj.lastSeasonFantasy.points, 37);
+  assert.notEqual(proj.projectedPoints, proj.lastSeasonFantasy.points);
   assert.equal(proj.method, 'blended_recent_season');
   assert.ok(proj.confidence > 0.9); // full season + full recent + supported
+});
+
+test('projected and last-season FPPG may legitimately match when only season data exists', () => {
+  const stats = { externalId: 'same', season: line({ points: 20, assists: 6, rebounds: 8, gamesPlayed: 70 }), recent: null };
+  const proj = projectPlayer({ stats, statCategories: CATS });
+  assert.equal(proj.method, 'season_only');
+  assert.equal(proj.projectedPoints, proj.lastSeasonFantasy.points);
 });
 
 test('projectPlayer returns null projection and 0 confidence with no data', () => {

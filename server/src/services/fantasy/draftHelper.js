@@ -7,79 +7,42 @@
  * manager can study relative worth for keeper/dynasty planning or next season's
  * draft. Every value comes from real projections; players without a projection
  * are listed separately as "no data", never assigned a fabricated value.
- *
- * Value reuses the same transparent model as trades/waivers (playerValue.js) so
- * a player's worth is consistent across the whole product.
  */
-import { scarcityWeights, healthMultiplier } from './playerValue.js';
-import { computeDurability } from './durability.js';
+import { scarcityWeights } from './playerValue.js';
+import { computeAvailabilityBaseline, estimateExpectedGames } from './durability.js';
 import { computeMarketContext, computeRankComparison } from './adpMarket.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
-const SHORT_TERM_STATUSES = new Set(['GTD', 'DTD', 'DAY_TO_DAY', 'Q', 'QUESTIONABLE', 'PROBABLE']);
-
-export function draftHealthMultiplier(status) {
-  return status && SHORT_TERM_STATUSES.has(String(status).toUpperCase()) ? 1 : healthMultiplier(status);
-}
 
 /**
  * Draft-value model (distinct from the trade/waiver playerValue model).
  *
- * DRAFT VALUE answers "who is worth more to draft", which is driven by expected
- * PER-GAME production under this league's scoring — NOT by a games-in-window
- * total. (Using a period total made players on teams with more games this week
- * outrank clearly better per-game stars; that is a weekly-streaming concern,
- * not draft value.) Components are each normalized to a comparable 0..1 scale
+ * DRAFT VALUE answers "who is worth more to draft" in Yahoo points leagues.
+ * Its primary input is projected regular-season fantasy points (projected FPPG
+ * x expected games), not a current-week schedule total. Components are each
+ * normalized to a comparable 0..1 scale
  * BEFORE combining, so no single raw scale (e.g. raw fantasy points) can
  * dominate, then blended with fixed weights:
  *
- *   production   (0..1)  per-game league fantasy points vs the pool max
- *   replacement  (0..1)  per-game value ABOVE the positional replacement
+ *   production   (0..1)  projected season fantasy points vs the pool max
+ *   replacement  (0..1)  season value ABOVE the positional replacement
  *                        baseline (VORP-style): rewards players who clear the
  *                        bar at a scarce position, computed from the pool itself
  *   scarcity     (0..1)  league positional scarcity (rarer eligible slots)
  *   confidence   (0..1)  data-quality confidence (missing/thin data penalized,
  *                        never treated as zero production)
- *   healthMult   (mult)  season-long injury availability multiplier; transient
- *                        Q/GTD/DTD tags remain context-only, OUT/IL is reduced
+ *   roster fit   (0..1)  selected team's positional need (secondary only)
  *
- *   rawScore = 0.60*production + 0.30*replacement + 0.10*scarcity
+ *   rawScore = 0.70*production + 0.20*replacement + 0.05*scarcity + 0.05*fit
  *   draftValue = rawScore
  *                * (CONF_FLOOR + (1-CONF_FLOOR)*confidence)   // confidence penalty
- *                * healthMult                                  // CURRENT injury penalty
- *                * (1 - durabilityPenalty)                     // historical availability
  *
- * DURABILITY (historical, season-level availability) is DISTINCT from the
- * current injury multiplier (healthMult). It is a DOWNSIDE-ONLY adjustment:
- * players with strong/neutral or insufficient history are not boosted; only
- * demonstrably lower historical availability is penalized, capped at
- * DURABILITY_MAX_PENALTY so elite per-game production is never overwhelmed.
- * When history is missing or thin (<2 usable seasons) the penalty is 0.
- *
- * Scarcity weight was reduced (0.15 -> 0.10, the 0.05 moved to production) so
- * positional scarcity does not double-count with the replacement/VORP term.
- *
- * Everything is derived from existing normalized data (projection per-game,
- * league rosterSlots, Yahoo injury status, historical games played). No
- * player-specific hardcoding.
+ * Expected games already incorporates historical availability and an explicit
+ * verified season-ending injury cap, so no separate durability or injury
+ * multiplier is applied. This prevents double-counting availability risk.
  */
-export const DRAFT_WEIGHTS = Object.freeze({ production: 0.60, replacement: 0.30, scarcity: 0.10 });
-const CONF_FLOOR = 0.6; // a no-confidence player keeps 60% of value, never 0 from data gaps
-// Durability penalty is downside-only and capped so it moderately adjusts, never
-// dominates. A fully-available player (durabilityScore 1) gets 0 penalty; the
-// penalty scales with the availability SHORTFALL up to this cap. Tunable.
-export const DURABILITY_MAX_PENALTY = 0.10; // max 10% of draft value
-
-/**
- * Downside-only durability penalty in [0, DURABILITY_MAX_PENALTY].
- *   penalty = DURABILITY_MAX_PENALTY × (1 - durabilityScore)
- * null durabilityScore (insufficient/no history) => 0 penalty (neutral).
- */
-export function durabilityPenaltyFrom(durabilityScore) {
-  if (durabilityScore == null) return 0;
-  const shortfall = Math.max(0, Math.min(1, 1 - durabilityScore));
-  return Number((DURABILITY_MAX_PENALTY * shortfall).toFixed(4));
-}
+export const DRAFT_WEIGHTS = Object.freeze({ production: 0.70, replacement: 0.20, scarcity: 0.05, rosterFit: 0.05 });
+const CONF_FLOOR = 0.9; // data quality is a restrained 0-10% adjustment, never the primary ranking signal
 
 /** Max scarcity weight among a player's eligible positions (>=1). */
 function bestScarcity(eligiblePositions, weights) {
@@ -98,13 +61,13 @@ function scarcityComponent(scarcity, weights) {
 
 /**
  * Positional replacement baselines (VORP-style) from the pool itself.
- * For each starting position, the baseline is the per-game production of a
+ * For each starting position, the baseline is the season production of a
  * "replacement" starter: the player ranked at (teamCount × slotsForPos). A
- * player's replacement component is how far their per-game value exceeds the
+ * player's replacement component is how far their season value exceeds the
  * best (lowest) baseline among the positions they're eligible for, normalized
  * by the pool's spread. Entirely data-derived; no hardcoded player/position.
  *
- * @param {Array<{perGame:number|null, eligiblePositions:string[]}>} rows
+ * @param {Array<{seasonPoints:number|null, eligiblePositions:string[]}>} rows
  * @param {Object} settings  normalized league settings
  * @returns {{ baselineByPos:Object, spread:number }}
  */
@@ -114,8 +77,8 @@ export function computeReplacementBaselines(rows, settings) {
   const demand = {};
   for (const slot of startingSlots) demand[slot.position] = (demand[slot.position] || 0) + (slot.count || 0);
 
-  const valued = rows.filter((r) => r.perGame != null);
-  const allVals = valued.map((r) => r.perGame).sort((a, b) => b - a);
+  const valued = rows.filter((r) => r.seasonPoints != null);
+  const allVals = valued.map((r) => r.seasonPoints).sort((a, b) => b - a);
   const spread = allVals.length ? Math.max(1e-6, allVals[0] - allVals[allVals.length - 1]) : 1;
 
   const baselineByPos = {};
@@ -123,7 +86,7 @@ export function computeReplacementBaselines(rows, settings) {
     // Players eligible at this position, best-first.
     const eligible = valued
       .filter((r) => (r.eligiblePositions || []).includes(pos))
-      .map((r) => r.perGame)
+      .map((r) => r.seasonPoints)
       .sort((a, b) => b - a);
     const starters = Math.max(1, Math.round((demand[pos] || 0) * teamCount));
     // Replacement = the starter just past the last startable slot (next man up).
@@ -135,27 +98,29 @@ export function computeReplacementBaselines(rows, settings) {
 
 /**
  * Compute a draft value + explainable component breakdown for one player.
- * PER-GAME anchored: never uses a games-in-window period total.
+ * Season-total anchored: never uses a games-in-window period total.
  *
  * @param {Object} params
- * @param {number|null} params.perGame        per-game league fantasy points
+ * @param {number|null} params.seasonPoints   projected regular-season fantasy points
+ * @param {number|null} params.perGame        projected per-game fantasy points
+ * @param {number|null} params.expectedGames  projected regular-season games
  * @param {number|null} params.confidence     data-quality confidence 0..1
- * @param {string|null} params.status         Yahoo injury status
  * @param {string[]} params.eligiblePositions
  * @param {Object} params.weights             scarcityWeights(settings)
- * @param {number} params.poolMaxPerGame      max per-game in the pool (for production norm)
+ * @param {number} params.poolMaxSeasonPoints max season total in pool
  * @param {{baselineByPos:Object, spread:number}} params.replacement
- * @param {Array|null} [params.history]        historical availability [{season,gamesPlayed,gameTotal}]
+ * @param {number} [params.rosterFitScore]     need=1, neutral=.5, surplus=0
+ * @param {Object|null} [params.availabilityModel] expected-games explanation
  * @returns {{ value:number|null, components:Object }|{ value:null, components:Object }}
  */
-export function computeDraftValue({ perGame, confidence, status, eligiblePositions, weights, poolMaxPerGame, replacement, history = null }) {
-  if (perGame == null) {
+export function computeDraftValue({ seasonPoints, perGame, expectedGames, confidence, eligiblePositions, weights, poolMaxSeasonPoints, replacement, rosterFitScore = 0.5, availabilityModel = null }) {
+  if (seasonPoints == null) {
     return { value: null, components: { reason: 'no_projection' } };
   }
-  // 1. Production: per-game vs pool max (0..1).
-  const production = poolMaxPerGame > 0 ? Math.max(0, Math.min(1, perGame / poolMaxPerGame)) : 0;
+  // 1. Production: projected season total vs pool max (0..1).
+  const production = poolMaxSeasonPoints > 0 ? Math.max(0, Math.min(1, seasonPoints / poolMaxSeasonPoints)) : 0;
 
-  // 2. Replacement (VORP): per-game above the best baseline among eligible
+  // 2. Replacement (VORP): season total above the best baseline among eligible
   //    positions, normalized by pool spread (0..1, clamped).
   let bestBaseline = Infinity;
   for (const pos of eligiblePositions || []) {
@@ -163,7 +128,7 @@ export function computeDraftValue({ perGame, confidence, status, eligiblePositio
     if (b != null && b < bestBaseline) bestBaseline = b;
   }
   if (!Number.isFinite(bestBaseline)) bestBaseline = 0;
-  const vorp = perGame - bestBaseline;
+  const vorp = seasonPoints - bestBaseline;
   const replacementComp = Math.max(0, Math.min(1, vorp / (replacement?.spread || 1)));
 
   // 3. Scarcity (0..1).
@@ -174,42 +139,35 @@ export function computeDraftValue({ perGame, confidence, status, eligiblePositio
   const conf = confidence == null ? 0 : Math.max(0, Math.min(1, confidence));
   const confFactor = CONF_FLOOR + (1 - CONF_FLOOR) * conf;
 
-  // 5. CURRENT injury availability multiplier (separate from durability).
-  // A transient questionable/day-to-day tag should not discount an entire
-  // season-long draft projection. Long-term OUT/IL statuses still apply.
-  const healthMult = draftHealthMultiplier(status);
+  // 5. Roster need is intentionally small and secondary to season production.
+  const fitComp = Math.max(0, Math.min(1, Number(rosterFitScore) || 0));
 
-  // 6. Historical durability (season-level availability). Downside-only, capped.
-  //    Missing/thin history => neutral (durabilityScore null => 0 penalty).
-  const durability = computeDurability(history);
-  const durabilityPenalty = durabilityPenaltyFrom(durability.durabilityScore);
-
-  const rawScore = DRAFT_WEIGHTS.production * production
+  const blendedScore = DRAFT_WEIGHTS.production * production
     + DRAFT_WEIGHTS.replacement * replacementComp
-    + DRAFT_WEIGHTS.scarcity * scarcityComp;
+    + DRAFT_WEIGHTS.scarcity * scarcityComp
+    + DRAFT_WEIGHTS.rosterFit * fitComp;
+  const rawScore = seasonPoints > 0 ? blendedScore : 0;
 
-  // Scale to a readable 0..100 draft score (relative within pool). Durability
-  // is applied as a (1 - penalty) multiplier, kept separate from the current
-  // injury multiplier so the two signals never conflate.
-  const value = Number((rawScore * confFactor * healthMult * (1 - durabilityPenalty) * 100).toFixed(2));
+  // Scale to 0..100. Availability already affects seasonPoints through
+  // expectedGames, so it is deliberately not multiplied again here.
+  const value = Number((rawScore * confFactor * 100).toFixed(2));
 
   return {
     value,
     components: {
       perGame: Number(perGame.toFixed(2)),
+      expectedGames: Number(expectedGames.toFixed(1)),
+      seasonPoints: Number(seasonPoints.toFixed(1)),
       production: Number(production.toFixed(3)),
       replacement: Number(replacementComp.toFixed(3)),
-      vorp: Number(vorp.toFixed(2)),
+      vorp: Number(vorp.toFixed(1)),
       scarcity: Number(scarcityComp.toFixed(3)),
       scarcityWeight: scarcityW,
       confidence: Number(conf.toFixed(2)),
       confidenceFactor: Number(confFactor.toFixed(3)),
-      healthMult, // CURRENT injury status (distinct from durability)
-      // Historical durability (explainability) — kept separate from injury.
-      durabilityScore: durability.durabilityScore,
-      durabilityPenalty,
-      durabilitySeasons: durability.usableSeasons,
-      history: history || null,
+      rosterFit: Number(fitComp.toFixed(2)),
+      availability: availabilityModel || null,
+      availabilityPenaltyAppliedAgain: false,
       rawScore: Number(rawScore.toFixed(4)),
     },
   };
@@ -243,6 +201,12 @@ function rosterFit(eligiblePositions, thinSet, overloadedSet) {
   return { fit: 'neutral', label: 'Neutral fit' };
 }
 
+function rosterFitScore(fit) {
+  if (fit === 'need') return 1;
+  if (fit === 'surplus') return 0;
+  return 0.5;
+}
+
 function oneDecimal(value) {
   return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(1)) : null;
 }
@@ -268,7 +232,7 @@ function nbaStatSentence(player) {
 }
 
 /** Deterministic, data-backed Draft Helper recommendation (no AI call). */
-export function buildDraftRecommendation({ player, overallRank, market, projectionRank, projectionCount, availabilityKnown }) {
+export function buildDraftRecommendation({ player, overallRank, market, seasonProjectionRank, projectionCount, availabilityKnown }) {
   const rostered = availabilityKnown && player.availability !== 'available';
   let action;
   if (rostered) {
@@ -292,19 +256,27 @@ export function buildDraftRecommendation({ player, overallRank, market, projecti
       ? `adds depth at ${positions}, where your roster is already strong`
       : `adds ${positions} depth`;
   let production;
-  if (projectionRank === 1 && projectionCount > 0) {
-    production = `${player.name} has the highest projected fantasy points per game among ${projectionCount} ${availabilityKnown ? 'available ' : ''}players with projections and ${fit}.`;
-  } else if (projectionRank != null && projectionCount > 0) {
-    production = `${player.name} projects #${projectionRank} of ${projectionCount} ${availabilityKnown ? 'available ' : ''}players in fantasy points per game and ${fit}.`;
+  if (seasonProjectionRank === 1 && projectionCount > 0) {
+    production = `${player.name} has the highest projected regular-season fantasy-point total among ${projectionCount} ${availabilityKnown ? 'available ' : ''}players with projections and ${fit}.`;
+  } else if (seasonProjectionRank != null && projectionCount > 0) {
+    production = `${player.name} projects #${seasonProjectionRank} of ${projectionCount} ${availabilityKnown ? 'available ' : ''}players in regular-season fantasy points and ${fit}.`;
   } else {
     production = `${player.name} ${fit}.`;
   }
 
   let context = nbaStatSentence(player);
-  const injured = player.status && !['Healthy', 'ACTIVE', 'NORMAL'].includes(player.status);
-  if (injured) {
-    const injury = `Yahoo currently lists ${player.name} as ${player.status}, so account for the availability risk.`;
-    context = context ? `${context.replace(/\.$/, '')}; Yahoo currently lists ${player.name} as ${player.status}.` : injury;
+  const baselineGames = player.availabilityModel?.baselineAvailability != null
+    ? player.availabilityModel.baselineAvailability * 82
+    : null;
+  const materialAvailabilityRisk = player.expectedSeasonGames != null
+    && baselineGames != null
+    && player.expectedSeasonGames <= baselineGames - 8;
+  if (player.availabilityModel?.injuryReason) {
+    const injury = `${player.name}'s verified injury report indicates ${player.availabilityModel.injuryReason}, which is reflected in the expected-games estimate.`;
+    context = context ? `${context} ${injury}` : injury;
+  } else if (materialAvailabilityRisk) {
+    const risk = `Recent availability history projects about ${Math.round(player.expectedSeasonGames)} games, adding material season-volume risk.`;
+    context = context ? `${context} ${risk}` : risk;
   } else if (!context && player.lastSeasonYahooRank != null) {
     context = `Yahoo ranked ${player.name} #${player.lastSeasonYahooRank} for the ${seasonLabel(player.lastSeasonYahooRankSeason)} season.`;
   }
@@ -384,10 +356,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     };
   }
 
-  // Pass 1: gather per-game projection + metadata for every pooled player.
-  // DRAFT VALUE is PER-GAME anchored — the schedule-aware period total is NOT
-  // used here (that is a weekly-streaming signal, not draft value). We still
-  // surface periodProjected/expectedGames for display only.
+  // Pass 1: gather the league-scored per-game projection and metadata. The
+  // schedule-aware current-period total remains display-only.
   const prelim = [];
   const noData = [];
   for (const p of pool) {
@@ -400,6 +370,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       periodProjected: scheduleAware ? (period.periodProjectedPoints ?? null) : null, // display only
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
+      injury: proj?.injury ?? null,
       lastSeasonNba: proj?.lastSeason?.stats
         ? {
             season: proj.lastSeason.season,
@@ -419,22 +390,42 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     prelim.push({ ...base, perGame, history });
   }
 
-  // Pool-wide references for normalization (computed from the pool itself).
-  const weights = scarcityWeights(settings, prelim);
-  const poolMaxPerGame = prelim.reduce((m, r) => Math.max(m, r.perGame), 0);
-  const replacement = computeReplacementBaselines(prelim, settings);
+  // Expected season games use 3 completed seasons, recency weighted. Players
+  // with incomplete/no history regress toward the pool availability baseline.
+  const availabilityBaseline = computeAvailabilityBaseline(prelim.map((r) => r.history));
+  const seasonRows = prelim.map((r) => {
+    const availabilityModel = estimateExpectedGames(r.history, {
+      baselineAvailability: availabilityBaseline,
+      injury: r.injury,
+    });
+    const expectedSeasonGames = availabilityModel.expectedGames;
+    return {
+      ...r,
+      expectedSeasonGames,
+      projectedSeasonPoints: Number((r.perGame * expectedSeasonGames).toFixed(1)),
+      seasonPoints: Number((r.perGame * expectedSeasonGames).toFixed(1)),
+      availabilityModel,
+    };
+  });
 
-  // Pass 2: compute normalized, per-game-anchored draft value + explainability.
-  const valued = prelim.map((r) => {
+  // Pool-wide references for normalization (computed from the pool itself).
+  const weights = scarcityWeights(settings, seasonRows);
+  const poolMaxSeasonPoints = seasonRows.reduce((m, r) => Math.max(m, r.seasonPoints), 0);
+  const replacement = computeReplacementBaselines(seasonRows, settings);
+
+  // Pass 2: compute season-total-anchored draft value + explainability.
+  const valued = seasonRows.map((r) => {
     const dv = computeDraftValue({
+      seasonPoints: r.seasonPoints,
       perGame: r.perGame,
+      expectedGames: r.expectedSeasonGames,
       confidence: r.confidence,
-      status: r.status,
       eligiblePositions: r.eligiblePositions,
       weights,
-      poolMaxPerGame,
+      poolMaxSeasonPoints,
       replacement,
-      history: r.history,
+      rosterFitScore: rosterFitScore(r.rosterFit),
+      availabilityModel: r.availabilityModel,
     });
     return {
       ...r,
@@ -444,13 +435,13 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     };
   });
 
-  // Global BEST AVAILABLE order: by draft value only. Roster fit AND Yahoo ADP
-  // are attached for the UI but MUST NOT influence this global ordering (fit =>
-  // "Best Fit" view; ADP => market label only). ProGM rank stays authoritative.
+  // Global BEST AVAILABLE order: season production is primary; positional
+  // replacement, scarcity, and roster fit are explicitly secondary. Yahoo ADP
+  // remains market context only and never changes ProGM order.
   const sorted = valued.sort((a, b) => b.value - a.value).slice(0, limit);
   const projectionPool = valued
     .filter((p) => !availabilityKnown || p.availability === 'available')
-    .sort((a, b) => b.perGame - a.perGame);
+    .sort((a, b) => b.projectedSeasonPoints - a.projectedSeasonPoints);
   const projectionRankByKey = new Map(projectionPool.map((p, i) => [p.playerKey, i + 1]));
   const board = assignTiers(sorted).map((p, i) => {
     const overallRank = i + 1;
@@ -478,7 +469,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       player: row,
       overallRank,
       market,
-      projectionRank: projectionRankByKey.get(row.playerKey) ?? null,
+      seasonProjectionRank: projectionRankByKey.get(row.playerKey) ?? null,
       projectionCount: projectionPool.length,
       availabilityKnown,
     });
@@ -496,11 +487,11 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     dataBasis: {
       facts: ['player eligibility, team, injury status, ownership, availability (Yahoo)'],
       calculations: [
-        'draft value = normalized blend of per-game league production (60%), positional replacement/VORP (30%), and scarcity (10%)',
-        'confidence + CURRENT injury penalties applied as multipliers (missing data penalized, never zeroed)',
-        'historical durability (season availability over last 3 completed seasons) applied as a downside-only multiplier capped at 10%; neutral when <2 usable seasons; kept separate from current injury',
-        'PER-GAME anchored — games-in-window totals do NOT drive draft value',
-        'value tiers from natural gaps; roster fit shown but does NOT reorder Best Available',
+        'projected season points = league-scored projected fantasy points/game × expected regular-season games',
+        'expected games = recency-weighted availability from the last 3 completed seasons; incomplete history regresses toward the pool baseline',
+        'draft value = normalized blend of projected season production (70%), positional replacement/VORP (20%), scarcity (5%), and roster fit (5%)',
+        'confidence makes a restrained data-quality adjustment; expected games accounts for availability once, with no second durability/injury multiplier',
+        'current-period schedule totals do NOT drive draft value',
         'Yahoo ADP shown as MARKET context (VALUE/REACH/DRAFT NOW/WAIT) — it never changes the ProGM ranking',
         'Yahoo Rank (overall + current season) shown as an independent EXTERNAL signal with a ProGM-vs-Yahoo agreement note — it never reorders the ProGM board',
       ],

@@ -18,6 +18,7 @@ function byathletePayload() {
     athletes: [
       { athlete: { id: '111', displayName: 'A', teamShortName: 'BOS' }, categories: [{ name: 'general', values: [70, 32] }] },
       { athlete: { id: '222', displayName: 'B', teamShortName: 'LAL' }, categories: [{ name: 'general', values: [55, 30] }] },
+      { athlete: { id: '333', displayName: 'Full Season', teamShortName: 'NY' }, categories: [{ name: 'general', values: [82, 20] }] },
     ],
   };
 }
@@ -91,7 +92,10 @@ test('2026-27 Wembanyama history maps to verified 2025-26 / 2024-25 / 2023-24 ga
     const gamesByEspnYear = { 2026: 64, 2025: 46, 2024: 71 };
     const payload = {
       categories: [{ name: 'general', names: ['gamesPlayed'] }],
-      athletes: [{ athlete: { id: '6580', displayName: 'Victor Wembanyama', teamShortName: 'SA' }, categories: [{ name: 'general', values: [gamesByEspnYear[endYear]] }] }],
+      athletes: [
+        { athlete: { id: '6580', displayName: 'Victor Wembanyama', teamShortName: 'SA' }, categories: [{ name: 'general', values: [gamesByEspnYear[endYear]] }] },
+        { athlete: { id: 'full', displayName: 'Full Season', teamShortName: 'NY' }, categories: [{ name: 'general', values: [82] }] },
+      ],
     };
     return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(payload) };
   };

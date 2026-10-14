@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDraftBoard, computeDraftValue, computeReplacementBaselines, draftHealthMultiplier, DRAFT_WEIGHTS } from './draftHelper.js';
+import { buildDraftBoard, computeDraftValue, computeReplacementBaselines, DRAFT_WEIGHTS } from './draftHelper.js';
 
 const settings = {
   rosterSlots: [
@@ -108,17 +108,28 @@ function providerWithPeriod(players, periodByKey) {
   };
 }
 
-test('PER-GAME anchored: a player on a 4-game week does NOT outrank a better per-game star on a 2-game week', () => {
+test('season model ignores current-period game count', () => {
   // Giddey-like: lower per-game (30) but 4 games -> period total 120.
   // Jokic-like: higher per-game (55) but 2 games -> period total 110.
   // Old (period-total) model ranked the 4-game player first; new model must not.
   const players = [pl('FourGameGuy', ['PG'], 30), pl('TwoGameStar', ['C'], 55)];
   const period = { FourGameGuy: { total: 120, games: 4 }, TwoGameStar: { total: 110, games: 2 } };
   const res = buildDraftBoard({ players, settings, projectionProvider: providerWithPeriod(players, period) });
-  assert.equal(res.board[0].name, 'TwoGameStar'); // higher per-game wins draft value
+  assert.equal(res.board[0].name, 'TwoGameStar');
   assert.ok(res.board[0].value > res.board[1].value);
   // Period total is still surfaced for display, but did not drive the ranking.
   assert.equal(res.board.find((p) => p.name === 'FourGameGuy').periodProjected, 120);
+});
+
+test('projected season total can rank a healthier lower-FPPG player first', () => {
+  const players = [pl('PerGameStar', ['PG'], 50), pl('HealthyVolume', ['PG'], 35)];
+  const history = {
+    PerGameStar: [hh(2025, 40), hh(2024, 40), hh(2023, 40)],
+    HealthyVolume: [hh(2025, 80), hh(2024, 80), hh(2023, 80)],
+  };
+  const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
+  assert.equal(res.board[0].name, 'HealthyVolume');
+  assert.ok(res.board[0].projectedSeasonPoints > res.board[1].projectedSeasonPoints);
 });
 
 test('missing-data confidence is penalized (not zeroed) and ranks below equal-production high-confidence', () => {
@@ -130,22 +141,19 @@ test('missing-data confidence is penalized (not zeroed) and ranks below equal-pr
   const lo = res.board.find((p) => p.name === 'LowConf');
   assert.ok(hi.value > lo.value);          // confidence penalty applies
   assert.ok(lo.value > 0);                  // but low confidence is NOT treated as zero
-  assert.ok(lo.components.confidenceFactor >= 0.6); // floor keeps >=60%
+  assert.ok(lo.components.confidenceFactor >= 0.9); // confidence stays secondary
 });
 
-test('injury status applies an availability multiplier to draft value', () => {
+test('temporary Yahoo OUT status alone does not become a season-long penalty', () => {
   const players = [pl('Healthy', ['PG'], 40), pl('Hurt', ['PG'], 40, { status: 'O' })];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
   const healthy = res.board.find((p) => p.name === 'Healthy');
   const hurt = res.board.find((p) => p.name === 'Hurt');
-  assert.ok(healthy.value > hurt.value);
-  assert.equal(hurt.components.healthMult, 0.5);
+  assert.equal(healthy.value, hurt.value);
+  assert.equal(hurt.components.availabilityPenaltyAppliedAgain, false);
 });
 
 test('transient questionable status does not discount a season-long draft rank', () => {
-  assert.equal(draftHealthMultiplier('Q'), 1);
-  assert.equal(draftHealthMultiplier('GTD'), 1);
-  assert.equal(draftHealthMultiplier('OUT'), 0.5);
   const players = [pl('Healthy', ['C'], 40), pl('Questionable', ['C'], 40, { status: 'Q' })];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
   assert.equal(res.board[0].value, res.board[1].value);
@@ -168,9 +176,9 @@ test('components are normalized so no single raw scale dominates (bounded 0..1)'
     assert.ok(p.components.scarcity >= 0 && p.components.scarcity <= 1);
   }
   // Weights are the documented blend (float-safe sum check).
-  assert.ok(Math.abs((DRAFT_WEIGHTS.production + DRAFT_WEIGHTS.replacement + DRAFT_WEIGHTS.scarcity) - 1) < 1e-9);
-  assert.equal(DRAFT_WEIGHTS.production, 0.60);
-  assert.equal(DRAFT_WEIGHTS.scarcity, 0.10);
+  assert.ok(Math.abs(Object.values(DRAFT_WEIGHTS).reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
+  assert.equal(DRAFT_WEIGHTS.production, 0.70);
+  assert.equal(DRAFT_WEIGHTS.replacement, 0.20);
 });
 
 test('draft scarcity reflects lineup demand relative to eligible player supply', () => {
@@ -185,7 +193,7 @@ test('draft scarcity reflects lineup demand relative to eligible player supply',
   assert.ok(center.components.scarcity > guard.components.scarcity);
 });
 
-test('roster fit does NOT reorder the global Best Available board', () => {
+test('roster fit remains secondary and cannot overwhelm a large production gap', () => {
   const players = [pl('BigValue', ['SG'], 45), pl('ThinPosFit', ['C'], 30)];
   // C is thin on my roster; fit should NOT lift the lower-value C above the SG.
   const analysis = { positions: { thinPositions: [{ position: 'C' }], overloadedPositions: [{ position: 'SG' }] } };
@@ -199,41 +207,42 @@ test('roster fit does NOT reorder the global Best Available board', () => {
 
 test('computeReplacementBaselines rewards value above the positional replacement bar', () => {
   const rows = [
-    { perGame: 50, eligiblePositions: ['C'] },
-    { perGame: 20, eligiblePositions: ['C'] },
-    { perGame: 10, eligiblePositions: ['C'] },
+    { seasonPoints: 4000, eligiblePositions: ['C'] },
+    { seasonPoints: 1600, eligiblePositions: ['C'] },
+    { seasonPoints: 800, eligiblePositions: ['C'] },
   ];
   const { baselineByPos, spread } = computeReplacementBaselines(rows, settings);
   assert.ok(baselineByPos.C != null);
   assert.ok(spread > 0);
   // The elite C clears the baseline => high replacement component.
-  const elite = computeDraftValue({ perGame: 50, confidence: 0.9, status: null, eligiblePositions: ['C'], weights: {}, poolMaxPerGame: 50, replacement: { baselineByPos, spread } });
+  const elite = computeDraftValue({ seasonPoints: 4000, perGame: 50, expectedGames: 80, confidence: 0.9, eligiblePositions: ['C'], weights: {}, poolMaxSeasonPoints: 4000, replacement: { baselineByPos, spread } });
   assert.ok(elite.components.replacement > 0.5);
 });
 
-test('explainability: every board row carries component scores + perGame', () => {
+test('explainability includes season volume and confirms availability is applied once', () => {
   const players = [pl('A', ['PG'], 25)];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
   const c = res.board[0].components;
-  for (const k of ['perGame', 'production', 'replacement', 'scarcity', 'confidence', 'healthMult', 'rawScore', 'durabilityScore', 'durabilityPenalty']) {
+  for (const k of ['perGame', 'expectedGames', 'seasonPoints', 'production', 'replacement', 'scarcity', 'confidence', 'rosterFit', 'availability', 'availabilityPenaltyAppliedAgain', 'rawScore']) {
     assert.ok(k in c, `missing component ${k}`);
   }
+  assert.equal(c.availabilityPenaltyAppliedAgain, false);
 });
 
 // --- Historical durability adjustment ---------------------------------------
 
 // Provider that also attaches per-player historical availability.
-function providerWithHistory(players, historyByKey) {
+function providerWithHistory(players, historyByKey, injuryByKey = {}) {
   const map = new Map(players.map((p) => [p.playerKey, p._proj]));
   return {
     getProjection: (p) => (map.get(p.playerKey) != null
-      ? { projectedPoints: map.get(p.playerKey), confidence: 0.8, history: historyByKey[p.playerKey] || null }
+      ? { projectedPoints: map.get(p.playerKey), confidence: 0.8, history: historyByKey[p.playerKey] || null, injury: injuryByKey[p.playerKey] || null }
       : null),
   };
 }
 const hh = (season, gp, total = 82) => ({ season, gamesPlayed: gp, gameTotal: total });
 
-test('same production + lower historical availability => modestly lower draft value', () => {
+test('same FPPG + lower historical availability => fewer games and lower season value', () => {
   const players = [pl('Durable', ['PG'], 40), pl('Fragile', ['PG'], 40)];
   const history = {
     Durable: [hh(2024, 80), hh(2023, 78), hh(2022, 82)],  // ~0.97 availability
@@ -243,48 +252,41 @@ test('same production + lower historical availability => modestly lower draft va
   const durable = res.board.find((p) => p.name === 'Durable');
   const fragile = res.board.find((p) => p.name === 'Fragile');
   assert.ok(durable.value > fragile.value); // lower availability ranks lower
-  assert.ok(fragile.components.durabilityPenalty > 0);
-  // ~97% availability -> only a negligible penalty, and far smaller than fragile's.
-  assert.ok(durable.components.durabilityPenalty < 0.01);
-  assert.ok(fragile.components.durabilityPenalty > durable.components.durabilityPenalty * 3);
-  // The adjustment is MODEST: fragile keeps at least 90% of the durable value.
-  assert.ok(fragile.value >= durable.value * 0.9);
+  assert.ok(durable.expectedSeasonGames > fragile.expectedSeasonGames);
+  assert.equal(durable.projectedSeasonPoints, Number((40 * durable.expectedSeasonGames).toFixed(1)));
+  assert.equal(fragile.projectedSeasonPoints, Number((40 * fragile.expectedSeasonGames).toFixed(1)));
+  assert.equal(fragile.components.availabilityPenaltyAppliedAgain, false);
 });
 
-test('durability penalty never exceeds 10% of draft value', () => {
-  const players = [pl('NeverPlays', ['PG'], 40)];
-  const history = { NeverPlays: [hh(2024, 0), hh(2023, 0), hh(2022, 0)] }; // availability 0
+test('one-season rookie history regresses toward the pool baseline rather than zero', () => {
+  const players = [pl('Veteran', ['PG'], 40), pl('Rookie', ['PG'], 40)];
+  const history = {
+    Veteran: [hh(2024, 70), hh(2023, 70), hh(2022, 70)],
+    Rookie: [hh(2024, 20)],
+  };
   const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
-  const p = res.board[0];
-  assert.ok(Math.abs(p.components.durabilityPenalty - 0.10) < 1e-9); // capped at 10%
-  // Value equals rawScore*confFactor*health*(1-0.10)*100 — i.e. at most a 10% cut.
+  const rookie = res.board.find((p) => p.name === 'Rookie');
+  assert.equal(rookie.availabilityModel.historyReliability, 0.3333);
+  assert.ok(rookie.expectedSeasonGames > 20);
+  assert.ok(rookie.expectedSeasonGames < 70);
 });
 
-test('insufficient history (1 season) applies NO durability penalty (neutral)', () => {
-  const players = [pl('Rookie', ['PG'], 40)];
-  const history = { Rookie: [hh(2024, 20)] }; // only one usable season
-  const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
-  assert.equal(res.board[0].components.durabilityScore, null);
-  assert.equal(res.board[0].components.durabilityPenalty, 0);
-});
-
-test('missing history applies NO durability penalty', () => {
+test('missing history uses the league baseline, never zero games', () => {
   const players = [pl('NoHistory', ['PG'], 40)];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
-  assert.equal(res.board[0].components.durabilityPenalty, 0);
-  assert.equal(res.board[0].components.durabilityScore, null);
+  assert.equal(res.board[0].expectedSeasonGames, 69.7);
+  assert.equal(res.board[0].availabilityModel.historyReliability, 0);
 });
 
-test('CURRENT injury is applied SEPARATELY from historical durability', () => {
-  // Durable availability but currently OUT: health multiplier applies, and
-  // durability penalty is ~0 — the two signals are independent.
+test('verified season-ending injury caps expected games without a second penalty', () => {
   const players = [pl('HurtButDurable', ['PG'], 40, { status: 'O' })];
   const history = { HurtButDurable: [hh(2024, 82), hh(2023, 80), hh(2022, 81)] };
-  const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
-  const c = res.board[0].components;
-  assert.equal(c.healthMult, 0.5);          // current injury reflected here
-  assert.ok(c.durabilityPenalty < 0.01);    // durability (history) strong -> negligible penalty
-  assert.ok(c.durabilityScore > 0.95);      // and it is SEPARATE from the injury multiplier
+  const injuries = { HurtButDurable: { designation: 'Out', description: 'Will miss the rest of the season' } };
+  const row = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history, injuries) }).board[0];
+  assert.equal(row.expectedSeasonGames, 0);
+  assert.equal(row.projectedSeasonPoints, 0);
+  assert.equal(row.components.availabilityPenaltyAppliedAgain, false);
+  assert.match(row.recommendation, /verified injury report/i);
 });
 
 // --- Yahoo ADP market context -----------------------------------------------
@@ -377,7 +379,7 @@ test('human recommendation uses available-player comparison, roster need, and ve
   assert.deepEqual(star.lastSeasonNba, { season: 2025, points: 28.2, rebounds: 8.1, assists: 7.4, gamesPlayed: 65 });
   assert.equal(star.lastSeasonFantasy.points, 61.7);
   assert.equal(star.lastSeasonFantasy.season, 2025);
-  assert.match(star.recommendation, /highest projected fantasy points per game among 2 available players/i);
+  assert.match(star.recommendation, /highest projected regular-season fantasy-point total among 2 available players/i);
   assert.match(star.recommendation, /fills a roster need at PG/i);
   assert.match(star.recommendation, /28.2 NBA points, 8.1 rebounds, and 7.4 assists/i);
 });
@@ -432,10 +434,7 @@ test('missing Yahoo Rank yields null fields + unknown agreement (null-safe)', ()
   assert.equal(res.board[0].rankAgreement, 'unknown');
 });
 
-test('elite production is NOT overwhelmed by durability + scarcity', () => {
-  // Elite per-game (60) but worst durability vs a mediocre, fully-durable,
-  // positionally-scarce player (25). Elite must still rank first — durability
-  // (<=10%) + scarcity (10% weight) cannot flip a 2.4x production gap.
+test('elite FPPG can remain first when its availability-adjusted season total is still higher', () => {
   const players = [pl('EliteFragile', ['SG'], 60), pl('MedDurableScarce', ['C'], 25)];
   const history = {
     EliteFragile: [hh(2024, 40), hh(2023, 30), hh(2022, 35)], // low availability
@@ -443,6 +442,27 @@ test('elite production is NOT overwhelmed by durability + scarcity', () => {
   };
   const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
   assert.equal(res.board[0].name, 'EliteFragile');
-  assert.ok(res.board[0].components.durabilityPenalty > 0); // still penalized...
-  assert.ok(res.board[0].value > res.board[1].value);       // ...but not overwhelmed
+  assert.ok(res.board[0].expectedSeasonGames < res.board[1].expectedSeasonGames);
+  assert.ok(res.board[0].projectedSeasonPoints > res.board[1].projectedSeasonPoints);
+});
+
+test('Jokic, Wembanyama, Embiid, and a healthy mid-tier player rank consistently with season totals', () => {
+  const players = [
+    pl('Jokic', ['C'], 124.73),
+    pl('Wembanyama', ['C'], 105.82),
+    pl('Embiid', ['C'], 93.2),
+    pl('HealthyMid', ['C'], 70),
+  ];
+  const history = {
+    Jokic: [hh(2025, 65), hh(2024, 70), hh(2023, 79)],
+    Wembanyama: [hh(2025, 64), hh(2024, 46), hh(2023, 71)],
+    Embiid: [hh(2025, 38), hh(2024, 19), hh(2023, 39)],
+    HealthyMid: [hh(2025, 78), hh(2024, 78), hh(2023, 78)],
+  };
+  const board = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) }).board;
+  assert.deepEqual(board.map((p) => p.name), ['Jokic', 'Wembanyama', 'HealthyMid', 'Embiid']);
+  for (const player of board) {
+    assert.equal(player.projectedSeasonPoints, Number((player.projected * player.expectedSeasonGames).toFixed(1)));
+    assert.equal(player.components.availabilityPenaltyAppliedAgain, false);
+  }
 });

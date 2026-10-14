@@ -215,11 +215,27 @@ export async function buildProjectionContext({ season, players, statCategories, 
   }
   const historyByExternalId = historyResult?.value || {};
 
+  // Current injury context is optional and identity-safe (same ESPN ids as the
+  // primary index). It must never be applied to a historical Yahoo season.
+  // Draft expected-games logic only acts on explicit verified season-ending
+  // language; short-term Yahoo Q/GTD tags remain context only.
+  let injuryResult = null;
+  const now = new Date();
+  const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+  if (Number(season) === currentNbaSeason) {
+    try {
+      injuryResult = await providers.getInjuries();
+    } catch {
+      injuryResult = null;
+    }
+  }
+  const injuryByExternalId = new Map((injuryResult?.value || []).map((injury) => [String(injury.externalId), injury]));
+
   // 4. Project each canonical player using the league's actual scoring. Merge
   //    recent form into the season stats so the EXISTING projection model
   //    (season+recent blend) uses it with no weight changes. Historical
-  //    availability is attached as projection.history for the draft durability
-  //    adjustment — it does NOT affect the projected points themselves.
+  //    availability is attached as projection.history for the draft expected-
+  //    games model — it does NOT affect projected points per game itself.
   const projectionByCanonicalId = new Map();
   for (const c of canonical) {
     const base = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
@@ -235,6 +251,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
     projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
+    projection.injury = (c.externalId && injuryByExternalId.get(String(c.externalId))) || null;
     projection.lastSeason = stats?.season
       ? { season: projectionSeason, stats: stats.season }
       : null;
@@ -264,6 +281,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
         lastSeasonStats: Boolean(statsResult?.value?.length),
         reboundSplits: reboundByCanonicalId.size > 0,
         recentForm: recentCount > 0,
+        injuries: injuryByExternalId.size > 0,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,
       },

@@ -332,7 +332,7 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
   if (!provider) return { value: {}, meta: { provider: 'none', cacheHit: true } };
 
   const seasons = provider.completedSeasons(currentSeason, count);
-  const gameTotal = provider.REGULAR_SEASON_GAMES || 82;
+  const standardGameTotal = provider.REGULAR_SEASON_GAMES || 82;
   const byPlayer = {}; // externalId -> [{ season, gamesPlayed, gameTotal }]
 
   for (const season of seasons) {
@@ -344,6 +344,10 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
         () => provider.getSeasonGamesPlayed(season),
       );
       if (!result.meta.cacheHit) health.recordSuccess(provider.name);
+      const observedGames = Object.values(result.value || {}).filter((games) => Number.isFinite(games) && games > 0);
+      // Completed shortened seasons are normalized against their observed
+      // league maximum, never hardcoded to an 82-game denominator.
+      const gameTotal = observedGames.length ? Math.min(standardGameTotal, Math.max(...observedGames)) : standardGameTotal;
       for (const [externalId, gamesPlayed] of Object.entries(result.value || {})) {
         if (!byPlayer[externalId]) byPlayer[externalId] = [];
         byPlayer[externalId].push({ season, gamesPlayed, gameTotal });
