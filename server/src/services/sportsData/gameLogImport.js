@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adaptGameLogs, parseGameLogCsv } from './gameLogAdapter.js';
-import { loadPlayerGameLogs, runGameLogEvaluation } from './gameLogEvaluation.js';
+import { loadPlayerGameLogs, runEnsembleEvaluation, runGameLogEvaluation } from './gameLogEvaluation.js';
 import { ingestBatch, registerSource } from './ingest.js';
 
 /**
@@ -42,12 +42,13 @@ async function main() {
     if (process.argv.includes('--evaluate')) {
       const sourceKey = argument('--source-key');
       const scoringPath = argument('--scoring');
-      if (!sourceKey || !scoringPath) throw new Error('Usage: --evaluate --source-key <key> --scoring scoring.json [--split-season 2025 --test-from 2026-02-01]');
+      if (!sourceKey || !scoringPath) throw new Error('Usage: --evaluate --source-key <key> --scoring scoring.json [--split-season 2025 --test-from 2026-02-01] [--ensemble]');
       const scoring = JSON.parse(fs.readFileSync(path.resolve(scoringPath), 'utf8'));
       const logs = await loadPlayerGameLogs(store, { sourceKey, statCategories: scoring.statCategories || scoring });
       const testFrom = argument('--test-from');
       const dateSplit = testFrom ? { season: Number(argument('--split-season')), testFrom } : null;
-      process.stdout.write(`${JSON.stringify(runGameLogEvaluation({ logs, dateSplit }), null, 2)}\n`);
+      const evaluate = process.argv.includes('--ensemble') ? runEnsembleEvaluation : runGameLogEvaluation;
+      process.stdout.write(`${JSON.stringify(evaluate({ logs, dateSplit }), null, 2)}\n`);
       return;
     }
     const dataPath = argument('--data');

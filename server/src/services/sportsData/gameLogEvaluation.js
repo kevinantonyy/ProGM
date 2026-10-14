@@ -1,4 +1,5 @@
 import { chronologicalSplit } from '../fantasy/backtest/evaluation.js';
+import { RECENT_WEIGHT, SEASON_WEIGHT } from '../fantasy/projection.js';
 import { scoreStatLine } from '../fantasy/scoring.js';
 import { emptyStatLine } from '../providers/types.js';
 import { accuracyMetrics } from '../predictionTracking/accuracy.js';
@@ -73,6 +74,64 @@ export function defaultCandidates() {
   return candidates;
 }
 
+// Mirrors freeNbaProvider RECENT_GAMES_PER_TEAM (production recent-form window).
+export const PRODUCTION_RECENT_GAMES_PER_TEAM = 10;
+
+/**
+ * Offline reproduction of ProGM's in-season projection (insights.js and
+ * projection.js): last completed season per-game line blended with recent form,
+ * SEASON_WEIGHT/RECENT_WEIGHT. Recent form is the player's games among the union
+ * of every team's last 10 completed games of the current season (getRecentForm),
+ * before the target date. No last-season line gives no projection; no recent
+ * games gives last season only. Blending fantasy points equals blending stat
+ * lines and then scoring, because points scoring is linear in the stats.
+ */
+export function existingProgmModel({ history, target, context }) {
+  const prior = priorSeasonMean(history, target.season);
+  if (prior == null) return null;
+  const window = context?.recentGameIds?.(target.season, target.date);
+  const recent = window ? history.filter((game) => game.season === target.season && window.has(game.gameId)) : [];
+  return recent.length ? SEASON_WEIGHT * prior + RECENT_WEIGHT * mean(recent.map((game) => game.fantasyPoints)) : prior;
+}
+
+export function ensembleModel(existingWeight, recencyModel) {
+  const model = (input) => {
+    const existing = existingProgmModel(input);
+    const recency = recencyModel(input);
+    if (!Number.isFinite(existing) || !Number.isFinite(recency)) return null;
+    return existingWeight * existing + (1 - existingWeight) * recency;
+  };
+  model.config = { existingWeight, recency: recencyModel.config ?? null };
+  return model;
+}
+
+/** League-wide recent-game window per (season, date), built only from games before that date. */
+export function createRecentWindowContext(teamGames, perTeam = PRODUCTION_RECENT_GAMES_PER_TEAM) {
+  const cache = new Map();
+  return {
+    recentGameIds(season, date) {
+      const key = `${season}|${date}`;
+      if (!cache.has(key)) {
+        const ids = new Set();
+        for (const games of teamGames.values()) {
+          const before = games.filter((game) => game.season === season && game.date < date);
+          for (const game of before.slice(-perTeam)) ids.add(game.gameId);
+        }
+        cache.set(key, ids);
+      }
+      return cache.get(key);
+    },
+  };
+}
+
+export function performanceTier(priorSeasonFppg) {
+  if (priorSeasonFppg == null) return 'no_prior_season';
+  if (priorSeasonFppg < 15) return 'under_15';
+  if (priorSeasonFppg < 25) return '15_to_25';
+  if (priorSeasonFppg < 35) return '25_to_35';
+  return '35_plus';
+}
+
 async function queryAll(store, kind, sport, filters) {
   const rows = [];
   for (let offset = 0; ; offset += 1000) {
@@ -98,14 +157,28 @@ export async function loadPlayerGameLogs(store, { sourceKey, statCategories }) {
     const fantasyPoints = gameFantasyPoints(row.stats, statCategories);
     if (fantasyPoints == null) continue;
     const list = players.get(row.playerId) || [];
-    list.push({ gameId: row.gameId, date: game.gameDate, season: row.season, fantasyPoints });
+    list.push({ gameId: row.gameId, date: game.gameDate, season: row.season, teamId: row.teamId, fantasyPoints });
     players.set(row.playerId, list);
   }
   for (const list of players.values()) list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.gameId < b.gameId ? -1 : 1));
-  return { players, provenance };
+  const teamGames = new Map();
+  for (const game of games.values()) {
+    if (!game.gameDate) continue;
+    for (const teamId of [game.homeTeamId, game.awayTeamId]) {
+      const list = teamGames.get(teamId) || [];
+      list.push({ gameId: game.externalId, date: game.gameDate, season: game.season });
+      teamGames.set(teamId, list);
+    }
+  }
+  for (const list of teamGames.values()) list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.gameId < b.gameId ? -1 : 1));
+  return { players, teamGames, context: createRecentWindowContext(teamGames), provenance };
 }
 
-function predictPhase(players, models, seasons, include = null) {
+function groupBy(keys, actuals, field) {
+  return [...new Set(keys.map((key) => actuals.get(key)[field]))].sort();
+}
+
+function predictPhase(players, models, seasons, include = null, context = null) {
   const wanted = new Set(seasons);
   const inPhase = include || ((game) => wanted.has(game.season));
   const records = Object.fromEntries(Object.keys(models).map((key) => [key, new Map()]));
@@ -117,11 +190,11 @@ function predictPhase(players, models, seasons, include = null) {
       while (earlier < index && games[earlier].date < game.date) earlier += 1;
       if (!inPhase(game)) continue;
       const history = games.slice(0, earlier);
-      const target = { playerId, season: game.season, date: game.date };
+      const target = { playerId, season: game.season, date: game.date, teamId: game.teamId ?? null };
       const key = `${playerId}|${game.gameId}`;
-      actuals.set(key, { season: game.season, actual: game.fantasyPoints });
+      actuals.set(key, { season: game.season, actual: game.fantasyPoints, month: game.date.slice(0, 7), tier: performanceTier(priorSeasonMean(history, game.season)) });
       for (const [name, model] of Object.entries(models)) {
-        const predicted = model({ history, target });
+        const predicted = model({ history, target, context });
         if (Number.isFinite(predicted)) records[name].set(key, predicted);
       }
     }
@@ -134,6 +207,8 @@ function predictPhase(players, models, seasons, include = null) {
       coverage: records[name].size,
       overall: accuracyMetrics(pairs(() => true)),
       bySeason: seasons.map((season) => ({ season, ...accuracyMetrics(pairs((key) => actuals.get(key).season === season)) })),
+      byMonth: groupBy(common, actuals, 'month').map((month) => ({ month, ...accuracyMetrics(pairs((key) => actuals.get(key).month === month)) })),
+      byTier: groupBy(common, actuals, 'tier').map((tier) => ({ tier, ...accuracyMetrics(pairs((key) => actuals.get(key).tier === tier)) })),
     };
   }
   return { seasons, targetGames: actuals.size, commonSampleCount: common.length, models: summary };
@@ -142,34 +217,36 @@ function predictPhase(players, models, seasons, include = null) {
 /**
  * @param {{players:Map, provenance:object}} logs  from loadPlayerGameLogs
  */
+function resolveSplit(logs, { validationSeasons = 1, testSeasons = 1, minTrainSeasons = 1, dateSplit = null }) {
+  const seasons = [...new Set([...logs.players.values()].flatMap((games) => games.map((game) => game.season)))];
+  if (dateSplit) {
+    const { season, testFrom } = dateSplit;
+    if (!seasons.includes(season) || !/^\d{4}-\d{2}-\d{2}$/.test(String(testFrom))) throw new Error('dateSplit needs a stored season and a YYYY-MM-DD testFrom.');
+    return {
+      split: { train: seasons.filter((value) => value < season).sort((a, b) => a - b), validation: [season], test: [season], testFrom },
+      validationFilter: (game) => game.season === season && game.date < testFrom,
+      testFilter: (game) => game.season === season && game.date >= testFrom,
+    };
+  }
+  return { split: chronologicalSplit(seasons, { validationSeasons, testSeasons, minTrainSeasons }), validationFilter: null, testFilter: null };
+}
+
 /**
  * `dateSplit: { season, testFrom }` splits ONE season by date when too few complete
  * seasons exist: earlier seasons are history only, games before `testFrom`
  * validate, games on or after it test. Otherwise whole seasons are split.
  */
 export function runGameLogEvaluation({ logs, candidates = defaultCandidates(), validationSeasons = 1, testSeasons = 1, minTrainSeasons = 1, dateSplit = null }) {
-  const seasons = [...new Set([...logs.players.values()].flatMap((games) => games.map((game) => game.season)))];
-  let split;
-  let validationFilter = null;
-  let testFilter = null;
-  if (dateSplit) {
-    const { season, testFrom } = dateSplit;
-    if (!seasons.includes(season) || !/^\d{4}-\d{2}-\d{2}$/.test(String(testFrom))) throw new Error('dateSplit needs a stored season and a YYYY-MM-DD testFrom.');
-    split = { train: seasons.filter((value) => value < season).sort((a, b) => a - b), validation: [season], test: [season], testFrom };
-    validationFilter = (game) => game.season === season && game.date < testFrom;
-    testFilter = (game) => game.season === season && game.date >= testFrom;
-  } else {
-    split = chronologicalSplit(seasons, { validationSeasons, testSeasons, minTrainSeasons });
-  }
+  const { split, validationFilter, testFilter } = resolveSplit(logs, { validationSeasons, testSeasons, minTrainSeasons, dateSplit });
   const models = { baseline: previousSeasonBaseline, ...candidates };
 
-  const validation = predictPhase(logs.players, models, split.validation, validationFilter);
+  const validation = predictPhase(logs.players, models, split.validation, validationFilter, logs.context);
   const ranked = Object.keys(candidates).filter((key) => validation.models[key].overall.mae != null)
     .sort((a, b) => validation.models[a].overall.mae - validation.models[b].overall.mae || (a < b ? -1 : 1));
   const selected = ranked[0] ?? null;
 
   const testModels = selected ? { baseline: previousSeasonBaseline, [selected]: candidates[selected] } : { baseline: previousSeasonBaseline };
-  const test = predictPhase(logs.players, testModels, split.test, testFilter);
+  const test = predictPhase(logs.players, testModels, split.test, testFilter, logs.context);
   const base = test.models.baseline;
   const chosen = selected ? test.models[selected] : null;
   return {
@@ -188,6 +265,62 @@ export function runGameLogEvaluation({ logs, candidates = defaultCandidates(), v
       seasonsImproved: chosen ? chosen.bySeason.filter((row, i) => row.mae != null && base.bySeason[i].mae != null && row.mae < base.bySeason[i].mae).length : 0,
       seasonsCompared: base.bySeason.filter((row) => row.mae != null).length,
     },
+    accuracyStatus: logs.provenance.synthetic === true ? 'synthetic_only_unvalidated' : 'historical_game_level_not_production_approved',
+  };
+}
+
+export function recencyGrid(halfLives = [2, 3, 5, 10, 20], priorWeights = [0, 1, 2, 4, 8]) {
+  const grid = {};
+  for (const halfLife of halfLives) for (const priorWeight of priorWeights) grid[`recency_h${halfLife}_k${priorWeight}`] = recencyBlend({ halfLife, priorWeight });
+  return grid;
+}
+
+function rankByMae(phase, keys) {
+  return keys.filter((key) => phase.models[key].overall.mae != null)
+    .sort((a, b) => phase.models[a].overall.mae - phase.models[b].overall.mae || (a < b ? -1 : 1));
+}
+
+function improvement(value, reference) {
+  return value == null || !reference ? null : Number((((reference - value) / reference) * 100).toFixed(2));
+}
+
+/**
+ * Four-way comparison: previous-season baseline, the existing ProGM model,
+ * the recency model and an existing+recency ensemble. Recency settings
+ * (stage 1) and the ensemble weight (stage 2) are chosen on validation only;
+ * the test phase then scores all four once, on identical games.
+ */
+export function runEnsembleEvaluation({ logs, dateSplit = null, validationSeasons = 1, testSeasons = 1, minTrainSeasons = 1, grid = recencyGrid(), weights = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1] }) {
+  const { split, validationFilter, testFilter } = resolveSplit(logs, { validationSeasons, testSeasons, minTrainSeasons, dateSplit });
+  const fixed = { baseline: previousSeasonBaseline, existing: existingProgmModel };
+
+  const stage1 = predictPhase(logs.players, { ...fixed, ...grid }, split.validation, validationFilter, logs.context);
+  const recencyKey = rankByMae(stage1, Object.keys(grid))[0];
+  const recency = grid[recencyKey];
+
+  const ensembles = Object.fromEntries(weights.map((weight) => [`ensemble_w${Math.round(weight * 100)}`, ensembleModel(weight, recency)]));
+  const stage2 = predictPhase(logs.players, { ...fixed, recency, ...ensembles }, split.validation, validationFilter, logs.context);
+  const ensembleKey = rankByMae(stage2, Object.keys(ensembles))[0];
+
+  const test = predictPhase(logs.players, { ...fixed, recency, ensemble: ensembles[ensembleKey] }, split.test, testFilter, logs.context);
+  const existingMae = test.models.existing.overall.mae;
+  const summary = Object.fromEntries(Object.entries(test.models).map(([key, value]) => [key, { ...value.overall, maeImprovementVsExistingPct: improvement(value.overall.mae, existingMae) }]));
+  const best = rankByMae(test, Object.keys(test.models))[0];
+  return {
+    evaluationVersion: GAME_EVALUATION_VERSION,
+    level: 'game',
+    source: { name: logs.provenance.name, synthetic: logs.provenance.synthetic === true },
+    split,
+    selection: {
+      recency: { model: recencyKey, config: recency.config, validationMae: stage1.models[recencyKey].overall.mae },
+      ensemble: { model: ensembleKey, existingWeight: ensembles[ensembleKey].config.existingWeight, validationMae: stage2.models[ensembleKey].overall.mae },
+      recencyGridValidationMae: Object.fromEntries(Object.keys(grid).map((key) => [key, stage1.models[key].overall.mae])),
+      ensembleWeightValidationMae: Object.fromEntries(Object.keys(ensembles).map((key) => [key, stage2.models[key].overall.mae])),
+    },
+    validation: { commonSampleCount: stage2.commonSampleCount, models: Object.fromEntries(['baseline', 'existing', 'recency', ensembleKey].map((key) => [key, stage2.models[key].overall])) },
+    test,
+    testSummary: summary,
+    bestTestModel: best,
     accuracyStatus: logs.provenance.synthetic === true ? 'synthetic_only_unvalidated' : 'historical_game_level_not_production_approved',
   };
 }

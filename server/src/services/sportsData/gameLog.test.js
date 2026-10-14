@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { adaptGameLogs } from './gameLogAdapter.js';
-import { gameFantasyPoints, loadPlayerGameLogs, previousSeasonBaseline, runGameLogEvaluation } from './gameLogEvaluation.js';
+import { createRecentWindowContext, ensembleModel, existingProgmModel, gameFantasyPoints, loadPlayerGameLogs, performanceTier, previousSeasonBaseline, recencyBlend, runEnsembleEvaluation, runGameLogEvaluation } from './gameLogEvaluation.js';
 import { importGameLogRows } from './gameLogImport.js';
 import { MemorySportsDataStore } from './memoryStore.js';
 import { syntheticSource } from './syntheticFixture.js';
@@ -186,4 +186,57 @@ test('date split validates on earlier games of a season and tests on later ones'
   assert.deepEqual(report.test.models.baseline.overall, { count: 1, mae: 9, rmse: 9, bias: -9 });
   assert.deepEqual(report.test.models.lastGame.overall, { count: 1, mae: 6, rmse: 6, bias: 6 });
   assert.throws(() => runGameLogEvaluation({ logs, dateSplit: { season: 1999, testFrom: '2021-11-15' } }), /dateSplit/);
+});
+
+test('existing ProGM model reproduces 0.65 x last season + 0.35 x league-window recent form', () => {
+  // Team A plays games on days 1..12 of the target season; the window is A's last 10 before the target date.
+  const teamGames = new Map([['A', Array.from({ length: 12 }, (_, i) => ({ gameId: `a${i + 1}`, date: `2021-11-${String(i + 1).padStart(2, '0')}`, season: 2021 }))]]);
+  const context = createRecentWindowContext(teamGames);
+  const history = [
+    { gameId: 'old1', date: '2020-11-01', season: 2020, fantasyPoints: 20 },
+    { gameId: 'old2', date: '2020-11-02', season: 2020, fantasyPoints: 30 }, // prior mean 25
+    { gameId: 'a1', date: '2021-11-01', season: 2021, fantasyPoints: 100 }, // outside last 10 before day 12
+    { gameId: 'a5', date: '2021-11-05', season: 2021, fantasyPoints: 10 },
+    { gameId: 'a11', date: '2021-11-11', season: 2021, fantasyPoints: 30 }, // recent mean 20
+  ];
+  const target = { playerId: 'p', season: 2021, date: '2021-11-12', teamId: 'A' };
+  assert.equal(existingProgmModel({ history, target, context }), 0.65 * 25 + 0.35 * 20);
+  // The window only contains games strictly before the target date.
+  assert.ok(!context.recentGameIds(2021, '2021-11-12').has('a12'));
+  assert.equal(context.recentGameIds(2021, '2021-11-12').size, 10);
+  // No current-season games in the window gives last season only; no last season gives no projection.
+  assert.equal(existingProgmModel({ history: history.slice(0, 2), target, context }), 25);
+  assert.equal(existingProgmModel({ history: history.slice(2), target, context }), null);
+});
+
+test('ensemble weights 0 and 1 reduce to the standalone models', () => {
+  const teamGames = new Map([['A', [{ gameId: 'a1', date: '2021-11-01', season: 2021 }]]]);
+  const input = { history: [{ gameId: 'x', date: '2020-11-01', season: 2020, fantasyPoints: 20 }, { gameId: 'a1', date: '2021-11-01', season: 2021, fantasyPoints: 40 }], target: { season: 2021, date: '2021-11-02' }, context: createRecentWindowContext(teamGames) };
+  const recency = recencyBlend({ halfLife: 5, priorWeight: 2 });
+  assert.equal(ensembleModel(1, recency)(input), existingProgmModel(input));
+  assert.equal(ensembleModel(0, recency)(input), recency(input));
+  assert.equal(ensembleModel(0.5, recency)(input), (existingProgmModel(input) + recency(input)) / 2);
+  assert.deepEqual([performanceTier(null), performanceTier(14.9), performanceTier(15), performanceTier(34.9), performanceTier(35)], ['no_prior_season', 'under_15', '15_to_25', '25_to_35', '35_plus']);
+});
+
+test('ensemble evaluation tunes on validation only and compares four models on identical games', async () => {
+  const store = new MemorySportsDataStore();
+  await importGameLogRows(store, { rows: syntheticRows({ endYears: [2021, 2022], datesPerSeason: 20 }), source: syntheticSource(), seasonLabel: 'end' });
+  const logs = await loadPlayerGameLogs(store, { sourceKey: 'synthetic-fixture', statCategories: SCORING });
+  const dateSplit = { season: 2021, testFrom: '2021-11-11' };
+  const report = runEnsembleEvaluation({ logs, dateSplit });
+  assert.deepEqual(Object.keys(report.test.models), ['baseline', 'existing', 'recency', 'ensemble']);
+  const counts = Object.values(report.test.models).map((model) => model.overall.count);
+  assert.ok(counts.every((count) => count === report.test.commonSampleCount && count > 0));
+  assert.equal(report.testSummary.existing.maeImprovementVsExistingPct, 0);
+  assert.ok(report.test.models.existing.byMonth.length >= 1 && report.test.models.existing.byTier.length >= 1);
+  assert.equal(Object.keys(report.selection.ensembleWeightValidationMae).length, 11);
+  assert.equal(report.accuracyStatus, 'synthetic_only_unvalidated');
+
+  // Changing test-period outcomes cannot change any validation-based choice.
+  for (const games of logs.players.values()) for (const game of games) if (game.date >= dateSplit.testFrom) game.fantasyPoints *= 3;
+  const altered = runEnsembleEvaluation({ logs, dateSplit });
+  assert.deepEqual(altered.selection, report.selection);
+  assert.deepEqual(altered.validation, report.validation);
+  assert.notDeepEqual(altered.testSummary, report.testSummary);
 });
