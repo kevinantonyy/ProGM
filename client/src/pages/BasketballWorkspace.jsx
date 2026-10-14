@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 import BasketballPlayerProfileProvider, { PlayerLink } from '../components/BasketballPlayerProfile';
 import LoadingState from '../components/LoadingState';
+import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../utils/draftPolling';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -367,10 +368,8 @@ function Rankings({ data }) {
 //   or on predraft (nothing to sync yet).
 // - Reconnect-safe: the server de-dupes picks by player_key, and we drive
 //   detection off the known pick count so refresh never double-counts.
-const DRAFT_POLL_MS = 5000;
-
 function useLiveDraft({ leagueKey, teamKey, active }) {
-  const [sync, setSync] = useState({ status: 'idle', draftState: null, picks: [], myRoster: [], recommendations: null, newPicks: [], error: null, lastSyncAt: null, totalPicks: 0 });
+  const [sync, setSync] = useState({ status: 'idle', draftState: null, picks: [], myRoster: [], recommendations: null, newPicks: [], error: null, lastSyncAt: null, totalPicks: 0, stale: false });
 
   useEffect(() => {
     if (!active || !leagueKey) return undefined;
@@ -378,14 +377,35 @@ function useLiveDraft({ leagueKey, teamKey, active }) {
     let inFlight = false;
     let timer = null;
     let knownPicks = 0;
+    let failureCount = 0;
+
+    function schedule(delay = DRAFT_POLL_MS) {
+      if (cancelled || document.visibilityState === 'hidden') return;
+      timer = setTimeout(poll, delay);
+    }
 
     async function poll() {
       if (cancelled || inFlight) return; // never overlap requests
+      if (document.visibilityState === 'hidden') return; // hidden duplicate tabs stay quiet
       inFlight = true;
+      let nextDelay = DRAFT_POLL_MS;
       try {
         const r = await api.get('/basketball/draft', { params: { leagueKey, teamKey, knownPicks } });
         if (cancelled) return;
         const d = r.data;
+        if (d.sync?.temporaryUnavailable) {
+          failureCount += 1;
+          nextDelay = draftPollBackoffMs({ failureCount, retryAfterMs: d.sync.retryAfterMs });
+          setSync((previous) => ({
+            ...previous,
+            status: 'unavailable',
+            draftState: previous.draftState || d.draftState || null,
+            error: d.sync.message || 'Yahoo draft sync is temporarily unavailable. Showing the last successful state.',
+            stale: Boolean(d.sync.stale),
+          }));
+          return;
+        }
+        failureCount = 0;
         knownPicks = d.totalPicks ?? knownPicks;
         setSync({
           status: d.draftState === 'complete' ? 'complete' : d.draftState === 'live' ? 'live' : 'waiting',
@@ -397,20 +417,39 @@ function useLiveDraft({ leagueKey, teamKey, active }) {
           totalPicks: d.totalPicks ?? 0,
           error: null,
           lastSyncAt: new Date().toISOString(),
+          stale: Boolean(d.sync?.stale || d.cache?.stale),
         });
-        // Stop polling once the draft is over — nothing more will change.
-        if (d.draftState === 'complete') { cancelled = true; return; }
+        // Predraft and completed drafts are inactive. Re-entering the Draft
+        // Helper starts a fresh check; inactive tabs make no background calls.
+        if (shouldStopDraftPolling(d.draftState)) { cancelled = true; return; }
       } catch (err) {
+        failureCount += 1;
+        nextDelay = draftPollBackoffMs({ failureCount });
         if (!cancelled) setSync((s) => ({ ...s, status: 'error', error: err.response?.data?.error || 'Draft sync error' }));
       } finally {
         inFlight = false;
-        if (!cancelled) timer = setTimeout(poll, DRAFT_POLL_MS);
+        schedule(nextDelay);
       }
     }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        if (timer) clearTimeout(timer);
+        timer = null;
+      } else if (!cancelled && !inFlight && !timer) {
+        poll();
+      }
+    }
+
     setSync((s) => ({ ...s, status: 'connecting' }));
+    document.addEventListener('visibilitychange', onVisibilityChange);
     poll();
 
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [leagueKey, teamKey, active]);
 
   return sync;
@@ -423,6 +462,7 @@ function LiveDraftBanner({ live }) {
     live: ['badge-green', `LIVE · ${live.totalPicks} pick${live.totalPicks === 1 ? '' : 's'} made`],
     waiting: ['badge-orange', 'Waiting for the draft to start…'],
     complete: ['badge-blue', 'Draft complete'],
+    unavailable: ['badge-orange', live.error || 'Yahoo draft sync is temporarily unavailable'],
     error: ['badge-red', live.error || 'Draft sync error'],
     idle: ['badge-orange', 'Draft sync idle'],
   };
@@ -433,6 +473,7 @@ function LiveDraftBanner({ live }) {
       <div className="flex items-center gap-2">
         <span className={`inline-block h-2 w-2 rounded-full ${live.status === 'live' ? 'bg-green-400' : live.status === 'error' ? 'bg-red-400' : 'bg-dark-500'} ${pulsing ? 'animate-pulse' : ''}`} />
         <span className={cls}>{label}</span>
+        {live.stale && <span className="text-xs text-dark-400">Cached</span>}
         {live.newPicks?.length > 0 && live.status === 'live' && <span className="text-xs text-green-400">+{live.newPicks.length} new</span>}
       </div>
       {live.lastSyncAt && <span className="text-xs text-dark-500">synced {new Date(live.lastSyncAt).toLocaleTimeString()}</span>}

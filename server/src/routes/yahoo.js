@@ -20,6 +20,7 @@ import { rankWaivers } from '../services/fantasy/waiverEngine.js';
 import { valuateTrade } from '../services/fantasy/tradeValuation.js';
 import { buildRosterIntelligence } from '../services/fantasy/rosterIntelligence.js';
 import { providerStatus, externalDataAvailable } from '../services/providers/index.js';
+import { assertYahooRequestAllowed, recordYahooResponse } from '../services/fantasy/yahooRequestGuard.js';
 
 const router = Router();
 const AUTH_URL = 'https://api.login.yahoo.com/oauth2/request_auth';
@@ -123,6 +124,7 @@ function collectResources(node, resourceKey, output = []) {
 }
 
 async function yahooFantasy(path, accessToken) {
+  assertYahooRequestAllowed();
   const endpoint = `${FANTASY_URL}${path}${path.includes('?') ? '&' : '?'}format=json`;
   const response = await fetch(endpoint, {
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
@@ -140,20 +142,36 @@ async function yahooFantasy(path, accessToken) {
     // Yahoo returns error details under `error` (OAuth/JSON) — never log the token.
     const yahooCode = data?.error?.code ?? data?.error ?? null;
     const yahooMessage = data?.error?.description || data?.error_description || data?.parseErrorBody || 'Yahoo Fantasy API request failed';
+    // Log only safe rate-limit/request diagnostics. Never copy all upstream
+    // headers because they may contain infrastructure or authentication data.
+    const responseHeaders = Object.fromEntries([
+      'retry-after',
+      'x-rate-limit-limit',
+      'x-rate-limit-remaining',
+      'x-rate-limit-reset',
+      'x-yahoo-request-id',
+    ].map((name) => [name, response.headers.get(name)]).filter(([, value]) => value != null));
+    const guard = recordYahooResponse(response.status, responseHeaders);
     console.error('[yahoo] Fantasy API error', {
       endpoint: path,
       httpStatus: response.status,
       yahooCode,
       yahooMessage,
+      responseHeaders,
+      retryAfterMs: guard.retryAfterMs || null,
+      circuitOpen: Boolean(guard.circuitOpen),
       accessTokenPresent: Boolean(accessToken),
     });
     const error = new Error(yahooMessage);
     error.httpStatus = response.status;
     error.yahooCode = yahooCode;
     error.endpoint = path;
+    error.responseHeaders = responseHeaders;
+    error.retryAfterMs = guard.retryAfterMs || null;
     throw error;
   }
 
+  recordYahooResponse(response.status, {});
   return data;
 }
 

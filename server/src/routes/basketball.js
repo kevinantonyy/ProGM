@@ -26,6 +26,7 @@ import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
+import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
 import { cache } from '../services/providers/index.js';
 
 const router = Router();
@@ -35,10 +36,9 @@ const TEAM_KEY_RE = /^\d+\.l\.\d+\.t\.\d+$/;
 // Short-lived cache for the assembled workspace so tab switches / re-renders
 // don't rebuild (and don't hit Yahoo/Tank01) repeatedly. Keyed per user+league.
 const WORKSPACE_TTL = 5 * 60 * 1000;
-// Live-draft fetch coalescing: a very short cache so overlapping ~5s polls
-// (and multiple tabs) never trigger concurrent duplicate Yahoo draftresults
-// calls. Short enough that each poll still sees fresh picks promptly.
-const DRAFT_FETCH_TTL = 3 * 1000;
+// Live-draft settings change slowly; draft results have their own league-scoped
+// cache, single-flight coordinator, backoff, and circuit breaker.
+const DRAFT_SETTINGS_TTL = 2 * 60 * 1000;
 // Yahoo ADP / market data changes during a draft, so cache it briefly (NOT
 // immutable) and share across polls/tabs. One batched request per window.
 const ADP_FETCH_TTL = 60 * 1000;
@@ -49,12 +49,20 @@ const ADP_FETCH_TTL = 60 * 1000;
  * sub-resource), cached briefly and shared. Never per-player.
  */
 async function fetchAvailableWithAdp(leagueKey, token) {
-  const key = `bball:availDraftMetadata:v2:${leagueKey}`;
-  const cached = cache.get(key);
-  if (cached && !cached.meta.stale) return cached.value;
-  const players = await fetchYahooDraftPool(yahooFantasy, token, leagueKey);
-  cache.set(key, players, { provider: 'yahoo', ttl: ADP_FETCH_TTL });
-  return players;
+  const result = await cache.remember(
+    `bball:availDraftMetadata:v3:${leagueKey}`,
+    { provider: 'yahoo', ttl: ADP_FETCH_TTL },
+    () => fetchYahooDraftPool(yahooFantasy, token, leagueKey),
+  );
+  return result.value;
+}
+
+async function fetchDraftSettings(leagueKey, token) {
+  return cache.remember(
+    `bball:draftSettings:${leagueKey}`,
+    { provider: 'yahoo', ttl: DRAFT_SETTINGS_TTL },
+    () => yahooFantasy(`/league/${leagueKey}/settings`, token),
+  );
 }
 
 async function requireToken(req, res) {
@@ -155,8 +163,8 @@ router.get('/workspace', authenticate, async (req, res) => {
  *
  * This endpoint NEVER writes to Yahoo and NEVER auto-drafts. It is purely a
  * read-only advisor. The client polls (~5s) only while the Draft Helper is open
- * and the draft is active; the server coalesces overlapping fetches via a 3s
- * cache so polling cannot stampede Yahoo.
+ * and the draft is active; the server coalesces overlapping fetches and backs
+ * off when Yahoo temporarily denies draft-results access.
  */
 router.get('/draft', authenticate, async (req, res) => {
   const leagueKey = String(req.query.leagueKey || '');
@@ -177,29 +185,84 @@ router.get('/draft', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    // Coalesce overlapping polls: one Yahoo draftresults fetch per 3s window,
-    // shared across concurrent requests/tabs for this league.
-    const draftCacheKey = `bball:draftresults:${leagueKey}`;
-    let draftData = cache.get(draftCacheKey);
-    if (!draftData || draftData.meta.stale) {
-      const fresh = await yahooFantasy(`/league/${leagueKey}/draftresults`, token);
-      cache.set(draftCacheKey, fresh, { provider: 'yahoo', ttl: DRAFT_FETCH_TTL });
-      draftData = { value: fresh, meta: { fetchedAt: new Date().toISOString(), stale: false } };
+    // Settings are slower-changing and tell us when draft polling is unnecessary.
+    // Fetch them first through a shared single-flight cache so predraft clients do
+    // not call Yahoo's draftresults endpoint every five seconds.
+    const settingsResult = await fetchDraftSettings(leagueKey, token);
+    const league = normalizeLeagueSettings(settingsResult.value);
+    const settings = league?.settings || null;
+    const rosterSlots = settings?.rosterSlots || [];
+    const slotsPerTeam = rosterSlots.reduce((n, s) => n + (s.count || 0), 0);
+    const expectedPicks = league?.numTeams && slotsPerTeam ? league.numTeams * slotsPerTeam : null;
+
+    // A predraft is inactive: return once and let the client stop polling. This
+    // was the production 999 pattern — draftresults was requested indefinitely
+    // even though Yahoo had not made that resource available.
+    if (league?.draftStatus === 'predraft') {
+      return res.json({
+        leagueKey,
+        teamKey,
+        draftState: 'predraft',
+        yahooDraftStatus: league.draftStatus,
+        totalPicks: 0,
+        expectedPicks,
+        currentPick: 1,
+        nextPick: null,
+        newPicks: [],
+        picks: [],
+        myRoster: [],
+        recommendations: null,
+        externalData: { available: false },
+        sync: { temporaryUnavailable: false, message: 'Waiting for the Yahoo draft to start.', retryAfterMs: null },
+        cache: { fetchedAt: settingsResult.meta.fetchedAt, stale: Boolean(settingsResult.meta.stale) },
+      });
     }
+
+    let draftData;
+    if (league?.draftStatus === 'postdraft') {
+      const cachedDraft = peekYahooDraftResults(leagueKey);
+      draftData = cachedDraft
+        ? { value: cachedDraft.value, meta: { fetchedAt: cachedDraft.fetchedAt, stale: true, temporaryUnavailable: false } }
+        : await fetchYahooDraftResults({ leagueKey, loader: () => yahooFantasy(`/league/${leagueKey}/draftresults`, token) });
+    } else {
+      draftData = await fetchYahooDraftResults({ leagueKey, loader: () => yahooFantasy(`/league/${leagueKey}/draftresults`, token) });
+    }
+
+    // With no prior success, HTTP 999 returns a usable temporary response rather
+    // than failing the whole workspace. The client retains its last good state.
+    if (!draftData.value) {
+      const fallbackState = league?.draftStatus === 'postdraft' ? 'complete' : league?.draftStatus === 'drafting' ? 'live' : 'unavailable';
+      return res.json({
+        leagueKey,
+        teamKey,
+        draftState: fallbackState,
+        yahooDraftStatus: league?.draftStatus || null,
+        totalPicks: knownPicks,
+        expectedPicks,
+        currentPick: knownPicks + 1,
+        nextPick: null,
+        newPicks: [],
+        picks: [],
+        myRoster: [],
+        recommendations: null,
+        externalData: { available: false },
+        sync: {
+          temporaryUnavailable: true,
+          message: draftData.meta.message,
+          retryAfterMs: draftData.meta.retryAfterMs,
+          circuitOpen: draftData.meta.circuitOpen,
+          stale: Boolean(draftData.meta.stale),
+        },
+        cache: { fetchedAt: draftData.meta.fetchedAt, stale: Boolean(draftData.meta.stale) },
+      });
+    }
+
     const picks = extractDraftResults(draftData.value);
 
     // Pick detection relative to what the client already has (idempotent across
     // refresh/reconnect; de-duped by player_key inside detectNewPicks).
     const prevStub = Array.from({ length: Math.min(knownPicks, picks.length) }, (_, i) => ({ playerKey: picks[i]?.playerKey }));
     const { newPicks, allPicks, totalPicks } = detectNewPicks(prevStub, picks);
-
-    // League settings (scoring + roster) — reused for state + recommendations.
-    const settingsData = await yahooFantasy(`/league/${leagueKey}/settings`, token);
-    const league = normalizeLeagueSettings(settingsData);
-    const settings = league?.settings || null;
-    const rosterSlots = settings?.rosterSlots || [];
-    const slotsPerTeam = rosterSlots.reduce((n, s) => n + (s.count || 0), 0);
-    const expectedPicks = league?.numTeams && slotsPerTeam ? league.numTeams * slotsPerTeam : null;
 
     const draftState = deriveDraftState({
       yahooDraftStatus: league?.draftStatus || null,
@@ -289,9 +352,40 @@ router.get('/draft', authenticate, async (req, res) => {
       myRoster: myPicks, // the user's current drafted roster (pick, round, playerKey)
       recommendations: board, // best-available / roster-fit over UNDRAFTED players
       externalData: { available: externalAvailable },
-      cache: { fetchedAt: draftData.meta.fetchedAt },
+      sync: {
+        temporaryUnavailable: Boolean(draftData.meta.temporaryUnavailable),
+        message: draftData.meta.message || null,
+        retryAfterMs: draftData.meta.retryAfterMs || null,
+        circuitOpen: Boolean(draftData.meta.circuitOpen),
+        stale: Boolean(draftData.meta.stale),
+      },
+      cache: { fetchedAt: draftData.meta.fetchedAt, stale: Boolean(draftData.meta.stale) },
     });
   } catch (error) {
+    // The process-wide Yahoo guard can pause requests before draft settings or
+    // results are loaded. Return a successful degradation response so clients
+    // retain their last known picks/recommendations instead of clearing state.
+    if (Number(error?.httpStatus) === 999) {
+      return res.json({
+        leagueKey,
+        teamKey: typeof req.query.teamKey === 'string' && TEAM_KEY_RE.test(req.query.teamKey) ? req.query.teamKey : null,
+        draftState: 'unavailable',
+        totalPicks: knownPicks,
+        newPicks: [],
+        picks: [],
+        myRoster: [],
+        recommendations: null,
+        externalData: { available: false },
+        sync: {
+          temporaryUnavailable: true,
+          message: 'Yahoo draft sync is temporarily unavailable. Showing the last successful state when available.',
+          retryAfterMs: error.retryAfterMs || null,
+          circuitOpen: error.yahooCode === 'CIRCUIT_OPEN',
+          stale: true,
+        },
+        cache: { fetchedAt: null, stale: true },
+      });
+    }
     sendError(res, error, 'Could not sync your Fantasy Basketball draft');
   }
 });
