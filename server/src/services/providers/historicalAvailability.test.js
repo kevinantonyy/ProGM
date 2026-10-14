@@ -73,6 +73,12 @@ test('request count is independent of player count (never per-player)', async ()
   assert.equal(byathleteCalls, 3);
 });
 
+test('career depth remains one cached bulk request per completed season', async () => {
+  await providers.getHistoricalAvailability(2026, 5);
+  assert.equal(byathleteCalls, 5);
+  assert.deepEqual([...seasonsRequested].sort(), [2022, 2023, 2024, 2025, 2026]);
+});
+
 test('graceful: a failing season is omitted, others still returned, never throws', async () => {
   global.fetch = async (url) => {
     const u = String(url);

@@ -327,6 +327,20 @@ export function getSchedule(season) {
  * @param {string|number} currentSeason  active ESPN season start-year
  * @param {number} [count]
  */
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function getHistoricalAvailability(currentSeason, count = 3) {
   const provider = candidateProviders().find((p) => typeof p.getSeasonGamesPlayed === 'function' && typeof p.completedSeasons === 'function');
   if (!provider) return { value: {}, meta: { provider: 'none', cacheHit: true } };
@@ -335,7 +349,7 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
   const standardGameTotal = provider.REGULAR_SEASON_GAMES || 82;
   const byPlayer = {}; // externalId -> [{ season, gamesPlayed, gameTotal }]
 
-  for (const season of seasons) {
+  const seasonResults = await mapWithConcurrency(seasons, 4, async (season) => {
     try {
       // One cached, league-wide request per completed season (immutable TTL).
       const result = await cache.remember(
@@ -348,13 +362,19 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
       // Completed shortened seasons are normalized against their observed
       // league maximum, never hardcoded to an 82-game denominator.
       const gameTotal = observedGames.length ? Math.min(standardGameTotal, Math.max(...observedGames)) : standardGameTotal;
-      for (const [externalId, gamesPlayed] of Object.entries(result.value || {})) {
-        if (!byPlayer[externalId]) byPlayer[externalId] = [];
-        byPlayer[externalId].push({ season, gamesPlayed, gameTotal });
-      }
+      return { season, gameTotal, gamesByPlayer: result.value || {} };
     } catch (error) {
       // A failed season is omitted; never breaks projections or penalizes.
       health.recordFailure(provider.name, error);
+      return null;
+    }
+  });
+
+  for (const seasonResult of seasonResults) {
+    if (!seasonResult) continue;
+    for (const [externalId, gamesPlayed] of Object.entries(seasonResult.gamesByPlayer)) {
+      if (!byPlayer[externalId]) byPlayer[externalId] = [];
+      byPlayer[externalId].push({ season: seasonResult.season, gamesPlayed, gameTotal: seasonResult.gameTotal });
     }
   }
 

@@ -148,6 +148,8 @@ export function mapEspnDirectory(payload) {
       teamAbbr: a.athlete?.teamShortName || a.athlete?.team?.abbreviation || null,
       yahooId: null, // ESPN exposes no Yahoo cross-reference
       imageUrl: typeof a.athlete?.headshot?.href === 'string' ? a.athlete.headshot.href : null,
+      age: num(a.athlete?.age),
+      debutYear: num(a.athlete?.debutYear),
     }))
     .filter((p) => p.externalId && p.name);
 }

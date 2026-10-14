@@ -9,7 +9,7 @@
  * are listed separately as "no data", never assigned a fabricated value.
  */
 import { scarcityWeights } from './playerValue.js';
-import { computeAvailabilityBaseline, estimateExpectedGames } from './durability.js';
+import { buildAvailabilityBaselineModel, estimateExpectedGames } from './durability.js';
 import { computeMarketContext, computeRankComparison } from './adpMarket.js';
 
 const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
@@ -371,6 +371,9 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
       injury: proj?.injury ?? null,
+      age: proj?.availabilityProfile?.age ?? null,
+      debutYear: proj?.availabilityProfile?.debutYear ?? null,
+      ageReferenceSeason: proj?.availabilityProfile?.ageReferenceSeason ?? null,
       lastSeasonNba: proj?.lastSeason?.stats
         ? {
             season: proj.lastSeason.season,
@@ -390,12 +393,29 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     prelim.push({ ...base, perGame, history });
   }
 
-  // Expected season games use 3 completed seasons, recency weighted. Players
-  // with incomplete/no history regress toward the pool availability baseline.
-  const availabilityBaseline = computeAvailabilityBaseline(prelim.map((r) => r.history));
+  // Expected games combine disjoint older-career and recent samples, both
+  // empirically shrunk toward a historical age/experience cohort baseline.
+  const targetSeason = currentSeason != null && currentSeason !== '' && Number.isInteger(Number(currentSeason))
+    ? Number(currentSeason)
+    : null;
+  const availabilityBaselineModel = buildAvailabilityBaselineModel(prelim.map((row) => ({
+    history: row.history,
+    age: row.age,
+    debutYear: row.debutYear,
+    ageReferenceSeason: row.ageReferenceSeason,
+  })), targetSeason);
   const seasonRows = prelim.map((r) => {
+    const baselineContext = availabilityBaselineModel.forPlayer({
+      age: r.age,
+      debutYear: r.debutYear,
+      ageReferenceSeason: r.ageReferenceSeason,
+      targetSeason,
+    });
     const availabilityModel = estimateExpectedGames(r.history, {
-      baselineAvailability: availabilityBaseline,
+      baselineContext,
+      age: r.age,
+      debutYear: r.debutYear,
+      targetSeason,
       injury: r.injury,
     });
     const expectedSeasonGames = availabilityModel.expectedGames;
@@ -488,7 +508,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
       facts: ['player eligibility, team, injury status, ownership, availability (Yahoo)'],
       calculations: [
         'projected season points = league-scored projected fantasy points/game × expected regular-season games',
-        'expected games = recency-weighted availability from the last 3 completed seasons; incomplete history regresses toward the pool baseline',
+        'expected games = 35% independent older-career availability + 40% recent availability + 25% historical age/experience baseline',
+        'career and recent samples are disjoint and empirically shrunk by eligible games and independent seasons; missing/pre-debut seasons are not zero',
         'draft value = normalized blend of projected season production (70%), positional replacement/VORP (20%), scarcity (5%), and roster fit (5%)',
         'confidence makes a restrained data-quality adjustment; expected games accounts for availability once, with no second durability/injury multiplier',
         'current-period schedule totals do NOT drive draft value',

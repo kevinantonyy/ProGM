@@ -82,6 +82,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
   }
 
   const seasonYear = Number(season);
+  const now = new Date();
+  const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
   const lastCompletedSeason = Number.isInteger(seasonYear) ? seasonYear - 1 : null;
   // Draft projections are anchored to the latest completed season. Current
   // in-season form is blended separately below when real games are available.
@@ -137,6 +139,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const { players: canonical, diagnostics } = buildCanonicalPlayers(source, indexResult.value);
   const matched = canonical.filter((c) => c.matched && c.externalId);
   const externalIds = matched.map((c) => c.externalId);
+  const externalRefById = new Map(indexResult.value.map((player) => [String(player.externalId), player]));
   // Only identity-safe matches may supply images. The identity layer deliberately
   // drops images for name-only matches, so no headshot is guessed from a name.
   const imageByCanonicalId = new Map(canonical.filter((c) => c.imageUrl).map((c) => [c.canonicalId, c.imageUrl]));
@@ -203,13 +206,18 @@ export async function buildProjectionContext({ season, players, statCategories, 
   }
   const recentByExternalId = recentResult?.value || {};
 
-  // 3c. Historical availability (OPTIONAL): games played across the last 3
-  //     completed seasons for durability. Best-effort — any failure yields no
-  //     history, which the draft model treats as NEUTRAL (no penalty). Never
-  //     breaks projections.
+  // 3c. Historical availability (OPTIONAL): cached league-wide season records
+  //     back to the earliest verified debut in this player pool. Each season is
+  //     fetched once globally, never per player; failed/missing seasons remain
+  //     missing and are never converted to zero games.
   let historyResult = null;
   try {
-    historyResult = await providers.getHistoricalAvailability(season);
+    const verifiedDebuts = matched
+      .map((player) => Number(externalRefById.get(String(player.externalId))?.debutYear))
+      .filter((year) => Number.isInteger(year) && year <= seasonYear);
+    const earliestDebut = verifiedDebuts.length ? Math.min(...verifiedDebuts) : null;
+    const careerSeasonCount = earliestDebut == null ? 3 : Math.max(3, Math.min(30, seasonYear - earliestDebut));
+    historyResult = await providers.getHistoricalAvailability(season, careerSeasonCount);
   } catch {
     historyResult = null;
   }
@@ -220,8 +228,6 @@ export async function buildProjectionContext({ season, players, statCategories, 
   // Draft expected-games logic only acts on explicit verified season-ending
   // language; short-term Yahoo Q/GTD tags remain context only.
   let injuryResult = null;
-  const now = new Date();
-  const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
   if (Number(season) === currentNbaSeason) {
     try {
       injuryResult = await providers.getInjuries();
@@ -251,6 +257,10 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
     projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
+    const externalRef = c.externalId ? externalRefById.get(String(c.externalId)) : null;
+    projection.availabilityProfile = externalRef
+      ? { age: externalRef.age ?? null, debutYear: externalRef.debutYear ?? null, ageReferenceSeason: currentNbaSeason, targetSeason: seasonYear }
+      : null;
     projection.injury = (c.externalId && injuryByExternalId.get(String(c.externalId))) || null;
     projection.lastSeason = stats?.season
       ? { season: projectionSeason, stats: stats.season }

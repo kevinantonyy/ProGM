@@ -14,6 +14,8 @@
  * @property {string} name
  * @property {string|null} teamAbbr
  * @property {string|null} yahooId     Provider-supplied Yahoo cross-reference id (Tank01 has this; nba.com does not)
+ * @property {number|null} age         Verified current age when supplied by provider
+ * @property {number|null} debutYear   NBA debut season start-year when supplied by provider
  *
  * @typedef {Object} StatLine        Per-game statline (provider-independent stat keys)
  * @property {number|null} gamesPlayed

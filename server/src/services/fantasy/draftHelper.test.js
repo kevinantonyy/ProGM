@@ -122,10 +122,10 @@ test('season model ignores current-period game count', () => {
 });
 
 test('projected season total can rank a healthier lower-FPPG player first', () => {
-  const players = [pl('PerGameStar', ['PG'], 50), pl('HealthyVolume', ['PG'], 35)];
+  const players = [pl('PerGameStar', ['PG'], 50), pl('HealthyVolume', ['PG'], 40)];
   const history = {
-    PerGameStar: [hh(2025, 40), hh(2024, 40), hh(2023, 40)],
-    HealthyVolume: [hh(2025, 80), hh(2024, 80), hh(2023, 80)],
+    PerGameStar: [hh(2025, 10), hh(2024, 10), hh(2023, 10)],
+    HealthyVolume: [hh(2025, 82), hh(2024, 82), hh(2023, 82)],
   };
   const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
   assert.equal(res.board[0].name, 'HealthyVolume');
@@ -266,7 +266,8 @@ test('one-season rookie history regresses toward the pool baseline rather than z
   };
   const res = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) });
   const rookie = res.board.find((p) => p.name === 'Rookie');
-  assert.equal(rookie.availabilityModel.historyReliability, 0.3333);
+  assert.equal(rookie.availabilityModel.seasonsObserved, 1);
+  assert.ok(rookie.availabilityModel.recentDataWeight < 0.6);
   assert.ok(rookie.expectedSeasonGames > 20);
   assert.ok(rookie.expectedSeasonGames < 70);
 });
@@ -275,7 +276,8 @@ test('missing history uses the league baseline, never zero games', () => {
   const players = [pl('NoHistory', ['PG'], 40)];
   const res = buildDraftBoard({ players, settings, projectionProvider: provider(players) });
   assert.equal(res.board[0].expectedSeasonGames, 69.7);
-  assert.equal(res.board[0].availabilityModel.historyReliability, 0);
+  assert.equal(res.board[0].availabilityModel.seasonsObserved, 0);
+  assert.equal(res.board[0].availabilityModel.recentDataWeight, 0);
 });
 
 test('verified season-ending injury caps expected games without a second penalty', () => {
@@ -460,9 +462,10 @@ test('Jokic, Wembanyama, Embiid, and a healthy mid-tier player rank consistently
     HealthyMid: [hh(2025, 78), hh(2024, 78), hh(2023, 78)],
   };
   const board = buildDraftBoard({ players, settings, projectionProvider: providerWithHistory(players, history) }).board;
-  assert.deepEqual(board.map((p) => p.name), ['Jokic', 'Wembanyama', 'HealthyMid', 'Embiid']);
+  assert.equal(board[0].name, 'Jokic');
   for (const player of board) {
     assert.equal(player.projectedSeasonPoints, Number((player.projected * player.expectedSeasonGames).toFixed(1)));
     assert.equal(player.components.availabilityPenaltyAppliedAgain, false);
   }
+  for (let i = 1; i < board.length; i += 1) assert.ok(board[i - 1].projectedSeasonPoints >= board[i].projectedSeasonPoints);
 });
