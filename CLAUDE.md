@@ -8,6 +8,7 @@ Fantasy sports assistant: Yahoo Fantasy Basketball (OAuth) plus existing fantasy
 - `server/src/services/fantasy/`: the production basketball engine (`projection.js`, `playerValue.js`, `rankings.js`, `scoring.js`, `draftHelper.js`, `waiverEngine.js`, `tradeRecommender.js`, `startSit.js`, `lineupOptimizer.js`, `adpMarket.js`, …).
 - `server/src/services/fantasy/backtest/`: the OFFLINE experimental prediction engine (see below).
 - `server/src/services/sportsData/`: internal provider-independent data store (Postgres `sd_*` tables, created lazily) and ingestion with source-permission gating; internal admin-only GET routes at `/api/internal/sports-data`, 404 unless `ENABLE_SPORTS_DATA_API=true`. See its README.
+- `server/src/services/predictionTracking/`: append-only record of ProGM's own predictions (`pt_predictions`, created lazily) and offline MAE/RMSE/bias; not wired into production. No raw provider data, no outcomes collected. See its README.
 - `client/`: React 18, Vite and Tailwind. Basketball UI is in `client/src/pages/BasketballWorkspace.jsx`; football is in `pages/FantasyFootball.jsx`.
 
 ## Yahoo HTTP 999 warning
