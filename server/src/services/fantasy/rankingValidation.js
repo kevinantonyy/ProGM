@@ -70,16 +70,17 @@ export function orderingCorrelation(a, b) {
  * Targets: realized total, and realized value above replacement (total minus the
  * realized total of the starters-th best player at the player's primary position).
  */
-export function evaluateVariants({ ranking, realized, settings, topN = 24 }) {
+export function evaluateVariants({ ranking, realized, settings, topN = 24, primaryOf = null, depthOf = null }) {
   const demand = demandByPosition(settings);
   const teams = settings?.teamCount || settings?.numTeams || 12;
-  const primary = (r) => r.positions?.[0] ?? 'NA';
+  const primary = primaryOf || ((r) => r.positions?.[0] ?? 'NA');
+  const depth = depthOf || ((pos) => Math.round((demand[pos] || 1) * teams));
   const known = ranking.rows.filter((r) => realized.has(r.playerKey));
   const byPos = new Map();
   for (const r of known) byPos.set(primary(r), [...(byPos.get(primary(r)) || []), realized.get(r.playerKey)].sort((a, b) => b - a));
   const replacementLevel = (pos) => {
     const list = byPos.get(pos) || [];
-    return list.length ? list[Math.min(list.length - 1, Math.max(1, Math.round((demand[pos] || 1) * teams)))] : 0;
+    return list.length ? list[Math.min(list.length - 1, Math.max(1, depth(pos)))] : 0;
   };
   const target = { total: new Map(), vorp: new Map() };
   for (const r of known) {

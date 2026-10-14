@@ -57,3 +57,22 @@ test('pool sensitivity is deterministic and bounded', () => {
     assert.ok(a[v].meanAbsRankChange >= 0);
   }
 });
+
+import { buildPool, runValidation } from './rankingValidationRun.js';
+
+test('runner: rankings use only prior-season fields, never the realized totals (leakage guard)', () => {
+  // Synthetic rows in the prepared-pool format.
+  const labels = ['G', 'F', 'C'];
+  const rows = Array.from({ length: 60 }, (_, i) => ({
+    id: `p${i}`, pname: `Player ${i}`, gp: 60 + (i % 20), pts: 25 - i * 0.25, reb: 4 + (i % 7), ast: 2 + (i % 5), stl: 1, blk: 0.5, tov: 2,
+    pos: [labels[i % 3]], primary: labels[i % 3], gp_real: 70, total_real: 3000 - i * 20,
+  }));
+  const a = runValidation(rows);
+  const scrambled = runValidation(rows.map((r, i) => ({ ...r, total_real: (i * 7919) % 3000 })));
+  for (const v of ['A', 'B', 'C', 'D', 'E']) assert.deepEqual(scrambled.ranking[v], a.ranking[v], v);
+  assert.notEqual(scrambled.base24.variants.A.total.spearman, a.base24.variants.A.total.spearman); // only the evaluation changes
+  assert.deepEqual(runValidation(rows).ranking.A, a.ranking.A); // deterministic
+  const pool = buildPool(rows);
+  assert.ok(pool.players.every((p) => p.eligiblePositions.includes('UTIL')));
+  assert.deepEqual(pool.players[0].eligiblePositions.sort(), ['G', 'PG', 'SG', 'UTIL']);
+});
