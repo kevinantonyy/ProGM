@@ -94,6 +94,14 @@ function finiteProviderNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Box scores include rows for rostered players who did not play. Counting them
+// as games would inflate gamesPlayed and deflate every per-game average.
+function isDidNotPlayRow(record, statMap) {
+  const minutes = minutesValue(record?.min);
+  if (minutes != null) return minutes <= 0;
+  return Object.values(statMap).every((key) => !finiteProviderNumber(record?.[key]));
+}
+
 function flattenBalldontliePages(input) {
   if (Array.isArray(input)) return input.flatMap((item) => Array.isArray(item?.data) ? item.data : item);
   if (Array.isArray(input?.pages)) return input.pages.flatMap((page) => page?.data || []);
@@ -116,6 +124,7 @@ export function normalizeBalldontlieGameStats(input) {
   for (const record of records) {
     const game = record?.game || {};
     if (game.postseason === true || game.season_type && game.season_type !== 'regular') continue;
+    if (isDidNotPlayRow(record, statMap)) continue;
     const season = Number(game.season ?? record.season);
     const playerId = record?.player?.id ?? record.player_id;
     const gameId = game.id ?? record.game_id;
@@ -165,7 +174,12 @@ export function importHistoricalExport({ input, format = 'json', provenance, fie
   } else if (format === 'tabular-json') {
     sourceRows = input?.rows || input;
     rows = normalizeTabularHistoricalRows(sourceRows, fieldMap);
-  } else if (format === 'balldontlie-stats') rows = normalizeBalldontlieGameStats(input);
+  } else if (format === 'balldontlie-stats') {
+    if (input?.acquisition?.complete === false) {
+      throw new Error('BALLDONTLIE export is incomplete (page limit reached before the last page); partial seasons would bias games played and evaluation.');
+    }
+    rows = normalizeBalldontlieGameStats(input);
+  }
   else if (format === 'json') rows = input?.snapshots || input?.rows || input;
   else throw new Error(`Unsupported historical import format: ${format}.`);
   return importHistoricalDataset({ rows, sourceRows: sourceRows || rows, provenance: provenance || input?.provenance });

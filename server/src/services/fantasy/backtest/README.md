@@ -35,3 +35,19 @@ npm run backtest:historical -- --data authorized-history.json --scoring league-s
 ```
 
 Licensing gate: `sourcePolicy.js` marks an import as restricted when the provenance names Brescou, player IDs carry the `brescou:` prefix, or the raw rows keep Brescou/NBA.com stats column signatures, whatever `--format` was used. Restricted snapshots can only be imported with `--validate-only`; `runWalkForwardBacktest` and `runChronologicalEvaluation` refuse them unless provenance has `commercialModelTrainingAuthorized: true` and a `rightsEvidenceUrl`. A deliberately relabelled export cannot be detected, so provenance must stay truthful.
+
+## BALLDONTLIE acquisition (offline research only)
+
+`balldontlieAcquisition.js` fetches per-game rows from the stats endpoint into the saved-response format that `--format balldontlie-stats` imports. Before any request it requires `BALLDONTLIE_API_KEY` in the environment and an authorization file with `acquisitionAuthorized: true`, `name`, `permission`, `subscriptionTier`, and `termsReviewedAt`. Runs are capped by page count (default 1, at most 500) and rate-limited (default 5 requests/min), back off on HTTP 429, never overwrite an existing output file, and never write the key to output. An export cut off by the page cap is marked `complete: false`, and the importer refuses it. When aggregating to seasons, the importer drops postseason rows and did-not-play rows (0 minutes).
+
+```powershell
+$env:BALLDONTLIE_API_KEY = "<key>"
+node src/services/fantasy/backtest/balldontlieAcquisition.js --authorization bdl-authorization.json --seasons 2023 --out bdl-2023.json --max-pages 1 --rpm 5
+```
+
+Provider facts as of 2026-10-14. The docs and terms pages could not be loaded from the development sandbox, so these come from search excerpts; re-check them before relying on them:
+- Tiers: Free (5 requests/min, $0), ALL-STAR (60 requests/min, $9.99/mo), and GOAT (600 requests/min, $39.99/mo), per sport. Game player stats require ALL-STAR or higher. Season averages are GOAT-only, which is why this adapter aggregates per-game rows instead.
+- Pagination: cursor-based (`meta.next_cursor`); `per_page` defaults to 25, maximum 100.
+- Unverified: whether the NBA stats path is `/v1/stats` or `/nba/v1/stats` (use `--base-url`), whether `seasons[]` filters the stats endpoint, and how far back historical coverage really goes. Check all three with a one-page run.
+- Terms summary: commercial use, storage and caching, and AI/model training appear to be permitted. Building a competing product and reselling unmodified data are prohibited. Data is provided "as is" with no accuracy guarantee. The docs also say "We do not store historical data", which is unclear next to the terms. These permissions do not raise tier or rate limits. Have a person review the full terms and record that review in the authorization file; this summary is not legal advice.
+- Season lines from this source have no age or experience, so the age-development model's age curve has no effect on this data.
