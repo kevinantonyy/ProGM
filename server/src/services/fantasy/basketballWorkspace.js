@@ -309,6 +309,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
       leagueId: league?.leagueId || null,
       leagueName: league?.name || 'NBA League',
       season: league?.season || null,
+      draftStatus: league?.draftStatus || null, // Yahoo draft_status (cached league settings)
       teamName: myStanding?.name || 'My Team',
       sport: 'basketball',
     },
