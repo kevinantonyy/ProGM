@@ -87,7 +87,7 @@ Verbatim replies as supplied by the owner. Which repository sent which reply was
 - "Yes, Kevin this repo is open for use and you can store the data in your own database if needed"
 - "Hi Kevin, Yes you can use this repo for your app to store the historical statistics in a private database and using them to train a machine-learning model for player performance predictions"
 
-Not covered by these permissions: redistribution or a public API, and rights held upstream (NBA.com for both datasets' statistics; ESPN and basketball-reference for other llimllib tables). **Upstream status: unresolved.** The ingestion and training gates remain closed.
+Not covered by these permissions: redistribution or a public API, and rights held upstream (NBA.com for both datasets' statistics; ESPN and basketball-reference for other llimllib tables). **Upstream status: unverified; owner risk accepted.** The owner's risk acceptance (`docs/data-provenance/owner-risk-acceptance-2026-10-14.md`) is referenced only by the `llimllib-nba-player-game-logs` source registration, scoped to stats.nba.com-derived regular-season player game logs, 2015–16 to 2025–26. It is not NBA permission.
 
 To record a reply, add the verbatim text, its date, the sender's account or address, and a link or archived copy. Do not paraphrase or widen its scope.
 

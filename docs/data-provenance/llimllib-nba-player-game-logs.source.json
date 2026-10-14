@@ -1,0 +1,14 @@
+{
+  "sourceKey": "llimllib-nba-player-game-logs",
+  "name": "llimllib/nba_data regular-season player game logs (stats.nba.com-derived), 2015-16 to 2025-26",
+  "provider": "llimllib/nba_data (maintainer-approved); upstream stats.nba.com (rights unverified)",
+  "sports": ["basketball"],
+  "licenseName": "Maintainer permission for private storage and ML training + ProGM owner risk acceptance (not NBA permission)",
+  "licenseUrl": "https://github.com/kevinantonyy/ProGM/blob/claude/progm-development-takeover-fcndnq/server/src/services/sportsData/README.md",
+  "sourceUrl": "https://github.com/llimllib/nba_data",
+  "writtenPermissionUrl": "https://github.com/kevinantonyy/ProGM/blob/claude/progm-development-takeover-fcndnq/docs/data-provenance/owner-risk-acceptance-2026-10-14.md",
+  "termsReviewedAt": "2026-10-14",
+  "reviewedBy": "ProGM owner (risk acceptance); maintainer permissions recorded",
+  "attribution": "Data compiled by llimllib/nba_data from stats.nba.com",
+  "permissions": { "storage": true, "commercialUse": true, "modelTraining": true, "redistribution": false, "publicApi": false }
+}
