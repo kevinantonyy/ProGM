@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importHistoricalExport } from './datasetAdapter.js';
+import { assertBrescouTrainingAuthorized, importBrescouHistoricalCsv } from './brescouAdapter.js';
 import { createDevelopmentCandidate } from './developmentModel.js';
 import { normalizeTeamRosterDataset } from './rosterSnapshot.js';
 import { lastSeasonStatLineBaseline, runWalkForwardBacktest } from './runner.js';
@@ -12,6 +13,10 @@ function argument(name) {
   return index >= 0 ? process.argv[index + 1] : null;
 }
 
+function flag(name) {
+  return process.argv.includes(name);
+}
+
 function loadJson(filePath) {
   return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
 }
@@ -19,15 +24,36 @@ function loadJson(filePath) {
 export function runCli() {
   const dataPath = argument('--data');
   const scoringPath = argument('--scoring');
-  if (!dataPath || !scoringPath) {
-    throw new Error('Usage: npm run backtest:historical -- --data history.json --scoring league-scoring.json [--format json|tabular-json|csv|balldontlie-stats] [--provenance provenance.json]');
+  const validateOnly = flag('--validate-only');
+  if (!dataPath || (!scoringPath && !validateOnly)) {
+    throw new Error('Usage: npm run backtest:historical -- --data history.json [--player-index player_index.csv] --scoring league-scoring.json [--format json|tabular-json|csv|balldontlie-stats|brescou] [--provenance provenance.json] [--validate-only]');
   }
   const requestedFormat = argument('--format') || (path.extname(dataPath).toLowerCase() === '.csv' ? 'csv' : 'json');
-  const data = requestedFormat === 'csv' ? fs.readFileSync(path.resolve(dataPath), 'utf8') : loadJson(dataPath);
+  const data = ['csv', 'brescou'].includes(requestedFormat) ? fs.readFileSync(path.resolve(dataPath), 'utf8') : loadJson(dataPath);
   const provenancePath = argument('--provenance');
   const provenance = provenancePath ? loadJson(provenancePath) : data?.provenance;
+  let imported;
+  if (requestedFormat === 'brescou') {
+    const playerIndexPath = argument('--player-index');
+    if (!playerIndexPath) throw new Error('Brescou imports require --player-index player_index.csv.');
+    if (!validateOnly) assertBrescouTrainingAuthorized(provenance);
+    imported = importBrescouHistoricalCsv({
+      playerIndexCsv: fs.readFileSync(path.resolve(playerIndexPath), 'utf8'),
+      traditionalStatsCsv: data,
+      provenance,
+    });
+  } else {
+    imported = importHistoricalExport({ input: data, format: requestedFormat, provenance, fieldMap: data?.fieldMap });
+  }
+  if (validateOnly) {
+    process.stdout.write(`${JSON.stringify({
+      import: imported.diagnostics,
+      accuracyStatus: 'import_validation_only_no_model_training',
+      trainingBlocked: requestedFormat === 'brescou',
+    }, null, 2)}\n`);
+    return;
+  }
   const scoring = loadJson(scoringPath);
-  const imported = importHistoricalExport({ input: data, format: requestedFormat, provenance, fieldMap: data?.fieldMap });
   const statCategories = scoring.statCategories || scoring;
   const requestedModel = argument('--model') || 'all';
   if (!['baseline', 'candidate', 'team-context', 'both', 'all'].includes(requestedModel)) throw new Error('--model must be baseline, candidate, team-context, both, or all.');

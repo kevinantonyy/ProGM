@@ -8,6 +8,7 @@ Supported formats:
 - `tabular-json`: flat rows using canonical field names or common NBA aliases.
 - `csv`: the same flat contract. Empty cells remain `null`.
 - `balldontlie-stats`: saved, paginated responses from BALLDONTLIE `GET /v1/stats`; regular-season game rows are aggregated into player seasons. DD/TD rates are derived from complete game stat lines. Age and experience remain `null` because this response does not document them.
+- `brescou`: local `player/player_stats_traditionnal_rs.csv` plus `player/player_index.csv` from Brescou/NBA-dataset-stats-player-team. The adapter joins stable NBA player IDs, converts `SEASON` to its start year, preserves missing cells, and prevents traded-player aggregate/team rows from being counted twice.
 
 Required provenance fields are `name`, `permission`, `acquiredAt`, and `authorized: true`. Recommended fields are `provider`, `datasetVersion`, `licenseUrl`, `sourceUrl`, and `exportId`. Put provenance inside JSON input or provide it separately with `--provenance` (required for CSV).
 
@@ -16,7 +17,10 @@ cd server
 npm run backtest:historical -- --data authorized-history.csv --format csv --provenance provenance.json --scoring league-scoring.json --model both
 npm run backtest:historical -- --data balldontlie-export.json --format balldontlie-stats --provenance provenance.json --scoring league-scoring.json --model both
 npm run backtest:historical -- --data authorized-history.json --rosters authorized-rosters.json --scoring league-scoring.json --model all
+npm run backtest:historical -- --format brescou --data C:\data\player_stats_traditionnal_rs.csv --player-index C:\data\player_index.csv --provenance brescou-provenance.json --validate-only
 ```
+
+Brescou imports are validation-only until upstream commercial-use and model-training rights are documented. The repository's MIT notice is not treated as proof that upstream NBA statistics may be used commercially. A future backtest requires both `commercialModelTrainingAuthorized: true` and a non-empty `rightsEvidenceUrl` in provenance; do not set these without verified permission. The source has per-game traditional stats and season totals for DD2/TD3. Static position and debut year come from `player_index.csv`; it does not provide historical position changes.
 
 For custom flat columns, JSON input may include a `fieldMap` from ProGM canonical names to source column names. No adapter converts a missing statistic to zero.
 
