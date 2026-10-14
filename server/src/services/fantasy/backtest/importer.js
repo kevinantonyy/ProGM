@@ -22,6 +22,10 @@ function normalizeProvenance(raw) {
     acquiredAt,
     authorized: true,
     synthetic: raw?.synthetic === true,
+    provider: raw?.provider == null ? null : String(raw.provider),
+    licenseUrl: raw?.licenseUrl == null ? null : String(raw.licenseUrl),
+    sourceUrl: raw?.sourceUrl == null ? null : String(raw.sourceUrl),
+    exportId: raw?.exportId == null ? null : String(raw.exportId),
   };
 }
 
