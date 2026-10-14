@@ -143,10 +143,12 @@ test('rolling backtest returns MAE by career stage and low-prior-availability co
 });
 
 test('model parameters are explicit experimental defaults', () => {
-  assert.equal(AVAILABILITY_MODEL.careerWeight, 0.35);
-  assert.equal(AVAILABILITY_MODEL.recentWeight, 0.40);
+  assert.equal(AVAILABILITY_MODEL.historyWeight, 0.75);
   assert.equal(AVAILABILITY_MODEL.baselineWeight, 0.25);
-  assert.equal(AVAILABILITY_MODEL.careerWeight + AVAILABILITY_MODEL.recentWeight + AVAILABILITY_MODEL.baselineWeight, 1);
+  assert.equal(AVAILABILITY_MODEL.historyWeight + AVAILABILITY_MODEL.baselineWeight, 1);
+  assert.equal(AVAILABILITY_MODEL.recencyDecay, 0.6);
+  assert.equal(AVAILABILITY_MODEL.fullCoverageSeasons, 4);
+  assert.equal(AVAILABILITY_MODEL.isolatedAbsenceWeight, 0.5);
   assert.deepEqual([...DURABILITY_RECENCY_WEIGHTS], [0.5, 0.3, 0.2]);
   assert.equal(EXPECTED_SEASON_GAMES, 82);
   assert.equal(DEFAULT_AVAILABILITY_BASELINE, 0.85);
