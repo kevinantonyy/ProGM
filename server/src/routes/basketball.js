@@ -25,6 +25,7 @@ import {
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
+import { projectionModelLabels } from '../services/fantasy/projectionModel.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
 import { cache } from '../services/providers/index.js';
@@ -298,6 +299,7 @@ router.get('/draft', authenticate, async (req, res) => {
     // uses the user's drafted-so-far roster.
     let board = { available: false, availabilityKnown: true, board: [], noData: [], note: 'Projections unavailable.' };
     let externalAvailable = false;
+    let projectionModels = projectionModelLabels();
     if (settings && scoringIsSupported(settings)) {
       let myRosterPlayers = [];
       if (myPickKeys.size) {
@@ -325,11 +327,17 @@ router.get('/draft', authenticate, async (req, res) => {
         getProjection: (pl) => ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null,
         getProjectedValue: (pl) => (ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || {}).projectedPoints ?? null,
       };
+      // Informational only (hybrid flag on): next-game number per player. Not used for rank/value.
+      const nextGameProvider = ctx.projectionModels?.hybridEnabled
+        ? { getProjection: (pl) => ctx.nextGameByCanonicalId.get(canonicalIdOf(pl)) || null }
+        : null;
+      projectionModels = ctx.projectionModels;
       const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
       board = buildDraftBoard({
         players: availablePlayers,
         settings,
         projectionProvider,
+        nextGameProvider,
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentPick,
@@ -351,7 +359,7 @@ router.get('/draft', authenticate, async (req, res) => {
       picks: allPicks, // full ordered board (pick, round, teamKey, playerKey)
       myRoster: myPicks, // the user's current drafted roster (pick, round, playerKey)
       recommendations: board, // best-available / roster-fit over UNDRAFTED players
-      externalData: { available: externalAvailable },
+      externalData: { available: externalAvailable, projectionModels },
       sync: {
         temporaryUnavailable: Boolean(draftData.meta.temporaryUnavailable),
         message: draftData.meta.message || null,

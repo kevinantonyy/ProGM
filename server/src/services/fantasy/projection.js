@@ -34,7 +34,7 @@
  * Confidence is clamped to [0,1]. A player with no stats -> confidence 0 and a
  * null projection (never a fabricated number).
  */
-import { resolveProjectionModel } from './projectionModel.js';
+import { EXISTING_MODEL_VERSION, resolveProjectionModel } from './projectionModel.js';
 import { scoreStatLine } from './scoring.js';
 import { emptyStatLine } from '../providers/types.js';
 
@@ -122,17 +122,28 @@ export function applyRecencyHybrid(base, stats, { halfLife, rampGames }) {
   return { expected: out, recencyWeight: Number(recencyWeight.toFixed(3)), windowGames: games.length };
 }
 
-export function projectPlayer({ stats, statCategories, availability = null, model = resolveProjectionModel() }) {
-  const noData = { projectedPoints: null, perGame: null, confidence: 0, expected: null, breakdown: [], unsupportedStats: [], availability, method: 'no_data', modelVersion: model.version, hybrid: null };
+export const PROJECTION_HORIZONS = Object.freeze({ SEASON: 'season', NEXT_GAME: 'next_game' });
+
+/**
+ * @param {'season'|'next_game'} [params.horizon]
+ *   'season' (default): season-long projection used by draft value and rankings;
+ *     always the existing model, whatever the feature flag says.
+ *   'next_game': short-horizon projection for in-season tools; uses the
+ *     recency hybrid only when `model` (the feature flag) selects it.
+ */
+export function projectPlayer({ stats, statCategories, availability = null, horizon = PROJECTION_HORIZONS.SEASON, model = resolveProjectionModel() }) {
+  if (horizon !== PROJECTION_HORIZONS.SEASON && horizon !== PROJECTION_HORIZONS.NEXT_GAME) throw new Error(`Unknown projection horizon: ${horizon}.`);
+  const active = horizon === PROJECTION_HORIZONS.NEXT_GAME ? model : { kind: 'existing', version: EXISTING_MODEL_VERSION };
+  const noData = { projectedPoints: null, perGame: null, confidence: 0, expected: null, breakdown: [], unsupportedStats: [], availability, method: 'no_data', horizon, modelVersion: active.version, hybrid: null };
   if (!stats) return noData;
 
   const base = blendStatLines(stats.season, stats.recent);
   let expected = base;
   let hybrid = null;
-  if (model.kind === 'recency_hybrid') {
-    const result = applyRecencyHybrid(base, stats, model);
+  if (active.kind === 'recency_hybrid') {
+    const result = applyRecencyHybrid(base, stats, active);
     expected = result.expected;
-    hybrid = { recencyWeight: result.recencyWeight, windowGames: result.windowGames, halfLife: model.halfLife, rampGames: model.rampGames };
+    hybrid = { recencyWeight: result.recencyWeight, windowGames: result.windowGames, halfLife: active.halfLife, rampGames: active.rampGames };
   }
   if (!expected) return noData;
 
@@ -157,7 +168,8 @@ export function projectPlayer({ stats, statCategories, availability = null, mode
     unsupportedStats: scored.unsupportedStats,
     availability,
     method: scored.unsupportedStats.length ? 'incomplete_scoring_data' : stats.recent ? 'blended_recent_season' : 'season_only',
-    modelVersion: model.version,
+    horizon,
+    modelVersion: active.version,
     hybrid,
     lastSeasonFantasy: {
       points: historical.unsupportedStats.length ? null : historical.points,

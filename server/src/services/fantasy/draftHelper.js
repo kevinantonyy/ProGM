@@ -298,7 +298,7 @@ export function buildDraftRecommendation({ player, overallRank, market, seasonPr
  * @param {number|null} [params.nextPick]    user's next projected overall pick (live); enables DRAFT NOW/WAIT
  * @param {string|number|null} [params.currentSeason] Yahoo/NBA season for picking the current-season Yahoo rank
  */
-export function buildDraftBoard({ players, settings, projectionProvider, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
+export function buildDraftBoard({ players, settings, projectionProvider, nextGameProvider = null, rosterAnalysis = null, availabilityOf = null, position = null, limit = 1000, currentPick = null, nextPick = null, currentSeason = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const thinSet = new Set((rosterAnalysis?.positions?.thinPositions || []).map((t) => t.position));
   const overloadedSet = new Set((rosterAnalysis?.positions?.overloadedPositions || []).map((o) => o.position));
@@ -365,7 +365,13 @@ export function buildDraftBoard({ players, settings, projectionProvider, rosterA
     const period = typeof projectionProvider.getPeriodValue === 'function' ? projectionProvider.getPeriodValue(p) : null;
     const scheduleAware = Boolean(period?.scheduleAware);
     const perGame = proj?.projectedPoints ?? null;
+    // INFORMATIONAL ONLY: the short-horizon hybrid number, shown when valid
+    // recent-game data exists. It never feeds rank, draft value or recommendations.
+    const nextGame = nextGameProvider?.getProjection ? nextGameProvider.getProjection(p) : null;
+    const nextGamePoints = nextGame && nextGame.hybrid?.windowGames > 0 && Number.isFinite(nextGame.projectedPoints)
+      ? oneDecimal(nextGame.projectedPoints) : null;
     const base = decorate(p, {
+      ...(nextGameProvider ? { nextGamePoints } : {}),
       projected: perGame,
       periodProjected: scheduleAware ? (period.periodProjectedPoints ?? null) : null, // display only
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only

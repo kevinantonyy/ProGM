@@ -210,6 +210,12 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
 
   const baseProvider = ctx.projectionProvider;
   const projectionProvider = schedules && periodWindow ? withPeriodValues(baseProvider, { schedules, periodWindow }) : baseProvider;
+  // Short-horizon tools (lineup, waivers, start/sit) use next_game projections;
+  // identical to the season provider unless the hybrid flag is on. Draft helper,
+  // rankings, trades and team rating stay on the season provider.
+  const nextGameBase = ctx.nextGameProjectionProvider || baseProvider;
+  const nextGameProvider = nextGameBase === baseProvider ? projectionProvider
+    : schedules && periodWindow ? withPeriodValues(nextGameBase, { schedules, periodWindow }) : nextGameBase;
 
   // Per-player schedule-aware period values, keyed by canonicalId.
   const periodValues = new Map();
@@ -226,10 +232,10 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
 
   // 4. Analytics engines (all provider-independent, degrade cleanly).
   const analysis = settings ? analyzeRoster({ players: myRoster, settings }) : null;
-  const lineup = settings ? optimizeLineup({ players: myRoster, settings, projectionProvider }) : null;
+  const lineup = settings ? optimizeLineup({ players: myRoster, settings, projectionProvider: nextGameProvider }) : null;
   const intelligence = analysis ? buildRosterIntelligence({ players: myRoster, analysis, projectionProvider, lineup }) : null;
-  const waivers = rankWaivers({ availablePlayers, projectionProvider, rosterAnalysis: analysis, myRoster, settings });
-  const startSit = settings ? analyzeStartSit({ players: myRoster, settings, projectionProvider }) : null;
+  const waivers = rankWaivers({ availablePlayers, projectionProvider: nextGameProvider, rosterAnalysis: analysis, myRoster, settings });
+  const startSit = settings ? analyzeStartSit({ players: myRoster, settings, projectionProvider: nextGameProvider }) : null;
   const leagueHub = buildLeagueHub({ standings, myTeamKey: teamKey });
   const rankings = buildRankings({ players: availablePlayers, projectionProvider, sortBy: periodWindow ? 'period' : 'projected' });
 
@@ -244,6 +250,9 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
         players: draftPool,
         settings,
         projectionProvider,
+        nextGameProvider: ctx.projectionModels?.hybridEnabled
+          ? { getProjection: (pl) => ctx.nextGameByCanonicalId.get(canonicalIdOf(pl)) || null }
+          : null,
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentSeason: league?.season || null, // for current-season Yahoo rank
@@ -287,6 +296,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
       freshness: ctx.freshness,
       identity: ctx.identityDiagnostics,
       providerStatus: ctx.providerStatus,
+      projectionModels: ctx.projectionModels || null,
     },
     connection: {
       leagueKey,

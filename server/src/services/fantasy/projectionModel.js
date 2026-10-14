@@ -30,3 +30,8 @@ export function resolveProjectionModel(env = process.env) {
     rampGames: boundedNumber(env.PROGM_HYBRID_RAMP_GAMES, HYBRID_DEFAULTS.rampGames, 1, 30),
   };
 }
+
+/** Labels for API responses: which model produced which horizon's numbers. */
+export function projectionModelLabels(model = resolveProjectionModel()) {
+  return { season: EXISTING_MODEL_VERSION, nextGame: model.version, hybridEnabled: model.kind === 'recency_hybrid' };
+}

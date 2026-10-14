@@ -404,8 +404,10 @@ router.get('/team/:teamKey/roster', authenticate, async (req, res) => {
       : { externalAvailable: false, projectionProvider: null, projectionByCanonicalId: new Map(), freshness: null, identityDiagnostics: null, reason: 'No league settings.' };
 
     // Start/Sit: deterministic checks (existing) + optimized lineup (new, when projections exist).
-    const startSit = settings ? analyzeStartSit({ players, settings, projectionProvider: ctx.projectionProvider }) : null;
-    const lineup = settings ? optimizeLineup({ players, settings, projectionProvider: ctx.projectionProvider }) : null;
+    // In-season, short-horizon tools use the next_game projection (hybrid only when flagged on).
+    const nextGameProvider = ctx.nextGameProjectionProvider || ctx.projectionProvider;
+    const startSit = settings ? analyzeStartSit({ players, settings, projectionProvider: nextGameProvider }) : null;
+    const lineup = settings ? optimizeLineup({ players, settings, projectionProvider: nextGameProvider }) : null;
 
     // Roster intelligence recommendations.
     const intelligence = analysis ? buildRosterIntelligence({ players, analysis, projectionProvider: ctx.projectionProvider, lineup }) : null;
@@ -428,6 +430,7 @@ router.get('/team/:teamKey/roster', authenticate, async (req, res) => {
         freshness: ctx.freshness,
         identity: ctx.identityDiagnostics,
         providerStatus: ctx.providerStatus,
+        projectionModels: ctx.projectionModels || null,
       },
     });
   } catch (error) {
@@ -529,8 +532,8 @@ router.get('/league/:leagueKey/players', authenticate, async (req, res) => {
       const ctx = settings
         ? await buildProjectionContext({ season: league.season, players, statCategories: settings.statCategories, scoringSupported: scoringIsSupported(settings) })
         : { externalAvailable: false, projectionProvider: null, freshness: null };
-      waivers = rankWaivers({ availablePlayers: players, projectionProvider: ctx.projectionProvider, rosterAnalysis });
-      external = { available: ctx.externalAvailable, freshness: ctx.freshness, reason: ctx.reason };
+      waivers = rankWaivers({ availablePlayers: players, projectionProvider: ctx.nextGameProjectionProvider || ctx.projectionProvider, rosterAnalysis });
+      external = { available: ctx.externalAvailable, freshness: ctx.freshness, reason: ctx.reason, projectionModels: ctx.projectionModels || null };
     }
 
     res.json({ leagueKey, status, start, count: players.length, players, waivers, external });
