@@ -15,6 +15,9 @@ Required provenance fields are `name`, `permission`, `acquiredAt`, and `authoriz
 cd server
 npm run backtest:historical -- --data authorized-history.csv --format csv --provenance provenance.json --scoring league-scoring.json --model both
 npm run backtest:historical -- --data balldontlie-export.json --format balldontlie-stats --provenance provenance.json --scoring league-scoring.json --model both
+npm run backtest:historical -- --data authorized-history.json --rosters authorized-rosters.json --scoring league-scoring.json --model all
 ```
 
 For custom flat columns, JSON input may include a `fieldMap` from ProGM canonical names to source column names. No adapter converts a missing statistic to zero.
+
+Team-context roster files contain `rows`, explicit `teamSeasons` completeness declarations, and the same required provenance block as historical imports. Every target-season row must attest `knownBeforeSeason: true`; otherwise that fold receives a neutral adjustment to prevent later transactions leaking into a preseason backtest. Target-season games/minutes are never used as features. Teams not explicitly marked `complete: true`, missing positions, missing prior minutes, or folds without enough historical transitions also receive a neutral team-context adjustment.

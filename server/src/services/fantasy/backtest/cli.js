@@ -3,7 +3,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importHistoricalExport } from './datasetAdapter.js';
 import { createDevelopmentCandidate } from './developmentModel.js';
+import { normalizeTeamRosterDataset } from './rosterSnapshot.js';
 import { lastSeasonStatLineBaseline, runWalkForwardBacktest } from './runner.js';
+import { createTeamContextCandidate } from './teamContextModel.js';
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -27,17 +29,24 @@ export function runCli() {
   const scoring = loadJson(scoringPath);
   const imported = importHistoricalExport({ input: data, format: requestedFormat, provenance, fieldMap: data?.fieldMap });
   const statCategories = scoring.statCategories || scoring;
-  const requestedModel = argument('--model') || 'both';
-  if (!['baseline', 'candidate', 'both'].includes(requestedModel)) throw new Error('--model must be baseline, candidate, or both.');
+  const requestedModel = argument('--model') || 'all';
+  if (!['baseline', 'candidate', 'team-context', 'both', 'all'].includes(requestedModel)) throw new Error('--model must be baseline, candidate, team-context, both, or all.');
+  const rosterPath = argument('--rosters');
+  const rosterData = rosterPath ? loadJson(rosterPath) : null;
+  const rosterDataset = rosterData ? normalizeTeamRosterDataset(rosterData) : null;
   const reports = {};
-  if (requestedModel !== 'candidate') {
+  if (['baseline', 'both', 'all'].includes(requestedModel)) {
     reports.baseline = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: lastSeasonStatLineBaseline });
   }
-  if (requestedModel !== 'baseline') {
+  if (['candidate', 'both', 'all'].includes(requestedModel)) {
     reports.candidate = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: createDevelopmentCandidate() });
+  }
+  if (['team-context', 'all'].includes(requestedModel)) {
+    reports.teamContext = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: createTeamContextCandidate({ rosterDataset }) });
   }
   process.stdout.write(`${JSON.stringify({
     import: imported.diagnostics,
+    rosterImport: rosterDataset?.diagnostics || null,
     accuracyStatus: imported.provenance.synthetic ? 'synthetic_only_unvalidated' : 'historical_backtest_not_production_approved',
     reports,
   }, null, 2)}\n`);

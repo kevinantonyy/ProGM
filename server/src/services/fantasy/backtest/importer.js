@@ -5,7 +5,7 @@ import {
   validateHistoricalSnapshots,
 } from './snapshot.js';
 
-function normalizeProvenance(raw) {
+export function normalizeProvenance(raw) {
   const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
   const permission = typeof raw?.permission === 'string' ? raw.permission.trim() : '';
   const acquiredAt = raw?.acquiredAt && !Number.isNaN(Date.parse(raw.acquiredAt))

@@ -112,7 +112,7 @@ export function runWalkForwardBacktest({ snapshots, statCategories, predictor = 
         actualFppg,
         predictedFantasyTotal: predictedFppg == null || predictedGames == null ? null : predictedFppg * predictedGames,
         actualFantasyTotal: actualFppg == null || actualGames == null ? null : actualFppg * actualGames,
-        cohorts: cohortKeys(target, history[0]),
+        cohorts: [...new Set([...cohortKeys(target, history[0]), ...(prediction.cohorts || [])])],
       };
       records.push(record);
       seasonRecords.push(record);
