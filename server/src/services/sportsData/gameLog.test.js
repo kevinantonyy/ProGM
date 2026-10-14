@@ -175,3 +175,15 @@ test('end-to-end: stored synthetic logs evaluate reproducibly; training permissi
   await importGameLogRows(noTraining, { rows: syntheticRows({ endYears: [2021], datesPerSeason: 1 }), source: syntheticSource({ permissions: { ...syntheticSource().permissions, modelTraining: false } }), seasonLabel: 'end' });
   await assert.rejects(loadPlayerGameLogs(noTraining, { sourceKey: 'synthetic-fixture', statCategories: SCORING }), /does not permit model training/);
 });
+
+test('date split validates on earlier games of a season and tests on later ones', () => {
+  const logs = handLogs();
+  logs.players.get('p').push({ gameId: 'f', date: '2021-12-01', season: 2021, fantasyPoints: 24 });
+  const report = runGameLogEvaluation({ logs, candidates: { lastGame }, dateSplit: { season: 2021, testFrom: '2021-11-15' } });
+  assert.deepEqual(report.split, { train: [2019, 2020], validation: [2021], test: [2021], testFrom: '2021-11-15' });
+  // Validation: game e (prior 2020 mean 15 vs 30; last game 18 vs 30). Test: game f (15 vs 24; last game 30 vs 24).
+  assert.deepEqual(report.validation.models.baseline.overall, { count: 1, mae: 15, rmse: 15, bias: -15 });
+  assert.deepEqual(report.test.models.baseline.overall, { count: 1, mae: 9, rmse: 9, bias: -9 });
+  assert.deepEqual(report.test.models.lastGame.overall, { count: 1, mae: 6, rmse: 6, bias: 6 });
+  assert.throws(() => runGameLogEvaluation({ logs, dateSplit: { season: 1999, testFrom: '2021-11-15' } }), /dateSplit/);
+});

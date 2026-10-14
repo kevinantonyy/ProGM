@@ -105,8 +105,9 @@ export async function loadPlayerGameLogs(store, { sourceKey, statCategories }) {
   return { players, provenance };
 }
 
-function predictPhase(players, models, seasons) {
+function predictPhase(players, models, seasons, include = null) {
   const wanted = new Set(seasons);
+  const inPhase = include || ((game) => wanted.has(game.season));
   const records = Object.fromEntries(Object.keys(models).map((key) => [key, new Map()]));
   const actuals = new Map();
   for (const [playerId, games] of players) {
@@ -114,7 +115,7 @@ function predictPhase(players, models, seasons) {
     for (let index = 0; index < games.length; index += 1) {
       const game = games[index];
       while (earlier < index && games[earlier].date < game.date) earlier += 1;
-      if (!wanted.has(game.season)) continue;
+      if (!inPhase(game)) continue;
       const history = games.slice(0, earlier);
       const target = { playerId, season: game.season, date: game.date };
       const key = `${playerId}|${game.gameId}`;
@@ -141,18 +142,34 @@ function predictPhase(players, models, seasons) {
 /**
  * @param {{players:Map, provenance:object}} logs  from loadPlayerGameLogs
  */
-export function runGameLogEvaluation({ logs, candidates = defaultCandidates(), validationSeasons = 1, testSeasons = 1, minTrainSeasons = 1 }) {
+/**
+ * `dateSplit: { season, testFrom }` splits ONE season by date when too few complete
+ * seasons exist: earlier seasons are history only, games before `testFrom`
+ * validate, games on or after it test. Otherwise whole seasons are split.
+ */
+export function runGameLogEvaluation({ logs, candidates = defaultCandidates(), validationSeasons = 1, testSeasons = 1, minTrainSeasons = 1, dateSplit = null }) {
   const seasons = [...new Set([...logs.players.values()].flatMap((games) => games.map((game) => game.season)))];
-  const split = chronologicalSplit(seasons, { validationSeasons, testSeasons, minTrainSeasons });
+  let split;
+  let validationFilter = null;
+  let testFilter = null;
+  if (dateSplit) {
+    const { season, testFrom } = dateSplit;
+    if (!seasons.includes(season) || !/^\d{4}-\d{2}-\d{2}$/.test(String(testFrom))) throw new Error('dateSplit needs a stored season and a YYYY-MM-DD testFrom.');
+    split = { train: seasons.filter((value) => value < season).sort((a, b) => a - b), validation: [season], test: [season], testFrom };
+    validationFilter = (game) => game.season === season && game.date < testFrom;
+    testFilter = (game) => game.season === season && game.date >= testFrom;
+  } else {
+    split = chronologicalSplit(seasons, { validationSeasons, testSeasons, minTrainSeasons });
+  }
   const models = { baseline: previousSeasonBaseline, ...candidates };
 
-  const validation = predictPhase(logs.players, models, split.validation);
+  const validation = predictPhase(logs.players, models, split.validation, validationFilter);
   const ranked = Object.keys(candidates).filter((key) => validation.models[key].overall.mae != null)
     .sort((a, b) => validation.models[a].overall.mae - validation.models[b].overall.mae || (a < b ? -1 : 1));
   const selected = ranked[0] ?? null;
 
   const testModels = selected ? { baseline: previousSeasonBaseline, [selected]: candidates[selected] } : { baseline: previousSeasonBaseline };
-  const test = predictPhase(logs.players, testModels, split.test);
+  const test = predictPhase(logs.players, testModels, split.test, testFilter);
   const base = test.models.baseline;
   const chosen = selected ? test.models[selected] : null;
   return {
