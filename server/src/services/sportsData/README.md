@@ -73,3 +73,20 @@ Source status (2026-10-14): no source of historical NBA game logs has verified p
 - NBA.com's terms reserve its basketball content, statistics included, against reproduction or reuse without written permission.
 
 The registry refuses all three without a `writtenPermissionUrl`. Keeping the database private does not remove those upstream restrictions.
+
+## Maintainer consent log (Phase 13)
+
+| Repository | Reported consent | Exact statement | Date | Sender identity | Status |
+|---|---|---|---|---|---|
+| github.com/Brescou/NBA-dataset-stats-player-team | Private storage and commercial ML training (reported by the ProGM owner, 2026-10-14) | **Not yet provided** | **Not provided** | **Not provided** | Unrecorded |
+| github.com/llimllib/nba_data | Private storage and commercial ML training (reported by the ProGM owner, 2026-10-14) | **Not yet provided** | **Not provided** | **Not provided** | Unrecorded |
+
+To record a reply, add the verbatim text, its date, the sender's account or address, and a link or archived copy. Do not paraphrase or widen its scope.
+
+Maintainer consent covers what the maintainer owns: their compilation, code and publication. It does not grant rights held upstream. The relevant upstream holders are:
+- **NBA.com / stats.nba.com:** the source of Brescou's tables and of llimllib's player game logs. NBA.com's terms (partial excerpt) say its basketball content, statistics included, may not be reproduced or used without written permission.
+- **ESPN and basketball-reference:** these appear in llimllib's other tables, which ProGM does not need. Sports Reference explicitly bans AI training.
+
+Therefore:
+- Record maintainer consent in the source's `permission` text only.
+- Set `writtenPermissionUrl` (sportsData), or `commercialModelTrainingAuthorized` plus `rightsEvidenceUrl` (backtest), **only** for evidence that covers the upstream data. That means a grant from the NBA or a licensed distributor, or a written legal determination by ProGM's owner and counsel that the intended use of these statistics is permitted.
