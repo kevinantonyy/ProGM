@@ -9,7 +9,9 @@ import espnRoutes from './routes/espn.js';
 import gmRoutes from './routes/gm.js';
 import basketballRoutes from './routes/basketball.js';
 import diagnosticsRoutes from './routes/diagnostics.js';
-import { initDatabase } from './db/connection.js';
+import { createSportsDataRouter } from './routes/sportsData.js';
+import { initDatabase, postgresPool } from './db/connection.js';
+import { PostgresSportsDataStore } from './services/sportsData/postgresStore.js';
 
 dotenv.config();
 
@@ -28,6 +30,11 @@ app.use('/api/espn', espnRoutes);
 app.use('/api/gm', gmRoutes);
 app.use('/api/basketball', basketballRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
+// Internal, admin-only, read-only; 404 unless ENABLE_SPORTS_DATA_API=true.
+let sportsDataStore = null;
+app.use('/api/internal/sports-data', createSportsDataRouter({
+  getStore: () => (sportsDataStore ||= new PostgresSportsDataStore(postgresPool)),
+}));
 
 // Health check
 app.get('/api/health', (req, res) => {

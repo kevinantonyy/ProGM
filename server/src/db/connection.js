@@ -62,4 +62,7 @@ export async function initDatabase() {
   console.log('Database initialized successfully');
 }
 
+// Raw pg pool for modules that need transactions (pool.connect()).
+export const postgresPool = postgres;
+
 export default pool;
