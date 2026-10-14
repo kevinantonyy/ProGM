@@ -15,9 +15,21 @@ export const DEFAULT_AVAILABILITY_BASELINE = 0.85;
 // Experimental, configurable defaults. These are not claimed as scientific
 // constants; rolling backtests expose their out-of-sample performance.
 export const AVAILABILITY_MODEL = Object.freeze({
-  careerWeight: 0.35,
-  recentWeight: 0.40,
+  // History vs cohort baseline (unchanged 75/25 split from the previous model).
+  historyWeight: 0.75,
   baselineWeight: 0.25,
+  // Every season's weight decays with age (newest = 1, then 0.6, 0.36, ...),
+  // matching the documented 0.5/0.3/0.2 recent ratio. Previously all seasons
+  // older than three were pooled into one block with a fixed 35% weight, so a
+  // single old injury season could outweigh the third-most-recent season.
+  recencyDecay: 0.6,
+  // Seasons of decayed weight needed for history to count fully; thinner
+  // histories lean on the cohort baseline (as the previous model did).
+  fullCoverageSeasons: 4,
+  // A single low season among >= 2 normal ones is treated as partly transient:
+  // half of its deviation from the player's other seasons is discounted.
+  // Recurring low seasons (>= 2) keep full weight. Unvalidated default.
+  isolatedAbsenceWeight: 0.5,
   // Selected from rolling MAE over the available cached history grid
   // (20.5/41/82/164); re-evaluate as historical coverage improves.
   playerPriorGames: 20.5,
@@ -217,6 +229,18 @@ function historicalAvailabilityPattern(rows, threshold = AVAILABILITY_MODEL.lowA
   return 'mixed_availability';
 }
 
+/** Discount half of a single outlier season's deviation (isolated absence only). */
+function adjustIsolatedAbsence(rows, pattern, config) {
+  if (pattern !== 'isolated_low_availability' || rows.length < 3) return rows;
+  return rows.map((row) => {
+    if (row.availability >= config.lowAvailabilityThreshold) return row;
+    const others = rows.filter((other) => other !== row);
+    const typical = others.reduce((sum, other) => sum + other.availability, 0) / others.length;
+    const availability = typical + (row.availability - typical) * config.isolatedAbsenceWeight;
+    return { ...row, availability, observedAvailability: row.availability, isolatedAbsenceAdjusted: true };
+  });
+}
+
 /** Career-adjusted, recency-aware expected regular-season games. */
 export function estimateExpectedGames(history, {
   baselineAvailability = DEFAULT_AVAILABILITY_BASELINE,
@@ -235,20 +259,23 @@ export function estimateExpectedGames(history, {
   const olderCareer = aggregateRate(olderCareerRows);
   const rawRecentRate = recentRate(recentRows);
   const baseline = Math.max(0, Math.min(1, Number(baselineContext?.rate ?? baselineAvailability) || DEFAULT_AVAILABILITY_BASELINE));
-  const careerPosterior = shrinkRate(olderCareer.rate, olderCareerRows, baseline, config.playerPriorGames);
-  const recentPosterior = shrinkRate(rawRecentRate, recentRows, baseline, config.playerPriorGames);
-  let availability = config.careerWeight * careerPosterior.rate
-    + config.recentWeight * recentPosterior.rate
-    + config.baselineWeight * baseline;
+  const pattern = historicalAvailabilityPattern(rows, config.lowAvailabilityThreshold);
+  const adjusted = adjustIsolatedAbsence(rows, pattern, config);
+  const seasonWeights = adjusted.map((_, index) => config.recencyDecay ** index);
+  const weightSum = seasonWeights.reduce((sum, weight) => sum + weight, 0);
+  const weightedRate = weightSum ? adjusted.reduce((sum, row, index) => sum + row.availability * seasonWeights[index], 0) / weightSum : null;
+  const fullWeight = Array.from({ length: config.fullCoverageSeasons }, (_, index) => config.recencyDecay ** index).reduce((sum, weight) => sum + weight, 0);
+  const coverage = Math.min(1, weightSum / fullWeight);
+  const posterior = shrinkRate(weightedRate, rows, baseline, config.playerPriorGames);
+  const historyRate = coverage * posterior.rate + (1 - coverage) * baseline;
+  let availability = config.historyWeight * historyRate + config.baselineWeight * baseline;
 
   const verifiedInjury = classifyVerifiedInjury(injury);
   const preInjuryGames = EXPECTED_SEASON_GAMES * availability;
   if (verifiedInjury.availabilityCap != null) availability = Math.min(availability, verifiedInjury.availabilityCap);
   availability = Math.max(0, Math.min(1, availability));
   const expectedGames = Number((EXPECTED_SEASON_GAMES * availability).toFixed(1));
-  const dataInfluence = (config.careerWeight * careerPosterior.dataWeight
-    + config.recentWeight * recentPosterior.dataWeight)
-    / (config.careerWeight + config.recentWeight);
+  const dataInfluence = coverage * posterior.dataWeight;
 
   return {
     expectedGames,
@@ -256,22 +283,23 @@ export function estimateExpectedGames(history, {
     careerRate: career.rate == null ? null : Number(career.rate.toFixed(4)),
     independentCareerRate: olderCareer.rate == null ? null : Number(olderCareer.rate.toFixed(4)),
     recentRate: rawRecentRate == null ? null : Number(rawRecentRate.toFixed(4)),
-    careerPosteriorRate: Number(careerPosterior.rate.toFixed(4)),
-    recentPosteriorRate: Number(recentPosterior.rate.toFixed(4)),
+    weightedRate: weightedRate == null ? null : Number(weightedRate.toFixed(4)),
+    posteriorRate: Number(posterior.rate.toFixed(4)),
+    historyCoverage: Number(coverage.toFixed(4)),
+    seasonWeights: seasonWeights.map((weight) => Number((weight / (weightSum || 1)).toFixed(4))),
+    isolatedAbsenceAdjusted: adjusted.filter((row) => row.isolatedAbsenceAdjusted).map((row) => row.season),
     baselineAvailability: Number(baseline.toFixed(4)),
     baselineContext,
     shrinkageFactor: Number((1 - dataInfluence).toFixed(4)),
-    careerDataWeight: Number(careerPosterior.dataWeight.toFixed(4)),
-    recentDataWeight: Number(recentPosterior.dataWeight.toFixed(4)),
-    careerEvidenceGames: Number(careerPosterior.evidenceGames.toFixed(1)),
-    recentEvidenceGames: Number(recentPosterior.evidenceGames.toFixed(1)),
+    recentDataWeight: Number(dataInfluence.toFixed(4)),
+    evidenceGames: Number(posterior.evidenceGames.toFixed(1)),
     seasonsObserved: rows.length,
     recentSeasonsObserved: recentRows.length,
     independentCareerSeasonsObserved: olderCareerRows.length,
     age: finite(age),
     debutYear: finite(debutYear),
     perSeason: rows,
-    historicalPattern: historicalAvailabilityPattern(rows, config.lowAvailabilityThreshold),
+    historicalPattern: pattern,
     injuryType: verifiedInjury.type,
     injuryCap: verifiedInjury.availabilityCap,
     injuryReason: verifiedInjury.reason,

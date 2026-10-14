@@ -536,6 +536,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
     {expanded && <tr id={detailId} className="border-b border-dark-700 bg-dark-900/50"><td colSpan="5" className="p-4 sm:pl-16">
       <h3 className="font-display text-lg font-bold">Why Draft This Player?</h3>
       <p className="mt-2 max-w-4xl text-sm leading-6 text-dark-300">{player.recommendation || 'A recommendation is unavailable because the supporting data is incomplete.'}</p>
+      {player.rankingFactors && <p className="mt-2 max-w-4xl text-xs leading-5 text-dark-400"><span className="font-semibold text-dark-300">Ranking factors: </span>{player.rankingFactors}</p>}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div><p className="stat-label">Projected Fantasy Points/Game</p><p className="mt-1 font-semibold tabular-nums">{player.projected != null ? player.projected.toFixed(1) : '—'}</p></div>
         <div><p className="stat-label">Expected Games Played</p><p className="mt-1 font-semibold tabular-nums">{player.expectedSeasonGames != null ? player.expectedSeasonGames.toFixed(1) : '—'}</p></div>

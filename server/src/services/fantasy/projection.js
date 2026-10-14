@@ -159,6 +159,13 @@ export function projectPlayer({ stats, statCategories, availability = null, hori
     weightedCount,
   });
 
+  // The confidence sample term (games played / 40) partly reflects missed
+  // games. Season-long draft value already prices availability through
+  // expected games, so it can add this shortfall back to avoid a second
+  // injury penalty.
+  const gp = stats.season?.gamesPlayed;
+  const confidenceGamesPlayedShortfall = gp == null ? 0 : Number((0.5 * (1 - Math.min(1, gp / 40))).toFixed(3));
+
   return {
     projectedPoints: scored.unsupportedStats.length ? null : scored.points,
     perGame: scored.unsupportedStats.length ? null : scored.points,
@@ -171,6 +178,7 @@ export function projectPlayer({ stats, statCategories, availability = null, hori
     horizon,
     modelVersion: active.version,
     hybrid,
+    confidenceGamesPlayedShortfall,
     lastSeasonFantasy: {
       points: historical.unsupportedStats.length ? null : historical.points,
       complete: historical.unsupportedStats.length === 0 && historical.points != null,

@@ -231,6 +231,28 @@ function nbaStatSentence(player) {
   return sentence;
 }
 
+const AVAILABILITY_TEXT = Object.freeze({
+  consistently_high_availability: 'consistently high availability',
+  mixed_availability: 'mixed availability history',
+  isolated_low_availability: 'one isolated low-availability season (partly discounted)',
+  recurring_low_availability: 'recurring missed time',
+  no_history: 'no availability history (cohort baseline)',
+});
+
+/** Concise, data-only explanation of the main ranking factors. */
+export function describeRankingFactors(row, seasonPointsRank, poolSize) {
+  const c = row.components || {};
+  if (c.perGame == null || c.expectedGames == null) return null;
+  const parts = [`${c.perGame.toFixed(1)} FPPG × ${c.expectedGames.toFixed(1)} expected games = ${Math.round(c.seasonPoints).toLocaleString('en-US')} projected season points${seasonPointsRank ? ` (#${seasonPointsRank} of ${poolSize})` : ''}`];
+  const model = c.availability;
+  if (model?.historicalPattern) {
+    const injury = model.injuryCap === 0 ? '; verified season-ending injury' : '';
+    parts.push(`Availability: ${AVAILABILITY_TEXT[model.historicalPattern] || model.historicalPattern}${injury}`);
+  }
+  if (c.vorp != null) parts.push(`${c.vorp >= 0 ? '+' : ''}${Math.round(c.vorp).toLocaleString('en-US')} season points over positional replacement`);
+  return `${parts.join('. ')}.`;
+}
+
 /** Deterministic, data-backed Draft Helper recommendation (no AI call). */
 export function buildDraftRecommendation({ player, overallRank, market, seasonProjectionRank, projectionCount, availabilityKnown }) {
   const rostered = availabilityKnown && player.availability !== 'available';
@@ -376,6 +398,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, nextGam
       periodProjected: scheduleAware ? (period.periodProjectedPoints ?? null) : null, // display only
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
+      // Availability is priced once, via expected games (no second injury penalty).
+      draftConfidence: proj?.confidence == null ? null : Math.min(1, proj.confidence + (proj.confidenceGamesPlayedShortfall ?? 0)),
       injury: proj?.injury ?? null,
       age: proj?.availabilityProfile?.age ?? null,
       debutYear: proj?.availabilityProfile?.debutYear ?? null,
@@ -445,7 +469,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, nextGam
       seasonPoints: r.seasonPoints,
       perGame: r.perGame,
       expectedGames: r.expectedSeasonGames,
-      confidence: r.confidence,
+      confidence: r.draftConfidence ?? r.confidence,
       eligiblePositions: r.eligiblePositions,
       weights,
       poolMaxSeasonPoints,
@@ -491,6 +515,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, nextGam
       rankAgreement: rankCmp.agreement,
       rankReason: rankCmp.reason,
     };
+    row.rankingFactors = describeRankingFactors(row, projectionRankByKey.get(row.playerKey) ?? null, projectionPool.length);
     row.recommendation = buildDraftRecommendation({
       player: row,
       overallRank,
