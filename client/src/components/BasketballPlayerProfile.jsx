@@ -68,6 +68,7 @@ function PlayerProfile({ player, data, closeRef }) {
   const projection = player.projectedPoints ?? player.projected ?? null;
   const periodProjection = player.periodProjected ?? player.weeklyProjectedPoints ?? null;
   const progmRank = player.progmRank ?? player.overallRank ?? null;
+  const scope = data.draftBoard?.rankScope || data.rankings?.rankScope || null;
   const history = Array.isArray(player.history) ? player.history.filter((row) => row?.gamesPlayed != null && row?.gameTotal) : [];
   const durability = player.components?.durabilityScore;
   const explanations = [player.rankReason, player.marketReason, player.rosterFitLabel, player.fitReason, player.reasoning].filter(Boolean);
@@ -105,7 +106,7 @@ function PlayerProfile({ player, data, closeRef }) {
         <section className="p-4 sm:p-6">
           <h3 className="text-xl font-bold">Player overview</h3>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-md border border-dark-700 bg-dark-900 p-3"><p className="stat-label">ProGM Rank</p><p className="mt-1 text-xl font-black">{present(progmRank) ? `#${progmRank}` : '—'}</p></div>
+            <div className="rounded-md border border-dark-700 bg-dark-900 p-3"><p className="stat-label" title={scope === 'available_players' ? 'Relative to the players currently available; can change as players are drafted.' : 'Shared ProGM Overall Rank'}>{scope === 'available_players' ? 'Rank (available)' : 'Overall Rank'}</p><p className="mt-1 text-xl font-black">{present(progmRank) ? `#${progmRank}` : '—'}</p></div>
             <div className="rounded-md border border-dark-700 bg-dark-900 p-3"><p className="stat-label">Yahoo Rank</p><p className="mt-1 text-xl font-black">{present(player.yahooOverallRank) ? `#${player.yahooOverallRank}` : '—'}</p></div>
             <div className="rounded-md border border-dark-700 bg-dark-900 p-3"><p className="stat-label">Upcoming period</p><p className="mt-1 text-xl font-black">{periodProjection != null ? `${Number(periodProjection).toFixed(1)} FP` : '—'}</p>{player.expectedGames != null && <p className="text-xs text-dark-400">{player.expectedGames} game{player.expectedGames === 1 ? '' : 's'} · {data.period?.start || 'current'}–{data.period?.end || 'period'}</p>}</div>
           </div>
@@ -140,7 +141,7 @@ function collectPlayers(data) {
   };
 
   (data.myTeam?.roster || []).forEach((player) => add(player));
-  (data.rankings?.players || []).forEach((player) => add(player, { progmRank: player.rank, projectedPoints: player.projected }));
+  (data.rankings?.players || []).forEach((player) => add(player, { progmRank: player.overallRank ?? player.rank, projectedPoints: player.projected }));
   [...(data.waivers?.bestAvailable || []), ...(data.waivers?.bestFit || []), ...(data.waivers?.players || [])].forEach((player) => add(player));
   (data.waivers?.addDrop || []).forEach((move) => { add(move.add); add(move.drop); });
   [...(data.draftBoard?.board || []), ...(data.draftBoard?.noData || [])].forEach((player) => add(player, { progmRank: player.overallRank, projectedPoints: player.projected }));

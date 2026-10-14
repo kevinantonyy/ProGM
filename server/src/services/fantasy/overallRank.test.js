@@ -150,3 +150,27 @@ test('rank helper, priority note and reference cache behave', () => {
   saveBaselineReference(cache, key, { complete: true, values: [9] }); // first complete capture wins
   assert.deepEqual(loadBaselineReference(cache, key).values, [3]);
 });
+
+test('live draft with an empty roster: Draft Priority order equals Overall order, even after others draft', () => {
+  const full = board({ poolComplete: true });
+  const drafted = ['C1', 'G3', 'C4'];
+  const remaining = players(Object.keys(SPEC).filter((k) => !drafted.includes(k)));
+  const common = { players: remaining, settings: SETTINGS, projectionProvider: provider(), rosterAnalysis: analysis(0, ['PG', 'C']), availabilityOf: () => true };
+  for (const baselineReference of [full.baselineReference, null]) {
+    const live = buildDraftBoard({ ...common, baselineReference });
+    assert.equal(live.rosterPersonalized, false);
+    // Same valuation and ordering.
+    assert.ok(live.board.every((r) => r.value === r.baselineValue));
+    const byPriority = live.board.map((r) => r.playerKey);
+    const byOverall = [...live.board].sort((a, b) => a.overallRank - b.overallRank || a.draftPriority - b.draftPriority).map((r) => r.playerKey);
+    assert.deepEqual(byPriority, byOverall);
+    assert.ok(live.board.every((r, i) => i === 0 || live.board[i - 1].overallRank <= r.overallRank));
+    // Displayed numbers may differ (stable reference rank vs position among available), never the order.
+    assert.deepEqual(live.board.map((r) => r.draftPriority), live.board.map((_, i) => i + 1));
+  }
+  // The frozen reference gives the stable full-pool numbers; the unfrozen one is labelled relative.
+  const frozen = buildDraftBoard({ ...common, baselineReference: full.baselineReference });
+  assert.equal(frozen.rankScope, 'full_pool');
+  assert.ok(frozen.board.some((r) => r.overallRank !== r.draftPriority));
+  assert.equal(buildDraftBoard({ ...common }).rankScope, 'available_players');
+});

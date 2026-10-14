@@ -323,6 +323,12 @@ function Trades({ data, leagueKey }) {
   );
 }
 
+// A relative-to-available rank must never read as a stable Overall Rank.
+const overallLabel = (scope) => (scope === 'available_players' ? 'Rank (avail.)' : 'Overall');
+const overallTitle = (scope) => (scope === 'available_players'
+  ? 'Rank among the players currently available. It can change as players are drafted or added.'
+  : 'Shared ProGM Overall Rank (same as Draft Helper; ignores your roster). Stable as other teams draft.');
+
 // --- Tab: Rankings ---
 function Rankings({ data }) {
   const r = data.rankings;
@@ -336,7 +342,7 @@ function Rankings({ data }) {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     return (b.projected ?? -1) - (a.projected ?? -1);
   });
-  const cols = [r.players?.some((p) => p.overallRank != null) && ['overall', 'ProGM Overall'], ['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+  const cols = [r.players?.some((p) => p.overallRank != null) && ['overall', r.rankScope === 'available_players' ? 'Rank among available' : 'ProGM Overall'], ['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -345,7 +351,7 @@ function Rankings({ data }) {
       </div>
       <section className="card overflow-x-auto p-0">
         <table className="w-full min-w-[620px] text-sm">
-          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3 text-center" title="Shared ProGM Overall Rank (same as Draft Helper; ignores your roster)">Overall</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
+          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3 text-center" title={overallTitle(r.rankScope)}>{overallLabel(r.rankScope)}</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
           <tbody>{players.map((p, i) => (
             <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
               <td className="p-3 text-dark-400">{i + 1}</td>
@@ -358,7 +364,7 @@ function Rankings({ data }) {
           </tbody>
         </table>
       </section>
-      {r.rankScope === 'available_players' && <p className="text-xs text-dark-400">Overall ranks are relative to the players currently available, not the full league pool.</p>}
+      {r.rankScope === 'available_players' && <p className="text-xs text-dark-400">These ranks are relative to the players currently available, not a stable league-wide Overall Rank.</p>}
       <SecondaryDetails label="Ranking method">{r.note}</SecondaryDetails>
     </div>
   );
@@ -598,7 +604,7 @@ function DraftHelper({ data, leagueKey, active }) {
   const visibleRows = rows.slice(0, visibleCount);
 
   const hasPeriod = data.scheduleAware;
-  const sortBtns = [['progm', 'Draft Priority', 'Overall order adjusted for your roster needs'], ['overall', 'Overall Rank', 'Shared ProGM Overall Rank (ignores your roster)'], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
+  const sortBtns = [['progm', 'Draft Priority', 'Overall order adjusted for your roster needs'], ['overall', db?.rankScope === 'available_players' ? 'Rank (avail.)' : 'Overall Rank', overallTitle(db?.rankScope)], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
   const advancedSorts = [['seasonProjected', 'Projected Season Fantasy Points', 'Projected fantasy points/game multiplied by expected regular-season games'], ['projected', 'Projected Fantasy Points/Game', 'Projected per-game production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
 
   return (
@@ -609,7 +615,7 @@ function DraftHelper({ data, leagueKey, active }) {
         {isLive ? <p className="mt-1 text-xs text-dark-400">Recomputed after every pick.</p> : <SecondaryDetails label="Board method" className="mt-2">{db.note}</SecondaryDetails>}
       </div>
 
-      <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">Overall Rank</strong><br />Shared with the Rankings tab: projected season fantasy points (points per game × expected games), positional replacement value and scarcity for this league. It ignores your roster.{db.rankScope === 'available_players' ? ' Currently relative to the players still available.' : ''}</p><p><strong className="text-dark-200">Draft Priority</strong><br />Overall order adjusted for your roster needs once you have drafted players. It equals Overall while your roster is empty.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
+      <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">{db.rankScope === 'available_players' ? 'Rank among available' : 'Overall Rank'}</strong><br />Shared with the Rankings tab: projected season fantasy points (points per game × expected games), positional replacement value and scarcity for this league. It ignores your roster.{db.rankScope === 'available_players' ? ' This copy is relative to the players currently available, so it can shift as players are drafted; it is not a stable league-wide rank.' : ' It stays fixed as other teams draft.'}</p><p><strong className="text-dark-200">Draft Priority</strong><br />Overall order adjusted for your roster needs once you have drafted players. It equals Overall while your roster is empty.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
 
       {isLive && <LiveDraftRoster live={live} />}
 
@@ -635,7 +641,7 @@ function DraftHelper({ data, leagueKey, active }) {
       <section className="card overflow-x-auto p-0">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr>
-            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Shared ProGM Overall Rank: season value, expected games, replacement and scarcity. Ignores your roster and matches the Rankings tab.">Overall</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft Priority: Overall order adjusted for your roster needs once you have drafted players. Equals Overall with an empty roster.">Priority</abbr></th><th className="p-3">Player</th>
+            <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title={overallTitle(db.rankScope)}>{overallLabel(db.rankScope)}</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft Priority: Overall order adjusted for your roster needs once you have drafted players. Equals Overall with an empty roster.">Priority</abbr></th><th className="p-3">Player</th>
             <th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Yahoo's overall player rank">Yahoo Rank</abbr></th><th className="w-24 p-3 text-center"><abbr tabIndex="0" className="cursor-help no-underline" title="Average draft position in Yahoo drafts">Yahoo ADP</abbr></th><th className="w-52 p-3"><abbr tabIndex="0" className="cursor-help no-underline" title="Draft timing guidance from existing ProGM and Yahoo ADP calculations">Value</abbr></th>
           </tr></thead>
           <tbody>{visibleRows.map((player) => <DraftPlayerRow key={player.playerKey} player={player} availabilityKnown={db.availabilityKnown} />)}</tbody>
@@ -734,10 +740,10 @@ export function basketballContext(data) {
       confidence: t.confidence,
     })),
     // Player rankings (ProGM), top slice for reference.
-    rankingsTop: (data.rankings?.players || []).slice(0, 15).map((p) => ({ rank: p.rank, name: p.name, projected: p.projected, period: p.periodProjected })),
+    rankingsTop: (data.rankings?.players || []).slice(0, 15).map((p) => ({ rank: p.overallRank ?? p.rank, rankScope: data.rankings?.rankScope || null, name: p.name, projected: p.projected, period: p.periodProjected })),
     // Draft Helper board top slice (ProGM value + fit + availability), for
     // explanation only — Gemini must not invent rankings or values.
-    draftBoardTop: (data.draftBoard?.board || []).slice(0, 15).map((p) => ({ rank: p.draftPriority ?? p.overallRank, name: p.name, value: p.value, tier: p.tier, fit: p.rosterFit, availability: p.availability })),
+    draftBoardTop: (data.draftBoard?.board || []).slice(0, 15).map((p) => ({ draftPriority: p.draftPriority ?? null, overallRank: p.overallRank ?? null, rankScope: data.draftBoard?.rankScope || null, name: p.name, value: p.value, tier: p.tier, fit: p.rosterFit, availability: p.availability })),
     leagueHub: data.leagueHub ? { powerRankings: (data.leagueHub.powerRankings || []).map((t) => ({ rank: t.powerRank, name: t.name, score: t.powerScore })) } : null,
     recommendations: data.intelligence?.recommendations,
     dataAvailable: data.externalData?.available,
