@@ -13,9 +13,9 @@ Fantasy sports assistant: Yahoo Fantasy Basketball (OAuth) plus existing fantasy
 Yahoo has returned HTTP 999 before because of excessive draft-results polling. These files hold the protections: `server/src/services/fantasy/yahooRequestGuard.js` (single-flight, cache, backoff, circuit breaker), `yahooDraftPolling.js`, and `client/src/utils/draftPolling.js` (backoff, stopping polling on inactive pages). **Do not change Yahoo polling or these protections** unless the user explicitly asks.
 
 ## Offline models (not production)
-- `backtest/` holds walk-forward backtesting (`runner.js`, `metrics.js`), the age-development model (`developmentModel.js`), historical importers (`importer.js`, `datasetAdapter.js`), and the team-context model (`teamContextModel.js`). The CLI is `npm run backtest:historical` (in `server/`).
+- `backtest/` holds walk-forward backtesting (`runner.js`, `metrics.js`), the age-development model (`developmentModel.js`), historical importers (`importer.js`, `datasetAdapter.js`), and the team-context model (`teamContextModel.js`). Chronological train/validation/test evaluation is in `evaluation.js` (`--evaluate`). The CLI is `npm run backtest:historical` (in `server/`).
 - So far these models are validated only on synthetic fixtures. They must not be imported by production code, deployed, or presented as proven improvements.
-- Imports need an authorized provenance block (`authorized: true`). Brescou/NBA-dataset-stats-player-team is MIT-licensed, but commercial rights to its upstream data are **unverified** (the publisher has been contacted). Do not train on it, or ship anything derived from it, until those rights are confirmed.
+- Imports need an authorized provenance block (`authorized: true`). Brescou/NBA-dataset-stats-player-team is MIT-licensed, but commercial rights to its upstream data are **unverified** (the publisher has been contacted). Do not train on it, or ship anything derived from it, until those rights are confirmed. `sourcePolicy.js` enforces this whatever the import format; do not weaken it.
 
 ## Constraints
 - $0 extra spend. Add no new dependencies unless needed. Keep diffs minimal and avoid rewrites.

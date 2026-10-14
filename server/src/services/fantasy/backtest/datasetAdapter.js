@@ -158,10 +158,15 @@ export function normalizeBalldontlieGameStats(input) {
 
 export function importHistoricalExport({ input, format = 'json', provenance, fieldMap = {} }) {
   let rows;
-  if (format === 'csv') rows = normalizeTabularHistoricalRows(parseHistoricalCsv(input), fieldMap);
-  else if (format === 'tabular-json') rows = normalizeTabularHistoricalRows(input?.rows || input, fieldMap);
-  else if (format === 'balldontlie-stats') rows = normalizeBalldontlieGameStats(input);
+  let sourceRows;
+  if (format === 'csv') {
+    sourceRows = parseHistoricalCsv(input);
+    rows = normalizeTabularHistoricalRows(sourceRows, fieldMap);
+  } else if (format === 'tabular-json') {
+    sourceRows = input?.rows || input;
+    rows = normalizeTabularHistoricalRows(sourceRows, fieldMap);
+  } else if (format === 'balldontlie-stats') rows = normalizeBalldontlieGameStats(input);
   else if (format === 'json') rows = input?.snapshots || input?.rows || input;
   else throw new Error(`Unsupported historical import format: ${format}.`);
-  return importHistoricalDataset({ rows, provenance: provenance || input?.provenance });
+  return importHistoricalDataset({ rows, sourceRows: sourceRows || rows, provenance: provenance || input?.provenance });
 }

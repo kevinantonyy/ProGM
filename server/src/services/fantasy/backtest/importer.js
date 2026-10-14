@@ -4,6 +4,7 @@ import {
   normalizeHistoricalSnapshot,
   validateHistoricalSnapshots,
 } from './snapshot.js';
+import { restrictedSourceFromProvenance, restrictedSourceFromRows } from './sourcePolicy.js';
 
 export function normalizeProvenance(raw) {
   const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
@@ -26,13 +27,19 @@ export function normalizeProvenance(raw) {
     licenseUrl: raw?.licenseUrl == null ? null : String(raw.licenseUrl),
     sourceUrl: raw?.sourceUrl == null ? null : String(raw.sourceUrl),
     exportId: raw?.exportId == null ? null : String(raw.exportId),
+    restrictedSource: restrictedSourceFromProvenance(raw),
+    commercialModelTrainingAuthorized: raw?.commercialModelTrainingAuthorized === true,
+    rightsEvidenceUrl: raw?.rightsEvidenceUrl == null ? null : String(raw.rightsEvidenceUrl),
   };
 }
 
 /** Import a bulk user-supplied or otherwise authorized historical dataset. */
-export function importHistoricalDataset({ rows, provenance }) {
+export function importHistoricalDataset({ rows, provenance, sourceRows = rows }) {
   if (!Array.isArray(rows)) throw new Error('Historical import rows must be an array.');
   const normalizedProvenance = normalizeProvenance(provenance);
+  // Detect restricted data from its content too, so choosing a generic format
+  // or omitting the source name cannot bypass the licensing gate.
+  normalizedProvenance.restrictedSource ||= restrictedSourceFromRows(sourceRows) || restrictedSourceFromRows(rows);
   const snapshots = rows.map((row) => normalizeHistoricalSnapshot(row, normalizedProvenance));
   const validation = validateHistoricalSnapshots(snapshots);
   if (!validation.valid) throw new Error(`Historical import validation failed: ${validation.errors.join(' ')}`);

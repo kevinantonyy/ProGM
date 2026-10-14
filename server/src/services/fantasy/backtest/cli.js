@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { importHistoricalExport } from './datasetAdapter.js';
 import { assertBrescouTrainingAuthorized, importBrescouHistoricalCsv } from './brescouAdapter.js';
 import { createDevelopmentCandidate } from './developmentModel.js';
+import { runChronologicalEvaluation } from './evaluation.js';
 import { normalizeTeamRosterDataset } from './rosterSnapshot.js';
 import { lastSeasonStatLineBaseline, runWalkForwardBacktest } from './runner.js';
 import { createTeamContextCandidate } from './teamContextModel.js';
@@ -17,6 +18,14 @@ function flag(name) {
   return process.argv.includes(name);
 }
 
+function integerArgument(name, fallback) {
+  const value = argument(name);
+  if (value == null) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) throw new Error(`${name} must be an integer.`);
+  return parsed;
+}
+
 function loadJson(filePath) {
   return JSON.parse(fs.readFileSync(path.resolve(filePath), 'utf8'));
 }
@@ -26,7 +35,7 @@ export function runCli() {
   const scoringPath = argument('--scoring');
   const validateOnly = flag('--validate-only');
   if (!dataPath || (!scoringPath && !validateOnly)) {
-    throw new Error('Usage: npm run backtest:historical -- --data history.json [--player-index player_index.csv] --scoring league-scoring.json [--format json|tabular-json|csv|balldontlie-stats|brescou] [--provenance provenance.json] [--validate-only]');
+    throw new Error('Usage: npm run backtest:historical -- --data history.json [--player-index player_index.csv] --scoring league-scoring.json [--format json|tabular-json|csv|balldontlie-stats|brescou] [--provenance provenance.json] [--validate-only | --evaluate [--validation-seasons 1] [--test-seasons 1] [--min-train-seasons 2]]');
   }
   const requestedFormat = argument('--format') || (path.extname(dataPath).toLowerCase() === '.csv' ? 'csv' : 'json');
   const data = ['csv', 'brescou'].includes(requestedFormat) ? fs.readFileSync(path.resolve(dataPath), 'utf8') : loadJson(dataPath);
@@ -60,6 +69,20 @@ export function runCli() {
   const rosterPath = argument('--rosters');
   const rosterData = rosterPath ? loadJson(rosterPath) : null;
   const rosterDataset = rosterData ? normalizeTeamRosterDataset(rosterData) : null;
+  if (flag('--evaluate')) {
+    const models = { baseline: lastSeasonStatLineBaseline, candidate: createDevelopmentCandidate() };
+    if (rosterDataset) models.teamContext = createTeamContextCandidate({ rosterDataset });
+    const evaluation = runChronologicalEvaluation({
+      snapshots: imported.snapshots,
+      statCategories,
+      models,
+      validationSeasons: integerArgument('--validation-seasons', 1),
+      testSeasons: integerArgument('--test-seasons', 1),
+      minTrainSeasons: integerArgument('--min-train-seasons', 2),
+    });
+    process.stdout.write(`${JSON.stringify({ import: imported.diagnostics, rosterImport: rosterDataset?.diagnostics || null, evaluation }, null, 2)}\n`);
+    return;
+  }
   const reports = {};
   if (['baseline', 'both', 'all'].includes(requestedModel)) {
     reports.baseline = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: lastSeasonStatLineBaseline });

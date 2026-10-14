@@ -198,8 +198,4 @@ export function importBrescouHistoricalCsv({ playerIndexCsv, traditionalStatsCsv
   };
 }
 
-export function assertBrescouTrainingAuthorized(provenance) {
-  if (provenance?.commercialModelTrainingAuthorized !== true || !String(provenance?.rightsEvidenceUrl ?? '').trim()) {
-    throw new Error('Brescou model training is blocked until upstream commercial-use and model-training rights are documented. Use --validate-only.');
-  }
-}
+export { assertBrescouTrainingAuthorized } from './sourcePolicy.js';

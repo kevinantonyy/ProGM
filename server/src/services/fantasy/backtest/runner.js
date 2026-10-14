@@ -1,6 +1,7 @@
 import { scoreStatLine } from '../scoring.js';
 import { HISTORICAL_STAT_KEYS, snapshotToStatLine, validateHistoricalSnapshots } from './snapshot.js';
 import { regressionMetrics, spearmanCorrelation } from './metrics.js';
+import { assertSnapshotsTrainable } from './sourcePolicy.js';
 
 function strictScore(statLine, statCategories) {
   const scored = scoreStatLine(statLine, statCategories);
@@ -63,9 +64,10 @@ function summarize(records) {
  * Pure walk-forward evaluation. A predictor receives only rows whose season is
  * strictly earlier than its target; the target's actual stat line is withheld.
  */
-export function runWalkForwardBacktest({ snapshots, statCategories, predictor = lastSeasonStatLineBaseline, targetSeasons = null }) {
+export function runWalkForwardBacktest({ snapshots, statCategories, predictor = lastSeasonStatLineBaseline, targetSeasons = null, includeRecords = false }) {
   const validation = validateHistoricalSnapshots(snapshots);
   if (!validation.valid) throw new Error(`Invalid historical snapshots: ${validation.errors.join(' ')}`);
+  assertSnapshotsTrainable(snapshots);
 
   const ordered = [...snapshots].sort((a, b) => a.season - b.season || a.player.id.localeCompare(b.player.id));
   const allSeasons = [...new Set(ordered.map((row) => row.season))].sort((a, b) => a - b);
@@ -160,5 +162,6 @@ export function runWalkForwardBacktest({ snapshots, statCategories, predictor = 
     },
     cohorts,
     foldModels,
+    ...(includeRecords ? { records } : {}),
   };
 }

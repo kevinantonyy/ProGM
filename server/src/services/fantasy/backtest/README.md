@@ -25,3 +25,13 @@ Brescou imports are validation-only until upstream commercial-use and model-trai
 For custom flat columns, JSON input may include a `fieldMap` from ProGM canonical names to source column names. No adapter converts a missing statistic to zero.
 
 Team-context roster files contain `rows`, explicit `teamSeasons` completeness declarations, and the same required provenance block as historical imports. Every target-season row must attest `knownBeforeSeason: true`; otherwise that fold receives a neutral adjustment to prevent later transactions leaking into a preseason backtest. Target-season games/minutes are never used as features. Teams not explicitly marked `complete: true`, missing positions, missing prior minutes, or folds without enough historical transitions also receive a neutral team-context adjustment.
+
+## Chronological evaluation
+
+`--evaluate` runs `evaluation.js`. Seasons are split chronologically into train, validation, and test (defaults: the last season is test, the one before it is validation, and at least 2 seasons are train; override with `--validation-seasons`, `--test-seasons`, `--min-train-seasons`). Each target season is predicted by a fold fit only on earlier seasons (rolling origin). The model with the lowest validation fantasy-points-per-game MAE is selected before test seasons are scored, and test results never feed back into selection. Every model, including `last_season_stat_line` (the production preseason baseline), is scored on the same player-seasons that all models predicted. The report includes MAE, RMSE, bias (predicted minus actual), Spearman rank correlation, sample sizes, per-season results, and an order-independent SHA-256 `dataFingerprint` of the input.
+
+```powershell
+npm run backtest:historical -- --data authorized-history.json --scoring league-scoring.json --evaluate
+```
+
+Licensing gate: `sourcePolicy.js` marks an import as restricted when the provenance names Brescou, player IDs carry the `brescou:` prefix, or the raw rows keep Brescou/NBA.com stats column signatures, whatever `--format` was used. Restricted snapshots can only be imported with `--validate-only`; `runWalkForwardBacktest` and `runChronologicalEvaluation` refuse them unless provenance has `commercialModelTrainingAuthorized: true` and a `rightsEvidenceUrl`. A deliberately relabelled export cannot be detected, so provenance must stay truthful.
