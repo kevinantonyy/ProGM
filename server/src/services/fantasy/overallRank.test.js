@@ -31,7 +31,7 @@ test('empty roster: Overall Rank and Draft Priority are identical in valuation a
   for (const row of b.board) {
     assert.equal(row.value, row.baselineValue);
     assert.equal(row.overallRank, row.draftPriority);
-    assert.match(row.priorityNote, /equals Overall/);
+    assert.equal(row.priorityNote, null); // no roster yet: recommendations follow ProGM Rank
   }
   // Same without any roster analysis at all.
   const none = board();
@@ -48,9 +48,10 @@ test('roster composition changes Draft Priority but never Overall Rank', () => {
   assert.notEqual(order(needPg), order(needC)); // priority order is roster-aware
   assert.equal(needPg.rosterPersonalized, true);
   // A player is moved only by fit, and the board says why.
-  const moved = needPg.board.find((r) => r.priorityNote && /vs Overall order/.test(r.priorityNote));
+  const moved = needPg.board.find((r) => r.priorityNote);
   assert.ok(moved);
-  assert.match(moved.priorityNote, /thin position|depth|roster/);
+  assert.match(moved.priorityNote, /^Roster fit: .*(higher|lower) than ProGM Rank alone\.$/);
+  assert.doesNotMatch(moved.priorityNote, /#|\d/); // explanation in words only: never a second rank
   assert.ok(needPg.board.every((r) => r.overallRank != null));
   // Fit stays secondary: the clearly best player is still first in both orders.
   assert.equal(needC.board[0].playerKey, 'G1');
@@ -137,7 +138,8 @@ test('rank helper, priority note and reference cache behave', () => {
   assert.equal(rankAmong([50, 40, 40, 10], 45), 2);
   assert.equal(rankAmong([50, 40, 40, 10], 5), 5);
   assert.equal(rankAmong([50], null), null);
-  assert.equal(describePriorityDifference({ personalized: true, poolPosition: 5, draftPriority: 3, fit: 'need' }), 'Up 2 vs Overall order: fills a thin position on your roster.');
+  assert.equal(describePriorityDifference({ personalized: true, poolPosition: 5, draftPriority: 3, fit: 'need' }), 'Roster fit: fills a thin position on your roster, so draft recommendations rate this player slightly higher than ProGM Rank alone.');
+  assert.equal(describePriorityDifference({ personalized: false, poolPosition: 5, draftPriority: 3, fit: 'need' }), null);
   assert.equal(describePriorityDifference({ personalized: true, poolPosition: 3, draftPriority: 3, fit: 'need' }), null);
 
   const store = new Map();
@@ -173,4 +175,23 @@ test('live draft with an empty roster: Draft Priority order equals Overall order
   assert.equal(frozen.rankScope, 'full_pool');
   assert.ok(frozen.board.some((r) => r.overallRank !== r.draftPriority));
   assert.equal(buildDraftBoard({ ...common }).rankScope, 'available_players');
+});
+
+test('recommendations, market labels and rank gaps use the displayed ProGM Rank, with roster fit explained in words', () => {
+  const full = board({ poolComplete: true });
+  const withYahoo = (rows) => rows.map((p) => ({ ...p, yahooAdp: 6, yahooOverallRank: 6 }));
+  const drafted = ['G1', 'C1'];
+  const remaining = withYahoo(players(Object.keys(SPEC).filter((k) => !drafted.includes(k))));
+  const live = buildDraftBoard({ players: remaining, settings: SETTINGS, projectionProvider: provider(), baselineReference: full.baselineReference, rosterAnalysis: analysis(3, ['PG']), availabilityOf: () => true });
+  for (const row of live.board) {
+    assert.equal(row.overallRank, ranks(full)[row.playerKey]); // the number shown as ProGM Rank
+    const quoted = row.recommendation.match(/ProGM Rank #(\d+)/);
+    if (quoted) assert.equal(Number(quoted[1]), row.overallRank); // never the board position
+    if (row.marketReason && /ProGM #/.test(row.marketReason)) assert.match(row.marketReason, new RegExp(`ProGM #${row.overallRank}\\b`));
+    assert.equal(row.rankGap, 6 - row.overallRank); // Yahoo rank is compared with the same ProGM Rank
+  }
+  // Roster fit is explained in words and the personalized order never replaces the rank.
+  assert.ok(live.board.some((r) => r.priorityNote && !/\d/.test(r.priorityNote)));
+  const stripped = live.board.map((r) => r.overallRank);
+  assert.deepEqual([...stripped].sort((a, b) => a - b), [...new Set(stripped)].sort((a, b) => a - b));
 });

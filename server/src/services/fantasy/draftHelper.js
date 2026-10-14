@@ -251,13 +251,16 @@ export function rankAmong(sortedDesc, value) {
   return lo + 1;
 }
 
-/** Explain a meaningful gap between Overall (baseline) order and Draft Priority order. */
+/**
+ * Explain a meaningful gap between baseline (ProGM Rank) order and the
+ * roster-aware recommendation order. Words only: it never presents a second rank.
+ */
 export function describePriorityDifference({ personalized, poolPosition, draftPriority, fit }) {
-  if (!personalized) return 'Draft Priority equals Overall order until you have a roster.';
-  const moved = poolPosition - draftPriority; // positive = moved up by roster fit
+  if (!personalized) return null; // no roster yet: recommendations follow ProGM Rank
+  const moved = poolPosition - draftPriority; // positive = roster fit moved the player up
   if (!moved) return null;
-  const why = fit === 'need' ? 'fills a thin position on your roster' : fit === 'surplus' ? 'your roster already has depth here' : 'neighbouring players moved with roster needs';
-  return `${moved > 0 ? 'Up' : 'Down'} ${Math.abs(moved)} vs Overall order: ${why}.`;
+  const why = fit === 'need' ? 'fills a thin position on your roster' : fit === 'surplus' ? 'your roster already has depth here' : 'nearby players shifted with your roster needs';
+  return `Roster fit: ${why}, so draft recommendations rate this player ${moved > 0 ? 'slightly higher' : 'slightly lower'} than ProGM Rank alone.`;
 }
 
 /** Concise, data-only explanation of the main ranking factors. */
@@ -528,13 +531,13 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     // Market context compares ProGM rank (this board position) vs Yahoo ADP.
     // DRAFT NOW/WAIT only when a reliable nextPick was supplied.
     const market = computeMarketContext({
-      progmRank: draftPriority,
+      progmRank: overallRank,
       yahooAdp: p.yahooAdp,
       currentPick,
       nextPick,
     });
     // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
-    const rankCmp = computeRankComparison({ progmRank: draftPriority, yahooOverallRank: p.yahooOverallRank });
+    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooOverallRank });
     const row = {
       overallRank, // stable baseline rank (no roster fit); same value in Rankings
       draftPriority, // order of this board (adds roster fit once a roster exists)
@@ -552,7 +555,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     row.rankingFactors = describeRankingFactors(row, projectionRankByKey.get(row.playerKey) ?? null, projectionPool.length);
     row.recommendation = buildDraftRecommendation({
       player: row,
-      overallRank: draftPriority,
+      overallRank,
       market,
       seasonProjectionRank: projectionRankByKey.get(row.playerKey) ?? null,
       projectionCount: projectionPool.length,
