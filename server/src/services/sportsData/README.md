@@ -76,19 +76,18 @@ The registry refuses all three without a `writtenPermissionUrl`. Keeping the dat
 
 ## Maintainer consent log (Phase 13)
 
-Verbatim replies supplied by the ProGM owner on 2026-10-14. The owner has not yet said which repository each reply came from, the date it was sent, or who sent it:
+**Maintainer permissions (recorded 2026-10-14, confirmed by the ProGM owner):** the maintainers of both repositories approved using their datasets for ProGM's private historical database and for machine-learning model training.
 
-- **Reply A:** "Yes, Kevin this repo is open for use and you can store the data in your own database if needed"
-- **Reply B:** "Hi Kevin, Yes you can use this repo for your app to store the historical statistics in a private database and using them to train a machine-learning model for player performance predictions"
+| Repository | Maintainer permission | Scope |
+|---|---|---|
+| github.com/Brescou/NBA-dataset-stats-player-team | Approved | Private database storage; ML model training |
+| github.com/llimllib/nba_data | Approved | Private database storage; ML model training |
 
-| Repository | Reply | Date | Sender | Scope stated | Not stated |
-|---|---|---|---|---|---|
-| github.com/Brescou/NBA-dataset-stats-player-team | Unassigned (A or B) | Not provided | Not provided | See below | See below |
-| github.com/llimllib/nba_data | Unassigned (A or B) | Not provided | Not provided | See below | See below |
+Verbatim replies as supplied by the owner. Which repository sent which reply was not specified:
+- "Yes, Kevin this repo is open for use and you can store the data in your own database if needed"
+- "Hi Kevin, Yes you can use this repo for your app to store the historical statistics in a private database and using them to train a machine-learning model for player performance predictions"
 
-- Reply A says: use of the repo, and storing the data in ProGM's own database. It does not mention model training or commercial use.
-- Reply B says: use of the repo "for your app", storing the historical statistics in a private database, and training a machine-learning model for player performance predictions. It does not explicitly mention commercial use.
-- Neither reply mentions upstream (NBA.com, ESPN, basketball-reference) rights.
+Not covered by these permissions: redistribution or a public API, and rights held upstream (NBA.com for both datasets' statistics; ESPN and basketball-reference for other llimllib tables). **Upstream status: unresolved.** The ingestion and training gates remain closed.
 
 To record a reply, add the verbatim text, its date, the sender's account or address, and a link or archived copy. Do not paraphrase or widen its scope.
 
