@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { adaptGameLogs } from './gameLogAdapter.js';
-import { createRecentWindowContext, ensembleModel, existingProgmModel, gameFantasyPoints, loadPlayerGameLogs, performanceTier, previousSeasonBaseline, recencyBlend, runEnsembleEvaluation, runGameLogEvaluation } from './gameLogEvaluation.js';
+import { createRecentWindowContext, ensembleModel, gamesPlayedBucket, runEarlySeasonEvaluation, windowHybrid, existingProgmModel, gameFantasyPoints, loadPlayerGameLogs, performanceTier, previousSeasonBaseline, recencyBlend, runEnsembleEvaluation, runGameLogEvaluation } from './gameLogEvaluation.js';
 import { importGameLogRows } from './gameLogImport.js';
 import { MemorySportsDataStore } from './memoryStore.js';
 import { syntheticSource } from './syntheticFixture.js';
@@ -239,4 +239,39 @@ test('ensemble evaluation tunes on validation only and compares four models on i
   assert.deepEqual(altered.selection, report.selection);
   assert.deepEqual(altered.validation, report.validation);
   assert.notDeepEqual(altered.testSummary, report.testSummary);
+});
+
+test('window hybrid falls back to the existing model and ramps toward window recency', () => {
+  const teamGames = new Map([['A', Array.from({ length: 4 }, (_, i) => ({ gameId: `a${i + 1}`, date: `2021-11-0${i + 1}`, season: 2021 }))]]);
+  const context = createRecentWindowContext(teamGames);
+  const last = [{ gameId: 'x', date: '2020-11-01', season: 2020, fantasyPoints: 20 }];
+  const target = { season: 2021, date: '2021-11-05' };
+  // No window games: existing model (last season only = 20).
+  assert.equal(windowHybrid({ rampGames: 4 })({ history: last, target, context }), 20);
+  // Two window games (30 older, 40 newer), half-life 1: weights 0.5 and 1 -> recent = (15 + 40) / 1.5.
+  const history = [...last, { gameId: 'a1', date: '2021-11-01', season: 2021, fantasyPoints: 30 }, { gameId: 'a2', date: '2021-11-02', season: 2021, fantasyPoints: 40 }];
+  const recent = 55 / 1.5;
+  const existing = 0.65 * 20 + 0.35 * 35;
+  assert.equal(windowHybrid({ halfLife: 1, rampGames: 4 })({ history, target, context }), 0.5 * recent + 0.5 * existing);
+  assert.equal(windowHybrid({ halfLife: 1, thresholdGames: 3 })({ history, target, context }), existing);
+  assert.equal(windowHybrid({ halfLife: 1, thresholdGames: 2 })({ history, target, context }), recent);
+  // No last season (rookie): window recency alone; nothing at all gives null.
+  assert.equal(windowHybrid({ halfLife: 1, rampGames: 4 })({ history: history.slice(1), target, context }), recent);
+  assert.equal(windowHybrid({ rampGames: 4 })({ history: [], target, context }), null);
+  assert.deepEqual([0, 1, 5, 6, 10, 11, 20, 21].map(gamesPlayedBucket), ['g00', 'g01_05', 'g01_05', 'g06_10', 'g06_10', 'g11_20', 'g11_20', 'g21_plus']);
+});
+
+test('early-season study tunes on one half of players and reports the other half', async () => {
+  const store = new MemorySportsDataStore();
+  await importGameLogRows(store, { rows: syntheticRows({ endYears: [2021, 2022], datesPerSeason: 20 }), source: syntheticSource(), seasonLabel: 'end' });
+  const logs = await loadPlayerGameLogs(store, { sourceKey: 'synthetic-fixture', statCategories: SCORING });
+  const report = runEarlySeasonEvaluation({ logs, season: 2021, before: '2021-11-15', testFrom: '2021-11-15' });
+  assert.match(report.design, /not a chronological out-of-sample test/);
+  assert.ok(report.tune.commonSampleCount > 0 && report.holdout.commonSampleCount > 0);
+  assert.ok(Object.keys(report.selection.tuneMae).includes(report.selection.model));
+  assert.deepEqual(Object.keys(report.holdout.models), ['existing', 'recency30', 'hybrid']);
+  assert.ok(report.holdout.models.hybrid.byGamesPlayed.some((row) => row.bucket === 'g00'));
+  // Holdout and later-period outcomes cannot change the tuning choice.
+  for (const games of logs.players.values()) for (const game of games) game.fantasyPoints += game.date >= '2021-11-15' ? 50 : 0;
+  assert.deepEqual(runEarlySeasonEvaluation({ logs, season: 2021, before: '2021-11-15' }).selection, report.selection);
 });

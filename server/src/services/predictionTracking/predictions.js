@@ -150,3 +150,28 @@ export async function recordPredictions(store, batch, { now = () => new Date().t
     return counts;
   });
 }
+
+/**
+ * Like recordPredictions, but keys that already exist are SKIPPED (counted as
+ * `skippedExisting`) instead of failing the batch. Stored records are still
+ * never modified. Used for live recording, where a projection can be
+ * recomputed later the same day with a slightly different value: the first
+ * recorded value stands.
+ */
+export async function recordNewPredictions(store, batch, { now = () => new Date().toISOString() } = {}) {
+  if (!Array.isArray(batch) || !batch.length) return { recorded: 0, skippedExisting: 0 };
+  if (batch.length > MAX_BATCH) throw new Error(`recordNewPredictions accepts at most ${MAX_BATCH} predictions per call.`);
+  await store.ensureSchema();
+  const nowIso = now();
+  const normalized = new Map();
+  for (const raw of batch) {
+    const prediction = normalizePrediction(raw, nowIso);
+    if (!normalized.has(predictionKey(prediction))) normalized.set(predictionKey(prediction), prediction);
+  }
+  return store.transaction(async (tx) => {
+    const existing = await tx.getByKeys([...normalized.keys()]);
+    const fresh = [...normalized.entries()].filter(([key]) => !existing.has(key)).map(([key, prediction]) => ({ ...prediction, key, hash: predictionHash(prediction) }));
+    await tx.insertPredictions(fresh);
+    return { recorded: fresh.length, skippedExisting: normalized.size - fresh.length };
+  });
+}

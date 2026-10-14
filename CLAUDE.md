@@ -9,6 +9,7 @@ Fantasy sports assistant: Yahoo Fantasy Basketball (OAuth) plus existing fantasy
 - `server/src/services/fantasy/backtest/`: the OFFLINE experimental prediction engine (see below).
 - `server/src/services/sportsData/`: internal provider-independent data store (Postgres `sd_*` tables, created lazily) and ingestion with source-permission gating; internal admin-only GET routes at `/api/internal/sports-data`, 404 unless `ENABLE_SPORTS_DATA_API=true`. See its README.
 - `server/src/services/predictionTracking/`: append-only record of ProGM's own predictions (`pt_predictions`, created lazily) and offline MAE/RMSE/bias; not wired into production. No raw provider data, no outcomes collected. See its README.
+- Projection model flag: `PROGM_PROJECTION_MODEL=recency_hybrid_v1` enables the recency hybrid (`services/fantasy/projectionModel.js`); unset = existing model (default, rollback). `PROGM_PREDICTION_TRACKING=true` records ProGM's own projections to `pt_predictions`. Both are off by default; evaluations are in `docs/evaluations/`.
 - `client/`: React 18, Vite and Tailwind. Basketball UI is in `client/src/pages/BasketballWorkspace.jsx`; football is in `pages/FantasyFootball.jsx`.
 
 ## Yahoo HTTP 999 warning

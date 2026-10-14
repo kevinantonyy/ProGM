@@ -484,19 +484,24 @@ export async function getRecentForm(season, { fetchBox = getBoxscore, perTeam = 
     sched = mapNbaScheduleWithIds(payload);
   }
   const gameIds = recentCompletedGameIds(sched, perTeam);
-  const linesByPlayer = new Map(); // externalId -> StatLine[]
+  const dateByGameId = new Map();
+  for (const games of Object.values(sched || {})) for (const g of games || []) if (g.gameId) dateByGameId.set(g.gameId, g.gameDate);
+  const linesByPlayer = new Map(); // externalId -> [{ gameDate, line }]
   for (const gid of gameIds) {
     let rows = [];
     try { rows = await fetchBox(gid); } catch { rows = []; }
     for (const { externalId, line } of rows || []) {
       if (!linesByPlayer.has(externalId)) linesByPlayer.set(externalId, []);
-      linesByPlayer.get(externalId).push(line);
+      linesByPlayer.get(externalId).push({ gameDate: dateByGameId.get(gid) ?? null, line });
     }
   }
   const out = new Map();
-  for (const [externalId, lines] of linesByPlayer) {
-    const agg = aggregateRecentLines(lines);
-    if (agg) out.set(externalId, { recent: agg.line, recentGameCount: agg.gameCount });
+  for (const [externalId, games] of linesByPlayer) {
+    const agg = aggregateRecentLines(games.map((game) => game.line));
+    // recentGames (oldest first) feeds the feature-flagged recency hybrid; the
+    // existing model keeps using only the aggregated `recent` line.
+    const recentGames = games.slice().sort((a, b) => String(a.gameDate || '').localeCompare(String(b.gameDate || '')));
+    if (agg) out.set(externalId, { recent: agg.line, recentGameCount: agg.gameCount, recentGames });
   }
   return out;
 }

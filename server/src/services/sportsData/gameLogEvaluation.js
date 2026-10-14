@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chronologicalSplit } from '../fantasy/backtest/evaluation.js';
 import { RECENT_WEIGHT, SEASON_WEIGHT } from '../fantasy/projection.js';
 import { scoreStatLine } from '../fantasy/scoring.js';
@@ -124,6 +125,47 @@ export function createRecentWindowContext(teamGames, perTeam = PRODUCTION_RECENT
   };
 }
 
+/** Bucket by the player's games already played this season (before the target game). */
+export function gamesPlayedBucket(count) {
+  if (count === 0) return 'g00';
+  if (count <= 5) return 'g01_05';
+  if (count <= 10) return 'g06_10';
+  if (count <= 20) return 'g11_20';
+  return 'g21_plus';
+}
+
+/**
+ * Recency over only what production can see live: the player's games inside
+ * the league-wide recent window (each team's last 10 completed games), with an
+ * exponential half-life. Blends with the existing model by sample size:
+ * weight on recency = min(1, n / rampGames) (or a hard threshold), where n is
+ * the player's games in the window. With no last-season line it uses the
+ * window alone; with no window games it is the existing model.
+ */
+export function windowHybrid({ halfLife = 5, rampGames = null, thresholdGames = null } = {}) {
+  const model = (input) => {
+    const { history, target, context } = input;
+    const window = context?.recentGameIds?.(target.season, target.date);
+    const games = window ? history.filter((game) => game.season === target.season && window.has(game.gameId)) : [];
+    const existing = existingProgmModel(input);
+    if (!games.length) return existing;
+    let weightSum = 0;
+    let weighted = 0;
+    games.slice().reverse().forEach((game, age) => {
+      const weight = 0.5 ** (age / halfLife);
+      weightSum += weight;
+      weighted += weight * game.fantasyPoints;
+    });
+    const recent = weighted / weightSum;
+    if (existing == null) return recent;
+    const n = games.length;
+    const recencyWeight = thresholdGames != null ? (n >= thresholdGames ? 1 : 0) : rampGames ? Math.min(1, n / rampGames) : 1;
+    return recencyWeight * recent + (1 - recencyWeight) * existing;
+  };
+  model.config = { halfLife, rampGames, thresholdGames };
+  return model;
+}
+
 export function performanceTier(priorSeasonFppg) {
   if (priorSeasonFppg == null) return 'no_prior_season';
   if (priorSeasonFppg < 15) return 'under_15';
@@ -188,11 +230,12 @@ function predictPhase(players, models, seasons, include = null, context = null) 
     for (let index = 0; index < games.length; index += 1) {
       const game = games[index];
       while (earlier < index && games[earlier].date < game.date) earlier += 1;
-      if (!inPhase(game)) continue;
+      if (!inPhase(game, playerId)) continue;
       const history = games.slice(0, earlier);
       const target = { playerId, season: game.season, date: game.date, teamId: game.teamId ?? null };
       const key = `${playerId}|${game.gameId}`;
-      actuals.set(key, { season: game.season, actual: game.fantasyPoints, month: game.date.slice(0, 7), tier: performanceTier(priorSeasonMean(history, game.season)) });
+      const seasonGames = history.filter((item) => item.season === game.season).length;
+      actuals.set(key, { season: game.season, actual: game.fantasyPoints, month: game.date.slice(0, 7), tier: performanceTier(priorSeasonMean(history, game.season)), gamesPlayed: gamesPlayedBucket(seasonGames) });
       for (const [name, model] of Object.entries(models)) {
         const predicted = model({ history, target, context });
         if (Number.isFinite(predicted)) records[name].set(key, predicted);
@@ -209,6 +252,7 @@ function predictPhase(players, models, seasons, include = null, context = null) 
       bySeason: seasons.map((season) => ({ season, ...accuracyMetrics(pairs((key) => actuals.get(key).season === season)) })),
       byMonth: groupBy(common, actuals, 'month').map((month) => ({ month, ...accuracyMetrics(pairs((key) => actuals.get(key).month === month)) })),
       byTier: groupBy(common, actuals, 'tier').map((tier) => ({ tier, ...accuracyMetrics(pairs((key) => actuals.get(key).tier === tier)) })),
+      byGamesPlayed: groupBy(common, actuals, 'gamesPlayed').map((bucket) => ({ bucket, ...accuracyMetrics(pairs((key) => actuals.get(key).gamesPlayed === bucket)) })),
     };
   }
   return { seasons, targetGames: actuals.size, commonSampleCount: common.length, models: summary };
@@ -321,6 +365,48 @@ export function runEnsembleEvaluation({ logs, dateSplit = null, validationSeason
     test,
     testSummary: summary,
     bestTestModel: best,
+    accuracyStatus: logs.provenance.synthetic === true ? 'synthetic_only_unvalidated' : 'historical_game_level_not_production_approved',
+  };
+}
+
+function playerHalf(playerId) {
+  return createHash('sha256').update(String(playerId)).digest()[0] % 2 === 0 ? 'tune' : 'holdout';
+}
+
+export function hybridSchedules() {
+  const schedules = { window_recency: windowHybrid({ halfLife: 5 }) };
+  for (const rampGames of [2, 3, 5, 8, 10]) schedules[`ramp_${rampGames}`] = windowHybrid({ halfLife: 5, rampGames });
+  for (const thresholdGames of [2, 3, 5, 8]) schedules[`threshold_${thresholdGames}`] = windowHybrid({ halfLife: 5, thresholdGames });
+  return schedules;
+}
+
+/**
+ * Early-season study inside the VALIDATION period of `season` (dates before
+ * `before`). Players are split deterministically into tune/holdout halves; the
+ * hybrid schedule is chosen on tune players only and reported on holdout
+ * players, by games already played. This is a player holdout within the same
+ * period, not a chronological out-of-sample test. If `testFrom` is given, the
+ * chosen schedule is also scored on that later period for reference only.
+ */
+export function runEarlySeasonEvaluation({ logs, season, before, testFrom = null, schedules = hybridSchedules() }) {
+  const inValidation = (half) => (game, playerId) => game.season === season && game.date < before && playerHalf(playerId) === half;
+  const reference = { existing: existingProgmModel, recency30: recencyBlend({ halfLife: 5, priorWeight: 0 }) };
+  const tune = predictPhase(logs.players, { ...reference, ...schedules }, [season], inValidation('tune'), logs.context);
+  const ranked = rankByMae(tune, Object.keys(schedules));
+  const chosenKey = ranked[0];
+  const compared = { ...reference, hybrid: schedules[chosenKey] };
+  const holdout = predictPhase(logs.players, compared, [season], inValidation('holdout'), logs.context);
+  const laterTest = testFrom ? predictPhase(logs.players, compared, [season], (game) => game.season === season && game.date >= testFrom, logs.context) : null;
+  const pick = (phase) => Object.fromEntries(Object.entries(phase.models).map(([key, value]) => [key, { overall: value.overall, byGamesPlayed: value.byGamesPlayed }]));
+  return {
+    evaluationVersion: GAME_EVALUATION_VERSION,
+    design: 'player-holdout within the validation period; not a chronological out-of-sample test',
+    season,
+    before,
+    selection: { model: chosenKey, config: schedules[chosenKey].config, tuneMae: Object.fromEntries(Object.keys(schedules).map((key) => [key, tune.models[key].overall.mae])) },
+    tune: { commonSampleCount: tune.commonSampleCount, models: pick(tune) },
+    holdout: { commonSampleCount: holdout.commonSampleCount, models: pick(holdout) },
+    laterTestReferenceOnly: laterTest ? { testFrom, commonSampleCount: laterTest.commonSampleCount, models: pick(laterTest) } : null,
     accuracyStatus: logs.provenance.synthetic === true ? 'synthetic_only_unvalidated' : 'historical_game_level_not_production_approved',
   };
 }

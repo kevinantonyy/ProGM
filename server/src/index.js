@@ -12,6 +12,8 @@ import diagnosticsRoutes from './routes/diagnostics.js';
 import { createSportsDataRouter } from './routes/sportsData.js';
 import { initDatabase, postgresPool } from './db/connection.js';
 import { PostgresSportsDataStore } from './services/sportsData/postgresStore.js';
+import { configurePredictionRecorder } from './services/predictionTracking/liveRecorder.js';
+import { PostgresPredictionStore } from './services/predictionTracking/stores.js';
 
 dotenv.config();
 
@@ -35,6 +37,9 @@ let sportsDataStore = null;
 app.use('/api/internal/sports-data', createSportsDataRouter({
   getStore: () => (sportsDataStore ||= new PostgresSportsDataStore(postgresPool)),
 }));
+
+// Live prediction tracking (Phase 10 store): off unless PROGM_PREDICTION_TRACKING=true.
+if (process.env.PROGM_PREDICTION_TRACKING === 'true') configurePredictionRecorder(new PostgresPredictionStore(postgresPool));
 
 // Health check
 app.get('/api/health', (req, res) => {

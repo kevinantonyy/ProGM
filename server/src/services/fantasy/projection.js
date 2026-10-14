@@ -34,6 +34,7 @@
  * Confidence is clamped to [0,1]. A player with no stats -> confidence 0 and a
  * null projection (never a fabricated number).
  */
+import { resolveProjectionModel } from './projectionModel.js';
 import { scoreStatLine } from './scoring.js';
 import { emptyStatLine } from '../providers/types.js';
 
@@ -86,24 +87,54 @@ function computeConfidence({ season, recent, recentGameCount, unsupportedCount, 
  * @param {{available:boolean, status:string|null}} [params.availability]
  * @returns {Object} projection result (null projectedPoints when no data)
  */
-export function projectPlayer({ stats, statCategories, availability = null }) {
-  if (!stats) {
-    return {
-      projectedPoints: null,
-      perGame: null,
-      confidence: 0,
-      expected: null,
-      breakdown: [],
-      unsupportedStats: [],
-      availability,
-      method: 'no_data',
-    };
+/**
+ * Recency hybrid (feature-flagged, see projectionModel.js). Uses the per-game
+ * lines already fetched for recent form (stats.recentGames: the player's games
+ * in each team's last completed games, oldest first). An exponentially
+ * weighted recent line is blended into the existing expected line with
+ * weight min(1, games / rampGames); with no last-season line the weighted
+ * recent line is used alone. Stats missing from every game stay as they were.
+ */
+export function applyRecencyHybrid(base, stats, { halfLife, rampGames }) {
+  const games = (stats?.recentGames || []).filter((game) => game?.line)
+    .sort((a, b) => String(a.gameDate || '').localeCompare(String(b.gameDate || '')));
+  if (!games.length) return { expected: base, recencyWeight: 0, windowGames: 0 };
+  const newestFirst = games.slice().reverse();
+  const hasSeason = stats?.season && Object.values(stats.season).some((value) => value != null);
+  const recencyWeight = hasSeason && base ? Math.min(1, games.length / rampGames) : 1;
+  const out = emptyStatLine();
+  for (const key of BLENDED_KEYS) {
+    let sum = 0;
+    let weightSum = 0;
+    newestFirst.forEach((game, age) => {
+      const value = game.line[key];
+      if (value == null) return;
+      const weight = 0.5 ** (age / halfLife);
+      sum += weight * value;
+      weightSum += weight;
+    });
+    const recent = weightSum ? sum / weightSum : null;
+    const prior = base?.[key] ?? null;
+    const value = recent == null ? prior : prior == null ? recent : recencyWeight * recent + (1 - recencyWeight) * prior;
+    out[key] = value == null ? null : Number(value.toFixed(2));
   }
+  out.gamesPlayed = base?.gamesPlayed ?? null;
+  return { expected: out, recencyWeight: Number(recencyWeight.toFixed(3)), windowGames: games.length };
+}
 
-  const expected = blendStatLines(stats.season, stats.recent);
-  if (!expected) {
-    return { projectedPoints: null, perGame: null, confidence: 0, expected: null, breakdown: [], unsupportedStats: [], availability, method: 'no_data' };
+export function projectPlayer({ stats, statCategories, availability = null, model = resolveProjectionModel() }) {
+  const noData = { projectedPoints: null, perGame: null, confidence: 0, expected: null, breakdown: [], unsupportedStats: [], availability, method: 'no_data', modelVersion: model.version, hybrid: null };
+  if (!stats) return noData;
+
+  const base = blendStatLines(stats.season, stats.recent);
+  let expected = base;
+  let hybrid = null;
+  if (model.kind === 'recency_hybrid') {
+    const result = applyRecencyHybrid(base, stats, model);
+    expected = result.expected;
+    hybrid = { recencyWeight: result.recencyWeight, windowGames: result.windowGames, halfLife: model.halfLife, rampGames: model.rampGames };
   }
+  if (!expected) return noData;
 
   const scored = scoreStatLine(expected, statCategories);
   const historical = scoreStatLine(stats.season, statCategories);
@@ -126,6 +157,8 @@ export function projectPlayer({ stats, statCategories, availability = null }) {
     unsupportedStats: scored.unsupportedStats,
     availability,
     method: scored.unsupportedStats.length ? 'incomplete_scoring_data' : stats.recent ? 'blended_recent_season' : 'season_only',
+    modelVersion: model.version,
+    hybrid,
     lastSeasonFantasy: {
       points: historical.unsupportedStats.length ? null : historical.points,
       complete: historical.unsupportedStats.length === 0 && historical.points != null,

@@ -18,6 +18,8 @@
 import * as providers from '../providers/index.js';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
+import { resolveProjectionModel } from './projectionModel.js';
+import { trackProjections } from '../predictionTracking/liveRecorder.js';
 
 /** canonicalId used across the app for a normalized Yahoo player. */
 export function canonicalIdOf(player) {
@@ -243,17 +245,23 @@ export async function buildProjectionContext({ season, players, statCategories, 
   //    availability is attached as projection.history for the draft expected-
   //    games model — it does NOT affect projected points per game itself.
   const projectionByCanonicalId = new Map();
+  // Feature flag (default: existing model). See projectionModel.js.
+  const model = resolveProjectionModel();
+  const trackingEntries = [];
   for (const c of canonical) {
     const base = c.externalId ? statsByExternalId.get(String(c.externalId)) || null : null;
     const reboundSplit = reboundByCanonicalId.get(c.canonicalId) || null;
     let stats = supplementReboundSplits(base, reboundSplit);
-    if (base && c.externalId) {
-      const rec = recentByExternalId[String(c.externalId)];
-      if (rec && rec.recent) {
-        stats = { ...stats, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null };
-      }
+    const rec = c.externalId ? recentByExternalId[String(c.externalId)] : null;
+    if (base && rec && rec.recent) {
+      stats = { ...stats, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null, recentGames: rec.recentGames ?? null };
+    } else if (!base && rec && rec.recent && model.kind === 'recency_hybrid') {
+      // Hybrid only: players with no last-season line (e.g. rookies) are
+      // projected from their recent games instead of having no projection.
+      stats = { season: null, recent: rec.recent, recentGameCount: rec.recentGameCount ?? null, recentGames: rec.recentGames ?? null };
     }
-    const projection = projectPlayer({ stats, statCategories });
+    const projection = projectPlayer({ stats, statCategories, model });
+    if (c.externalId) trackingEntries.push({ externalId: String(c.externalId), projection });
     projection.matchMethod = c.matchMethod;
     projection.matched = c.matched;
     projection.history = (c.externalId && historyByExternalId[String(c.externalId)]) || null;
@@ -268,6 +276,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
+  trackProjections(trackingEntries, { statCategories });
+
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
@@ -280,6 +290,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionByCanonicalId,
     imageByCanonicalId,
     identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
+    projectionModel: model.version,
     freshness,
     providerStatus: providers.providerStatus(),
     // Per-source availability so the UI/report can see what the primary served.

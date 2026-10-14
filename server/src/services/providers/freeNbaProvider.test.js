@@ -218,3 +218,20 @@ test('getRecentForm builds a per-player map from ONE box score per game (stubbed
     global.fetch = originalFetch;
   }
 });
+
+test('getRecentForm keeps dated per-game lines (oldest first) without extra requests', async () => {
+  const sched = { AAA: [
+    { gameId: 'g2', gameDate: '2026-01-03', completed: true },
+    { gameId: 'g1', gameDate: '2026-01-01', completed: true },
+  ] };
+  const calls = [];
+  const fetchBox = async (gameId) => {
+    calls.push(gameId);
+    return [{ externalId: '7', line: { points: gameId === 'g1' ? 10 : 20 } }];
+  };
+  const out = await getRecentForm('2025', { fetchBox, scheduleWithIds: sched });
+  const entry = out.get('7');
+  assert.equal(entry.recentGameCount, 2);
+  assert.deepEqual(entry.recentGames.map((game) => [game.gameDate, game.line.points]), [['2026-01-01', 10], ['2026-01-03', 20]]);
+  assert.deepEqual(calls.sort(), ['g1', 'g2']);
+});
