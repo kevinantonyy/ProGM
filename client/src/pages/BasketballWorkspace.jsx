@@ -4,6 +4,7 @@ import api from '../services/api';
 import BasketballPlayerProfileProvider, { PlayerLink } from '../components/BasketballPlayerProfile';
 import LoadingState from '../components/LoadingState';
 import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../utils/draftPolling';
+import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -323,11 +324,9 @@ function Trades({ data, leagueKey }) {
   );
 }
 
-// A relative-to-available rank must never read as a stable ProGM Rank.
-const overallLabel = (scope) => (scope === 'available_players' ? 'Rank (avail.)' : 'ProGM Rank');
-const overallTitle = (scope) => (scope === 'available_players'
-  ? 'Rank among the players currently available. It can change as players are drafted or added.'
-  : 'ProGM Rank: season value, expected games, positional replacement and scarcity. Same in Rankings and Draft Helper; ignores your roster; stable as other teams draft.');
+// Rank labels live in utils/rankLabels.js (a relative-to-available rank never reads as ProGM Rank).
+const overallLabel = rankLabel;
+const overallTitle = rankTitle;
 
 // --- Tab: Rankings ---
 function Rankings({ data }) {
@@ -342,7 +341,7 @@ function Rankings({ data }) {
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     return (b.projected ?? -1) - (a.projected ?? -1);
   });
-  const cols = [r.players?.some((p) => p.overallRank != null) && ['overall', r.rankScope === 'available_players' ? 'Rank (avail.)' : 'ProGM Rank'], ['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+  const cols = [rankingsRankColumn(r.rankScope, r.players?.some((p) => p.overallRank != null)), ['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -602,7 +601,7 @@ function DraftHelper({ data, leagueKey, active }) {
   const visibleRows = rows.slice(0, visibleCount);
 
   const hasPeriod = data.scheduleAware;
-  const sortBtns = [['progm', db?.rankScope === 'available_players' ? 'Rank (avail.)' : 'ProGM Rank', overallTitle(db?.rankScope)], ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
+  const sortBtns = [...draftSortButtons(db?.rankScope), ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
   const advancedSorts = [['seasonProjected', 'Projected Season Fantasy Points', 'Projected fantasy points/game multiplied by expected regular-season games'], ['projected', 'Projected Fantasy Points/Game', 'Projected per-game production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
 
   return (
