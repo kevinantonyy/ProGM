@@ -49,3 +49,27 @@ Candidates still awaiting verification (not integrated):
 - **BALLDONTLIE.** Its terms appear to allow commercial and ML use, but game stats need a paid plan, which is not allowed under the $0 budget. The saved-response adapter could be extended to emit batches if a free grant is ever obtained.
 
 Cross-provider identity linking (one canonical player across sources) is deliberately deferred. It needs a reviewed mapping table, not name matching.
+
+## Historical game logs (Phase 12B)
+
+- `gameLogAdapter.js`: turns a player game-log export (CSV, or JSON rows in NBA-style lowercase columns or with a `fieldMap`) into one `ingestBatch` batch per season.
+  - The caller must say how the file labels seasons (`seasonLabel: 'end' | 'start'`), and each label is checked against the game dates.
+  - Only regular-season games are kept, by game type or NBA game-id prefix `002`.
+  - Rows with no player name and games with only one team's players are skipped and counted.
+  - Identical duplicate rows collapse; conflicting duplicates fail.
+  - Total rebounds are filled in from offensive + defensive rebounds when missing.
+- `gameLogImport.js`: `importGameLogRows(store, { rows, source, seasonLabel })` registers the source (permission-gated), then ingests season by season. Each season is one atomic, idempotent batch, so re-running only adds or updates what changed. CLI: `node src/services/sportsData/gameLogImport.js --data logs.csv --source source.json --season-label end`, then `--evaluate --source-key <key> --scoring scoring.json`. Parquet files must be converted to CSV first (for example with the DuckDB CLI); no Parquet dependency is added.
+- `gameLogEvaluation.js`: game-level fantasy-point evaluation of stored logs.
+  - Each game is predicted only from the player's games on earlier dates; same-day games are not visible.
+  - Seasons are split chronologically. Train seasons only supply history, the recency-blend settings are chosen on validation seasons, and test seasons are scored once.
+  - The baseline is the player's previous-season mean, as in the production preseason projection.
+  - Models are compared on identical games, with MAE, RMSE and bias overall and per season.
+  - It refuses sources without the `modelTraining` permission.
+- Team records are per source, not per season, so the latest ingested abbreviation wins.
+
+Source status (2026-10-14): no source of historical NBA game logs has verified permission for storage and commercial ML use. Nothing real has been imported.
+- `llimllib/nba_data` has no licence and republishes stats.nba.com, ESPN and basketball-reference data.
+- Brescou is season-level only and NBA.com-derived.
+- NBA.com's terms reserve its basketball content, statistics included, against reproduction or reuse without written permission.
+
+The registry refuses all three without a `writtenPermissionUrl`. Keeping the database private does not remove those upstream restrictions.

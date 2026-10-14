@@ -17,6 +17,7 @@ const PROHIBITED_WITHOUT_WRITTEN_PERMISSION = Object.freeze([
   { pattern: /(^|[./\s])nba\.com|stats\.nba\.com|cdn\.nba\.com|nba_api/i, reason: 'NBA.com terms have not been verified to permit commercial reuse' },
   { pattern: /espn/i, reason: 'ESPN terms have not been verified to permit commercial reuse' },
   { pattern: /yahoo/i, reason: 'Yahoo Fantasy API terms restrict storage and separating underlying data' },
+  { pattern: /llimllib|billmill|nba_data/i, reason: 'llimllib/nba_data has no licence and republishes stats.nba.com, ESPN and basketball-reference data' },
 ]);
 
 const DESCRIPTIVE_FIELDS = ['sourceKey', 'name', 'provider', 'licenseUrl', 'sourceUrl'];
