@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importHistoricalDataset } from './importer.js';
-import { runWalkForwardBacktest } from './runner.js';
+import { createDevelopmentCandidate } from './developmentModel.js';
+import { lastSeasonStatLineBaseline, runWalkForwardBacktest } from './runner.js';
 
 function argument(name) {
   const index = process.argv.indexOf(name);
@@ -22,11 +23,21 @@ export function runCli() {
   const data = loadJson(dataPath);
   const scoring = loadJson(scoringPath);
   const imported = importHistoricalDataset({ rows: data.snapshots || data.rows, provenance: data.provenance });
-  const report = runWalkForwardBacktest({
-    snapshots: imported.snapshots,
-    statCategories: scoring.statCategories || scoring,
-  });
-  process.stdout.write(`${JSON.stringify({ import: imported.diagnostics, report }, null, 2)}\n`);
+  const statCategories = scoring.statCategories || scoring;
+  const requestedModel = argument('--model') || 'both';
+  if (!['baseline', 'candidate', 'both'].includes(requestedModel)) throw new Error('--model must be baseline, candidate, or both.');
+  const reports = {};
+  if (requestedModel !== 'candidate') {
+    reports.baseline = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: lastSeasonStatLineBaseline });
+  }
+  if (requestedModel !== 'baseline') {
+    reports.candidate = runWalkForwardBacktest({ snapshots: imported.snapshots, statCategories, predictor: createDevelopmentCandidate() });
+  }
+  process.stdout.write(`${JSON.stringify({
+    import: imported.diagnostics,
+    accuracyStatus: imported.provenance.synthetic ? 'synthetic_only_unvalidated' : 'historical_backtest_not_production_approved',
+    reports,
+  }, null, 2)}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

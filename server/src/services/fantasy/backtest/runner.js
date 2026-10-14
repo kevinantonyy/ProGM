@@ -47,7 +47,11 @@ function summarize(records) {
   }
   return {
     sampleCount: records.length,
-    nbaStats: { perGame: perGameByStat, seasonTotal: seasonTotalByStat },
+    nbaStats: {
+      minutesPerGame: regressionMetrics(records.map((row) => [row.predictedStatLine.minutes, row.actualStatLine.minutes])),
+      perGame: perGameByStat,
+      seasonTotal: seasonTotalByStat,
+    },
     fantasy: {
       perGame: regressionMetrics(records.map((row) => [row.predictedFppg, row.actualFppg])),
       seasonTotal: regressionMetrics(records.map((row) => [row.predictedFantasyTotal, row.actualFantasyTotal])),
@@ -68,12 +72,17 @@ export function runWalkForwardBacktest({ snapshots, statCategories, predictor = 
   const selectedSeasons = targetSeasons == null ? allSeasons.slice(1) : [...new Set(targetSeasons.map(Number))].sort((a, b) => a - b);
   const records = [];
   const seasonReports = [];
+  const foldModels = [];
   let targetCount = 0;
   let scoringCompleteTargets = 0;
 
   for (const targetSeason of selectedSeasons) {
     const training = ordered.filter((row) => row.season < targetSeason);
     const targets = ordered.filter((row) => row.season === targetSeason);
+    const foldPredictor = predictor && typeof predictor.fit === 'function'
+      ? predictor.fit({ training, targetSeason, statCategories })
+      : predictor;
+    if (foldPredictor?.diagnostics) foldModels.push(foldPredictor.diagnostics);
     targetCount += targets.length;
     const seasonRecords = [];
     for (const target of targets) {
@@ -81,7 +90,7 @@ export function runWalkForwardBacktest({ snapshots, statCategories, predictor = 
       const actualFppg = strictScore(actualStatLine, statCategories);
       if (actualFppg != null) scoringCompleteTargets += 1;
       const history = training.filter((row) => row.player.id === target.player.id).sort((a, b) => b.season - a.season);
-      const prediction = predictor({
+      const prediction = foldPredictor({
         targetSeason,
         player: { ...target.player },
         history,
@@ -150,5 +159,6 @@ export function runWalkForwardBacktest({ snapshots, statCategories, predictor = 
       bySeason: seasonReports,
     },
     cohorts,
+    foldModels,
   };
 }

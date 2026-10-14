@@ -21,6 +21,7 @@ function normalizeProvenance(raw) {
     permission,
     acquiredAt,
     authorized: true,
+    synthetic: raw?.synthetic === true,
   };
 }
 
