@@ -5,6 +5,7 @@ import BasketballPlayerProfileProvider, { PlayerLink } from '../components/Baske
 import LoadingState from '../components/LoadingState';
 import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../utils/draftPolling';
 import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
+import { resolveDraftPhase } from '../utils/draftStatus';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -377,7 +378,7 @@ function Rankings({ data }) {
 // - Reconnect-safe: the server de-dupes picks by player_key, and we drive
 //   detection off the known pick count so refresh never double-counts.
 function useLiveDraft({ leagueKey, teamKey, active }) {
-  const [sync, setSync] = useState({ status: 'idle', draftState: null, picks: [], myRoster: [], recommendations: null, newPicks: [], error: null, lastSyncAt: null, totalPicks: 0, stale: false });
+  const [sync, setSync] = useState({ status: 'idle', draftState: null, yahooDraftStatus: null, picks: [], myRoster: [], recommendations: null, newPicks: [], error: null, lastSyncAt: null, totalPicks: 0, stale: false });
 
   useEffect(() => {
     if (!active || !leagueKey) return undefined;
@@ -418,6 +419,7 @@ function useLiveDraft({ leagueKey, teamKey, active }) {
         setSync({
           status: d.draftState === 'complete' ? 'complete' : d.draftState === 'live' ? 'live' : 'waiting',
           draftState: d.draftState,
+          yahooDraftStatus: d.yahooDraftStatus ?? null,
           picks: d.picks || [],
           myRoster: d.myRoster || [],
           recommendations: d.recommendations || null,
@@ -558,8 +560,27 @@ function DraftPlayerRow({ player, availabilityKnown }) {
 }
 
 // --- Tab: Draft Helper (research tool + LIVE Yahoo draft sync) ---
+function DraftCompleted({ leagueName, onOpenRoster }) {
+  return (
+    <section className="card mx-auto max-w-2xl py-10 text-center" aria-labelledby="draft-complete-title">
+      <p className="text-5xl" aria-hidden="true">🏀</p>
+      <h2 id="draft-complete-title" className="mt-4 font-display text-3xl font-black">Your League Has Finished Drafting!</h2>
+      <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-dark-300">
+        {leagueName ? `${leagueName} has completed its draft` : 'Your league has completed its draft'}, so the Draft Helper is retired for this season.
+        Head to your team to set your lineup, then use Waivers, Trades and Start / Sit to improve your roster.
+      </p>
+      <button type="button" onClick={onOpenRoster} className="btn-primary mt-6">View My Roster</button>
+    </section>
+  );
+}
+
 function DraftHelper({ data, leagueKey, active }) {
-  const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active });
+  const navigate = useNavigate();
+  // Official completion comes only from Yahoo's draft_status (see utils/draftStatus.js);
+  // when it is already known to be complete we do not start the live sync at all.
+  const workspacePhase = resolveDraftPhase({ yahooDraftStatus: data.connection?.draftStatus });
+  const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active: active && workspacePhase !== 'completed' });
+  const draftPhase = live.yahooDraftStatus ? resolveDraftPhase({ yahooDraftStatus: live.yahooDraftStatus }) : workspacePhase;
   const isLive = live.draftState === 'live' || live.draftState === 'complete';
   // When a live draft is active, the recommendations come from the live sync
   // (undrafted pool, recomputed after each pick). Otherwise fall back to the
@@ -572,6 +593,8 @@ function DraftHelper({ data, leagueKey, active }) {
   const [sortBy, setSortBy] = useState('progm');
   const [visibleCount, setVisibleCount] = useState(50);
   useEffect(() => setVisibleCount(50), [leagueKey, q, pos, avail, sortBy, isLive]);
+
+  if (draftPhase === 'completed') return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} />;
 
   const liveBanner = <LiveDraftBanner live={live} />;
 
