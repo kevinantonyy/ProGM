@@ -46,11 +46,13 @@ export const RANK_COMPARE_THRESHOLDS = Object.freeze({
  * @param {Object} params
  * @param {number|null} params.progmRank    ProGM Best-Available overall rank (1-based)
  * @param {number|null} params.yahooAdp     Yahoo average pick (ADP), or null
+ * @param {number|null} [params.actionRank]  roster-aware board position used ONLY to gate DRAFT NOW/WAIT
+ *                                          (defaults to progmRank). VALUE/REACH always use progmRank.
  * @param {number|null} [params.currentPick] current overall draft pick (live), or null
  * @param {number|null} [params.nextPick]    user's next projected overall pick, or null
  * @returns {{ adpVsProgm:number|null, label:string, reason:string }}
  */
-export function computeMarketContext({ progmRank, yahooAdp, currentPick = null, nextPick = null }) {
+export function computeMarketContext({ progmRank, yahooAdp, actionRank = null, currentPick = null, nextPick = null }) {
   // Insufficient data -> neutral (never fabricated).
   if (progmRank == null || yahooAdp == null) {
     return { adpVsProgm: null, label: 'neutral', reason: 'Insufficient ProGM rank or Yahoo ADP data.' };
@@ -64,7 +66,9 @@ export function computeMarketContext({ progmRank, yahooAdp, currentPick = null, 
 
   // DRAFT NOW / WAIT require a reliably known next pick; otherwise omit them.
   if (nextPick != null) {
-    const strongValue = adpVsProgm >= STRONG_VALUE_GAP;
+    // Actionable advice uses the roster-aware board position (falls back to ProGM Rank).
+    const actionGap = Number((yahooAdp - (actionRank ?? progmRank)).toFixed(1));
+    const strongValue = actionGap >= STRONG_VALUE_GAP;
     // "Won't survive" => ADP lands before the user's next pick (minus margin).
     const unlikelyToSurvive = yahooAdp <= (nextPick - SURVIVE_MARGIN);
     const likelyToSurvive = yahooAdp >= nextPick;
@@ -76,7 +80,7 @@ export function computeMarketContext({ progmRank, yahooAdp, currentPick = null, 
         reason: `Strong ProGM value (ADP ${yahooAdp} vs ProGM #${progmRank}) and likely gone before your next pick (#${nextPick}).`,
       };
     }
-    if (isValue && likelyToSurvive) {
+    if (actionGap >= VALUE_GAP && likelyToSurvive) {
       return {
         adpVsProgm,
         label: 'WAIT',

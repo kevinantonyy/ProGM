@@ -96,3 +96,19 @@ test('rank-compare thresholds are documented constants', () => {
   assert.equal(RANK_COMPARE_THRESHOLDS.CLOSE_GAP, 5);
   assert.equal(RANK_COMPARE_THRESHOLDS.LARGE_GAP, 15);
 });
+
+test('DRAFT NOW / WAIT use the roster-aware actionRank; VALUE and rank comparison keep ProGM Rank', () => {
+  // ProGM Rank 20, ADP 30, next pick 40: gap 10 -> plain VALUE-level gap at ProGM Rank.
+  const base = { progmRank: 20, yahooAdp: 30, nextPick: 45 };
+  assert.equal(computeMarketContext(base).label, 'VALUE'); // no roster context => unchanged behaviour
+  // Roster need lifts him to board position 10: gap 20 >= strong gap and ADP will not survive -> DRAFT NOW.
+  const need = computeMarketContext({ ...base, actionRank: 10, nextPick: 40 });
+  assert.equal(need.label, 'DRAFT NOW');
+  assert.equal(need.adpVsProgm, 10); // displayed gap still vs ProGM Rank
+  // Roster surplus pushes him down to board position 35: no longer a value, so no DRAFT NOW.
+  const surplus = computeMarketContext({ ...base, actionRank: 35, nextPick: 40 });
+  assert.notEqual(surplus.label, 'DRAFT NOW');
+  assert.notEqual(surplus.label, 'WAIT');
+  // Omitting actionRank equals passing the ProGM Rank.
+  assert.deepEqual(computeMarketContext({ ...base, nextPick: 40 }), computeMarketContext({ ...base, actionRank: 20, nextPick: 40 }));
+});

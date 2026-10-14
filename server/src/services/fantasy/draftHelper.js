@@ -531,7 +531,8 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     // Market context compares ProGM rank (this board position) vs Yahoo ADP.
     // DRAFT NOW/WAIT only when a reliable nextPick was supplied.
     const market = computeMarketContext({
-      progmRank: overallRank,
+      progmRank: overallRank, // VALUE/REACH use the single ProGM Rank
+      actionRank: draftPriority, // DRAFT NOW/WAIT keep roster-aware board position
       yahooAdp: p.yahooAdp,
       currentPick,
       nextPick,

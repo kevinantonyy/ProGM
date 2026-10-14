@@ -195,3 +195,21 @@ test('recommendations, market labels and rank gaps use the displayed ProGM Rank,
   const stripped = live.board.map((r) => r.overallRank);
   assert.deepEqual([...stripped].sort((a, b) => a - b), [...new Set(stripped)].sort((a, b) => a - b));
 });
+
+test('board: DRAFT NOW/WAIT follow roster-aware draft priority while ProGM Rank stays fixed', () => {
+  const withAdp = (adp) => players().map((p) => ({ ...p, yahooAdp: adp[p.playerKey] ?? null }));
+  const adp = { G1: 1, G2: 2, G3: 14, G4: 20, C1: 3, C2: 12, C3: 22, C4: 30 };
+  const run = (rosterAnalysis) => buildDraftBoard({ players: withAdp(adp), settings: SETTINGS, projectionProvider: provider(), rosterAnalysis, availabilityOf: () => true, currentPick: 1, nextPick: 12 });
+  const empty = run(analysis(0));
+  const needC = run(analysis(3, ['C']));
+  const needPg = run(analysis(3, ['PG']));
+  // ProGM Rank and the market VALUE gap (adpVsProgm) never depend on the roster.
+  assert.deepEqual(ranks(needC), ranks(empty));
+  assert.deepEqual(needC.board.map((r) => [r.playerKey, r.adpVsProgm]).sort(), empty.board.map((r) => [r.playerKey, r.adpVsProgm]).sort());
+  // Actionable labels respond to roster context: C2 is priority #4 when C is thin, #5 when PG is.
+  const c2 = (b) => b.board.find((r) => r.playerKey === 'C2');
+  assert.equal(c2(needC).overallRank, c2(needPg).overallRank);
+  assert.equal(c2(needC).adpVsProgm, c2(needPg).adpVsProgm);
+  assert.equal(c2(needC).marketLabel, 'WAIT');
+  assert.notEqual(c2(needPg).marketLabel, 'WAIT');
+});
