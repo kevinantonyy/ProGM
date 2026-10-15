@@ -19,6 +19,7 @@ import * as providers from '../providers/index.js';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
 import { applyMarketPriors } from './marketPrior.js';
+import { classifyUnprojected, lastSeasonCutoff, yahooPlayerNumber } from './unprojectedClass.js';
 
 /** canonicalId used across the app for a normalized Yahoo player. */
 export function canonicalIdOf(player) {
@@ -276,8 +277,15 @@ export async function buildProjectionContext({ season, players, statCategories, 
   let estimateCount = 0;
   if (rookieEstimates) {
     const withEstimates = new Map(projectionByCanonicalId);
-    estimateCount = applyMarketPriors({ canonical, players, projectionByCanonicalId: withEstimates, canonicalIdOf, seasonYear }).estimateCount;
+    const numberById = new Map(players.map((p) => [canonicalIdOf(p), yahooPlayerNumber(p)]));
+    const cutoff = lastSeasonCutoff([...projectionByCanonicalId].map(([id, proj]) => ({ playerNumber: numberById.get(id), hasRealStats: proj?.projectedPoints != null && !proj.estimate })));
+    const result = applyMarketPriors({
+      canonical, players, projectionByCanonicalId: withEstimates, canonicalIdOf, seasonYear,
+      classify: (c, p) => classifyUnprojected({ playerNumber: yahooPlayerNumber(p), cutoff, matched: c.matched, status: p?.status ?? null }),
+    });
+    estimateCount = result.estimateCount;
     for (const [id, proj] of withEstimates) if (proj?.estimate === true) estimateByCanonicalId.set(id, proj);
+    for (const [id, proj] of result.skipped) estimateByCanonicalId.set(id, proj); // annotated "no projection" entries (reason only)
   }
 
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });

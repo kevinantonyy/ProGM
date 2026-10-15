@@ -5,9 +5,15 @@ import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { RANKING_MODELS, normalizeRankingModel, rankingProfile, resolveRankingModel, resolveRookieEstimates } from './rankingModel.js';
 import { withEstimates, canonicalIdOf } from './insights.js';
+import { classifyUnprojected } from './unprojectedClass.js';
 import { makeProjectionProvider, projectPlayer } from './projection.js';
 import { applyMarketPriors } from './marketPrior.js';
 import { emptyStatLine } from '../providers/types.js';
+
+// Test glue: veterans get low Yahoo numbers, incoming players high ones, then the REAL classifier decides.
+const numberOfKey = (p) => (/^R/.test(p.playerKey) || /^nba\.p\.9/.test(p.playerKey) || /^X/.test(p.playerKey) ? 5000 : 10);
+const classify = (c, p) => classifyUnprojected({ playerNumber: numberOfKey(p), cutoff: 100, matched: c.matched, status: p.status ?? null });
+
 
 // Synthetic players only.
 const SETTINGS = { teamCount: 2, rosterSlots: [{ position: 'PG', count: 1, isStarting: true }, { position: 'C', count: 1, isStarting: true }, { position: 'BN', count: 3, isStarting: false }] };
@@ -134,7 +140,7 @@ test('estimates are isolated: stats-only consumers never see them, draft views d
   const roster = [...vets.map((v) => player(v.key, 'PG', { yahooAdp: v.adp })), player('R1', 'PG', { yahooAdp: 20 })];
   const map = new Map(vets.map((v) => [v.key, statProj(v)])); map.set('R1', { projectedPoints: null, method: 'no_data' });
   const canonical = roster.map((p) => ({ canonicalId: p.playerKey, matched: map.get(p.playerKey).projectedPoints != null, matchMethod: null }));
-  const withEst = new Map(map); applyMarketPriors({ canonical, players: roster, projectionByCanonicalId: withEst, canonicalIdOf, seasonYear: 2026 });
+  const withEst = new Map(map); applyMarketPriors({ canonical, players: roster, projectionByCanonicalId: withEst, canonicalIdOf, seasonYear: 2026, classify });
   const estimates = new Map([...withEst].filter(([, p]) => p.estimate === true));
   assert.equal(map.get('R1').projectedPoints, null, 'stats map untouched');
   const base = makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf });
@@ -153,7 +159,7 @@ test('the Draft Helper board and Rankings flag exactly the same estimated player
   const roster = [...vets.map((v) => player(v.key, v.adp % 2 ? 'PG' : 'C', { yahooAdp: v.adp, yahooOverallRank: v.adp + 1 })), player('R1', 'PG', { yahooAdp: 14, yahooOverallRank: 15 }), player('R2', 'C', { yahooAdp: 50, yahooOverallRank: 55 })];
   const map = new Map(vets.map((v) => [v.key, statProj(v)])); for (const k of ['R1', 'R2']) map.set(k, { projectedPoints: null, method: 'no_data' });
   const canonical = roster.map((p) => ({ canonicalId: p.playerKey, matched: map.get(p.playerKey).projectedPoints != null, matchMethod: null }));
-  const withEst = new Map(map); applyMarketPriors({ canonical, players: roster, projectionByCanonicalId: withEst, canonicalIdOf, seasonYear: 2026 });
+  const withEst = new Map(map); applyMarketPriors({ canonical, players: roster, projectionByCanonicalId: withEst, canonicalIdOf, seasonYear: 2026, classify });
   const prov = withEstimates(makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf }), new Map([...withEst].filter(([, p]) => p.estimate === true)));
   const draft = buildDraftBoard({ players: roster, settings: SETTINGS, projectionProvider: prov, currentSeason: 2026, availabilityOf: () => true, currentPick: 1, nextPick: 30, rankingModel: 'v2', rookieEstimates: true });
   const overallRanks = new Map(draft.board.map((r) => [r.playerKey, r.overallRank]));

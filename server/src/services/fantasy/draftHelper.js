@@ -267,6 +267,7 @@ export function describePriorityDifference({ personalized, poolPosition, draftPr
 
 /** Plain-language reason a player could not be ranked (never silently dropped). */
 export function explainNoData(proj, player, { rookieEstimates = false } = {}) {
+  if (proj?.unprojectedReason) return `No NBA stat line for the projection season. ${proj.unprojectedReason}`;
   if (!proj || proj.method === 'no_data') {
     const base = 'No NBA stat line for the projection season (e.g. an incoming rookie or a player who missed last season). ProGM has no draft position or historical data for such players, so it cannot project them from statistics.';
     if (!rookieEstimates) return `${base} Market-based rookie estimates are turned off.`;
@@ -437,6 +438,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
       estimate: proj?.estimate === true,
       estimateBasis: proj?.estimate === true ? (proj.estimateBasis ?? null) : null,
       identityMatch: proj?.matchMethod ?? null,
+      unprojectedClass: proj?.unprojectedClass ?? null,
       // Availability is priced once, via expected games (no second injury penalty).
       draftConfidence: proj?.confidence == null ? null : Math.min(1, proj.confidence + (proj.confidenceGamesPlayedShortfall ?? 0)),
       injury: proj?.injury ?? null,

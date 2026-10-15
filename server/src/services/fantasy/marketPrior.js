@@ -99,7 +99,11 @@ export function marketPriorProjection(model, adp, { debutYear = null, targetSeas
  * canonical players that have no projection. Returns { estimateCount, model }.
  * Players with a real projection, or with a scoring-support gap, are untouched.
  */
-export function applyMarketPriors({ canonical, players, projectionByCanonicalId, canonicalIdOf, seasonYear }) {
+export function applyMarketPriors({ canonical, players, projectionByCanonicalId, canonicalIdOf, seasonYear, classify = null }) {
+  // `classify(canonicalEntry, yahooPlayer) -> { class, reason }` decides who may be estimated. Without it NOBODY is
+  // estimated: a missing projection alone never makes someone a rookie.
+  const playerById = new Map((players || []).map((p) => [canonicalIdOf(p), p]));
+  const skipped = new Map();
   const adpByCanonicalId = new Map((players || []).map((p) => [canonicalIdOf(p), Number(p.yahooAdp)]));
   const calibration = [];
   for (const [id, proj] of projectionByCanonicalId) {
@@ -109,17 +113,23 @@ export function applyMarketPriors({ canonical, players, projectionByCanonicalId,
   }
   const model = fitMarketPrior(calibration);
   let estimateCount = 0;
-  if (!model) return { estimateCount, model: null };
   for (const c of canonical || []) {
     const existing = projectionByCanonicalId.get(c.canonicalId);
     if (existing?.projectedPoints != null) continue;
     if (existing?.method === 'incomplete_scoring_data') continue; // scoring gap, not a stats gap
+    const verdict = classify ? classify(c, playerById.get(c.canonicalId)) : { class: 'unknown', reason: 'No classifier supplied.' };
+    if (verdict.class !== 'rookie_or_new_entrant') {
+      skipped.set(c.canonicalId, { ...(existing || { projectedPoints: null, method: 'no_data' }), unprojectedClass: verdict.class, unprojectedReason: verdict.reason });
+      continue;
+    }
+    if (!model) { skipped.set(c.canonicalId, { ...(existing || { projectedPoints: null, method: 'no_data' }), unprojectedClass: verdict.class, unprojectedReason: 'Rookie candidate, but no reliable ADP calibration is available.' }); continue; }
     const estimate = marketPriorProjection(model, adpByCanonicalId.get(c.canonicalId), { debutYear: null, targetSeason: Number.isInteger(seasonYear) ? seasonYear : null });
     if (!estimate) continue;
     estimate.matchMethod = c.matchMethod ?? null;
     estimate.matched = Boolean(c.matched);
+    estimate.unprojectedClass = verdict.class;
     projectionByCanonicalId.set(c.canonicalId, estimate);
     estimateCount += 1;
   }
-  return { estimateCount, model };
+  return { estimateCount, model, skipped };
 }

@@ -8,6 +8,7 @@
  */
 import { compareRankingModels } from './rankingCompare.js';
 import { fitMarketPrior, marketPriorPerGame, MIN_CALIBRATION_GAMES, MIN_POINTS } from './marketPrior.js';
+import { classifyUnprojected, lastSeasonCutoff, yahooPlayerNumber } from './unprojectedClass.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const COMPONENT_KEYS = ['production', 'replacement', 'vorp', 'scarcity', 'perGame', 'expectedGames', 'seasonPoints', 'confidence', 'confidenceFactor'];
@@ -29,7 +30,7 @@ export function sanitizeWorkspace(raw, { trace = [] } = {}) {
       rosterSlots: (raw.settings.rosterSlots || []).map((c) => ({ position: String(c.position ?? ''), count: num(c.count), isStarting: c.isStarting === true })),
     } : null,
     board: board.map((r) => ({
-      name: String(r.name ?? ''), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
+      name: String(r.name ?? ''), yahooPlayerNumber: yahooPlayerNumber(r), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
       overallRank: num(r.overallRank), draftPriority: num(r.draftPriority), yahooAdp: num(r.yahooAdp),
       lastSeasonGamesPlayed: num(r.lastSeasonNba?.gamesPlayed), estimate: r.estimate === true,
       projectionMethod: typeof r.projectionMethod === 'string' ? r.projectionMethod : null, marketLabel: typeof r.marketLabel === 'string' ? r.marketLabel : null,
@@ -37,7 +38,7 @@ export function sanitizeWorkspace(raw, { trace = [] } = {}) {
       ...(traced.has(String(r.name ?? '').toLowerCase()) ? { trace: traceRow(r) } : {}),
     })),
     noData: (Array.isArray(raw.draftBoard.noData) ? raw.draftBoard.noData : []).map((r) => ({
-      name: String(r.name ?? ''), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
+      name: String(r.name ?? ''), yahooPlayerNumber: yahooPlayerNumber(r), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
       yahooAdp: num(r.yahooAdp), noDataReason: typeof r.noDataReason === 'string' ? r.noDataReason : null,
       injuryStatus: typeof r.status === 'string' ? r.status : null, priorSeasonRanks: Array.isArray(r.yahooPriorSeasonRanks) ? r.yahooPriorSeasonRanks.length : 0,
       lastSeasonYahooRank: num(r.lastSeasonYahooRank), identityMatch: typeof r.identityMatch === 'string' ? r.identityMatch : null,
@@ -102,31 +103,59 @@ export function analyzeSnapshot(clean, { highlight = ['Cade Cunningham', 'Bam Ad
     calibration: model ? { players: model.n, r2: model.r2, slope: Number(model.slope.toFixed(2)), adpRange: [model.minAdp, model.maxAdp], minRequired: MIN_POINTS } : { players: calibration.length, usable: false },
     players: candidates.filter((c) => c.status === 'would_be_estimated').slice(0, 25),
   };
-  // Unprojected players by what the data can actually distinguish (diagnostic only; nothing here changes a ranking).
-  const classOf = (r) => {
-    if (r.noDataReason && /league scoring/i.test(r.noDataReason)) return 'scoring_gap';
-    if (r.priorSeasonRanks > 0 || r.lastSeasonYahooRank != null) return 'veteran_missing_stats'; // has a Yahoo rank from an earlier season
-    if (r.injuryStatus) return 'injured_no_history';
-    return 'rookie_or_new_candidate';
-  };
+  // Unprojected players: classified with the SAME function production uses for estimate eligibility.
+  // Cutoff = highest Yahoo player number among players that have a real stat-based projection (every board row).
+  const cutoff = lastSeasonCutoff(clean.board.map((r) => ({ playerNumber: r.yahooPlayerNumber, hasRealStats: !r.estimate && r.components.perGame != null })));
   const byClass = {};
-  for (const r of clean.noData) { const k = classOf(r); (byClass[k] ||= { total: 0, withAdp: 0, namesWithAdp: [] }); byClass[k].total += 1; if (r.yahooAdp != null) { byClass[k].withAdp += 1; byClass[k].namesWithAdp.push(`${r.name} (ADP ${r.yahooAdp}${r.injuryStatus ? ', ' + r.injuryStatus : ''}, identity ${r.identityMatch ?? 'unmatched'})`); } }
+  for (const r of clean.noData) {
+    const verdict = classifyUnprojected({
+      playerNumber: r.yahooPlayerNumber, cutoff, matched: false, status: r.injuryStatus,
+      scoringGap: /league scoring/i.test(r.noDataReason || ''),
+    });
+    const k = verdict.class; (byClass[k] ||= { total: 0, withAdp: 0, namesWithAdp: [] }); byClass[k].total += 1;
+    if (r.yahooAdp != null) { byClass[k].withAdp += 1; byClass[k].namesWithAdp.push({ name: r.name, adp: r.yahooAdp, yahooPlayerNumber: r.yahooPlayerNumber, status: r.injuryStatus, priorSeasonRankCount: r.priorSeasonRanks }); }
+  }
   coverage.unprojectedByClass = byClass;
+  coverage.classification = {
+    cutoffPlayerNumber: cutoff, rule: 'incoming player = Yahoo player number above every player with a real last-season stat line, no status flag',
+    note: 'Prior-season Yahoo ranks are shown for information only; they are NOT used (they were present for incoming rookies).',
+    wouldReceiveEstimate: (byClass.rookie_or_new_entrant?.namesWithAdp || []).filter((n) => candidates.some((c) => c.name === n.name && c.status === 'would_be_estimated')).map((n) => n.name),
+  };
 
-  // Replacement baselines recovered from published components: baseline = seasonPoints - vorp; spread = vorp / replacement.
-  const singles = {};
+  // Replacement baselines. The payload does not publish them, but every row implies its own exactly:
+  //   baseline = seasonPoints - vorp,   and the row's baseline is the LOWEST baseline among its eligible positions.
+  // Positions are therefore only reported when the rows pin them down; otherwise they are explicitly unavailable.
+  const byBaseline = new Map();
   const spreads = [];
   for (const r of clean.board) {
     const c = r.components; if (c.seasonPoints == null || c.vorp == null) continue;
-    const pos = r.eligiblePositions.filter((p) => p !== 'UTIL');
-    if (pos.length === 1) (singles[pos[0]] ||= []).push(c.seasonPoints - c.vorp);
+    const key = Math.round(c.seasonPoints - c.vorp);
+    const positions = r.eligiblePositions.filter((p) => p !== 'UTIL');
+    const g = byBaseline.get(key) || { baseline: key, rows: 0, common: null };
+    g.rows += 1; g.common = g.common == null ? new Set(positions) : new Set([...g.common].filter((p) => positions.includes(p)));
+    byBaseline.set(key, g);
     if (c.replacement != null && c.replacement > 0.02 && c.replacement < 0.98 && c.vorp > 0) spreads.push(c.vorp / c.replacement);
   }
-  const baselines = Object.fromEntries(Object.entries(singles).map(([k, v]) => [k, Math.round(median(v))]));
+  const groups = [...byBaseline.values()].filter((g) => g.rows >= 3).sort((x, y) => y.rows - x.rows).slice(0, 8)
+    .map((g) => ({ baselineSeasonPoints: g.baseline, players: g.rows, positionsCommonToAllThesePlayers: [...g.common] }));
+  const resolved = Object.fromEntries(groups.filter((g) => g.positionsCommonToAllThesePlayers.length === 1).map((g) => [g.positionsCommonToAllThesePlayers[0], g.baselineSeasonPoints]));
   const spread = median(spreads);
   const poolMax = median(clean.board.filter((r) => r.components.production > 0.2).map((r) => r.components.seasonPoints / r.components.production));
-  const poolDiag = { replacementBaselineByPosition: baselines, spread: spread == null ? null : Math.round(spread), poolMaxSeasonPoints: poolMax == null ? null : Math.round(poolMax) };
+  const poolDiag = {
+    replacementBaselineByPosition: resolved,
+    replacementBaselineByPositionNote: Object.keys(resolved).length ? 'inferred: the only position shared by every player with that baseline (not published by the payload)' : 'unavailable: eligible-position lists overlap (e.g. PG also lists G), so rows do not isolate a single position',
+    distinctReplacementBaselines: groups,
+    spread: spread == null ? null : Math.round(spread), poolMaxSeasonPoints: poolMax == null ? null : Math.round(poolMax),
+  };
 
-  const traces = clean.board.filter((r) => r.trace).map((r) => ({ name: r.name, eligiblePositions: r.eligiblePositions, components: r.components, ...r.trace }));
+  const traces = clean.board.filter((r) => r.trace).map((r) => {
+    const c = r.components; const last = r.trace?.lastSeasonFantasy?.points;
+    // Production payloads from before this branch carry no projectionMethod. If per-game equals the last-season score
+    // (same weights, no recent-form blend) the projection is season-only; otherwise recent form was blended in.
+    const derived = last == null || c.perGame == null ? 'unavailable' : (Math.abs(c.perGame - last) < 0.011 ? 'season_only (derived)' : 'blended_recent_season (derived)');
+    return { name: r.name, eligiblePositions: r.eligiblePositions, components: r.components, ...r.trace,
+      projectionMethod: r.trace?.projectionMethod ?? derived, projectionMethodSource: r.trace?.projectionMethod ? 'payload' : 'derived from perGame vs last-season fantasy points',
+      replacementBaselineSeasonPoints: c.seasonPoints != null && c.vorp != null ? Math.round(c.seasonPoints - c.vorp) : null };
+  });
   return { snapshot: clean.meta, league: clean.league, comparison: cmp, rankingsVsDraftHelper: parity, rookieEstimateCoverage: coverage, pool: poolDiag, traces };
 }

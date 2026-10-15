@@ -5,6 +5,12 @@ import { buildDraftBoard } from './draftHelper.js';
 import { buildRankings } from './rankings.js';
 import { makeProjectionProvider } from './projection.js';
 import { canonicalIdOf } from './insights.js';
+import { classifyUnprojected } from './unprojectedClass.js';
+
+// Test glue: veterans get low Yahoo numbers, incoming players high ones, then the REAL classifier decides.
+const numberOfKey = (p) => (/^R/.test(p.playerKey) || /^nba\.p\.9/.test(p.playerKey) || /^X/.test(p.playerKey) ? 5000 : 10);
+const classify = (c, p) => classifyUnprojected({ playerNumber: numberOfKey(p), cutoff: 100, matched: c.matched, status: p.status ?? null });
+
 
 // Synthetic only. Veterans: ADP k -> perGame 60 - 8*ln(k) plus a small deterministic wobble.
 const vets = Array.from({ length: 80 }, (_, i) => {
@@ -48,7 +54,7 @@ test('rookie coverage: players with no stats but an ADP receive a labelled estim
   const far = yahooPlayer('R3', 400);
   const { players, map, canonical } = setup([rookie, noAdp, far]);
   const before = new Map([...map].filter(([k]) => k.startsWith('V')).map(([k, v]) => [k, v.projectedPoints]));
-  const { estimateCount } = applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 });
+  const { estimateCount } = applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
   assert.equal(estimateCount, 1);
   assert.equal(map.get('R1').estimate, true);
   assert.ok(map.get('R1').projectedPoints > 0);
@@ -61,10 +67,10 @@ test('missing data: no calibration (or scoring gap) means no estimates at all', 
   const rookie = yahooPlayer('R1', 25);
   const { players, map, canonical } = setup([rookie]);
   for (const k of [...map.keys()].filter((x) => x.startsWith('V'))) map.get(k).lastSeason = null; // no real sample
-  assert.equal(applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 }).estimateCount, 0);
+  assert.equal(applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify }).estimateCount, 0);
   const s2 = setup([rookie]);
   s2.map.set('R1', { projectedPoints: null, method: 'incomplete_scoring_data' });
-  assert.equal(applyMarketPriors({ canonical: s2.canonical, players: s2.players, projectionByCanonicalId: s2.map, canonicalIdOf, seasonYear: 2026 }).estimateCount, 0);
+  assert.equal(applyMarketPriors({ canonical: s2.canonical, players: s2.players, projectionByCanonicalId: s2.map, canonicalIdOf, seasonYear: 2026, classify }).estimateCount, 0);
 });
 
 test('player identity: ambiguous or unmatched provider identity still keys the estimate by Yahoo player_key', () => {
@@ -72,7 +78,7 @@ test('player identity: ambiguous or unmatched provider identity still keys the e
   const twinB = yahooPlayer('nba.p.9002', 55); // same display name, different Yahoo key
   twinA.name = twinB.name = 'Same Name';
   const { players, map, canonical } = setup([twinA, twinB]);
-  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 });
+  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
   assert.ok(map.get('nba.p.9001').projectedPoints > map.get('nba.p.9002').projectedPoints);
   assert.equal(map.get('nba.p.9001').estimate, true);
 });
@@ -82,7 +88,7 @@ const SETTINGS = { teamCount: 4, rosterSlots: [{ position: 'PG', count: 1, isSta
 test('draft board ranks estimates, flags them, and keeps market comparisons neutral (no circular VALUE)', () => {
   const rookie = yahooPlayer('R1', 6);
   const { players, map, canonical } = setup([rookie]);
-  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 });
+  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
   const provider = makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf });
   const board = buildDraftBoard({ players, settings: SETTINGS, projectionProvider: provider, currentSeason: 2026, availabilityOf: () => true, currentPick: 1, nextPick: 20 });
   const row = board.board.find((r) => r.playerKey === 'R1');
@@ -103,7 +109,7 @@ test('draft board ranks estimates, flags them, and keeps market comparisons neut
 test('ranking consistency: Rankings tab shows the same overall rank and estimate flag as the board', () => {
   const rookie = yahooPlayer('R1', 12);
   const { players, map, canonical } = setup([rookie]);
-  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 });
+  applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
   const provider = makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf });
   const board = buildDraftBoard({ players, settings: SETTINGS, projectionProvider: provider, currentSeason: 2026 });
   const overallRanks = new Map(board.board.map((r) => [r.playerKey, r.overallRank]));
@@ -119,3 +125,42 @@ test('league scoring is preserved: the same ADP maps to different points under d
   const b = fitMarketPrior(vets.map((v) => ({ adp: v.adp, perGame: v.perGame * 0.6 })));
   assert.ok(Math.abs(marketPriorPerGame(b, 30) - marketPriorPerGame(a, 30) * 0.6) < 0.05);
 });
+
+test('estimates need an explicit rookie verdict: veterans, injured players, matched players and unknowns are never estimated', () => {
+  const rookie = yahooPlayer('R1', 25), vet = yahooPlayer('V900', 25), hurt = { ...yahooPlayer('R2', 25), status: 'INJ' }, matchedGuy = yahooPlayer('R3', 25);
+  const { players, map, canonical } = setup([rookie, vet, hurt, matchedGuy]);
+  canonical.find((c) => c.canonicalId === 'R3').matched = true;
+  // V900 is numbered like a veteran by the test glue only if it does not start with R/X: it does not.
+  const res = applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
+  assert.equal(map.get('R1').estimate, true);
+  for (const k of ['V900', 'R2', 'R3']) assert.equal(map.get(k).projectedPoints, null, k);
+  assert.equal(res.estimateCount, 1);
+  assert.equal(res.skipped.get('V900').unprojectedClass, 'earlier_player_no_recent_stats');
+  assert.equal(res.skipped.get('R2').unprojectedClass, 'new_entrant_injured');
+  assert.equal(res.skipped.get('R3').unprojectedClass, 'unknown');
+  assert.match(res.skipped.get('V900').unprojectedReason, /veteran|earlier/i);
+});
+
+test('without a classifier nobody is estimated (a missing projection is never enough)', () => {
+  const { players, map, canonical } = setup([yahooPlayer('R1', 25)]);
+  const res = applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026 });
+  assert.equal(res.estimateCount, 0);
+  assert.equal(map.get('R1').projectedPoints, null);
+  assert.equal(res.skipped.get('R1').unprojectedClass, 'unknown');
+});
+
+test('the draft board explains a skipped veteran in plain words instead of a rookie estimate', () => {
+  const vet = yahooPlayer('V900', 25);
+  const { players, map, canonical } = setup([vet]);
+  const res = applyMarketPriors({ canonical, players, projectionByCanonicalId: map, canonicalIdOf, seasonYear: 2026, classify });
+  const est = new Map([...res.skipped]);
+  const provider = withEstimatesLocal(makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf }), est);
+  const b = buildDraftBoard({ players, settings: SETTINGS, projectionProvider: provider, currentSeason: 2026, rookieEstimates: true });
+  const row = b.noData.find((r) => r.playerKey === 'V900');
+  assert.ok(row); assert.equal(row.unprojectedClass, 'earlier_player_no_recent_stats');
+  assert.match(row.noDataReason, /veteran|earlier/i);
+  assert.equal(b.board.some((r) => r.playerKey === 'V900'), false);
+});
+function withEstimatesLocal(provider, map) {
+  return { ...provider, getProjection: (p) => { const own = provider.getProjection(p); return own?.projectedPoints != null ? own : (map.get(canonicalIdOf(p)) || own); } };
+}

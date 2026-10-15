@@ -114,3 +114,37 @@ prior-season rank count and identity match. Share the new `progm-ranking-compari
 6. **P5 - Replacement rule and C advantage:** no change without evidence; if the trace shows a degenerate C
    baseline, test a lineup-aware replacement offline first.
 7. Do not tune any weight toward Yahoo ADP.
+
+---
+## Follow-up fixes (real-league trace: all 14 ADP-eligible unprojected players, rookies included, came out "veteran")
+
+**Why rookies were labelled veterans.** The label came from the snapshot tool's own heuristic, which treated
+any prior-season Yahoo rank (`yahooPriorSeasonRanks`, `lastSeasonYahooRank`) as proof of a veteran. The real data
+refuted that assumption: incoming rookies such as Boozer, Dybantsa, Wilson and Peterson carry such ranks, so the
+field cannot separate rookies from veterans. It is now informational only. (Production never used it: the earlier
+estimator estimated *any* unprojected player with an ADP, which is the second problem.)
+
+**New rule (`unprojectedClass.js`), shared by production estimates and the diagnostic.** Rookie status is not
+inferred from a missing projection or an unmatched identity. The independent signal is Yahoo's own player number:
+a player whose number exceeds that of every player with a real last-season stat line was added to Yahoo after
+that season's players, so cannot have played in it. Anyone at or below the cutoff (veterans, injured veterans,
+earlier draft stashes) is never estimated. Further blocks: any Yahoo status flag, a provider-matched player,
+missing number or no cutoff (all "unknown"), and scoring gaps. `applyMarketPriors` now **requires** a classifier;
+without one nobody is estimated. Skipped players keep "no projection" with a plain-language reason in
+`noDataReason` and an `unprojectedClass` field.
+*Unverified assumption:* Yahoo player numbers are monotonic in creation time. It fails safe: a wrong cutoff can
+only be higher, which removes estimates, never adds them. The new trace prints the cutoff and each unprojected
+player's Yahoo number so you can check Boozer, Dybantsa, Wilson and Peterson sit above it.
+
+**Why replacement baselines and `projectionMethod` were empty.**
+- `projectionMethod`: the flags-off production payload predates that field, so it is simply absent (null).
+  The trace now derives it: if per-game equals the last-season fantasy score the projection is `season_only`,
+  otherwise recent form was blended; if the last-season score is missing it says `unavailable`. The source
+  ("payload" or "derived") is printed.
+- `replacementBaselineByPosition`: the old derivation looked for players with a single non-UTIL position, but
+  Yahoo lists overlapping positions (PG also lists G), so no row isolates one position. The payload does not
+  publish baselines. Each traced player now gets his **exact** baseline (`seasonPoints - vorp`); the pool section
+  lists the distinct baselines with the positions common to all players sharing each, and only names a position
+  when exactly one is shared (marked inferred); otherwise it states "unavailable" with the reason.
+
+No weights, expected-games formulas or scoring were changed.

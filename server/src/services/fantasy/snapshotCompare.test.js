@@ -67,17 +67,55 @@ test('trace option adds public availability/scoring detail for named players onl
   assert.ok(out.pool.replacementBaselineByPosition.PG != null || out.pool.replacementBaselineByPosition.C != null);
 });
 
-test('unprojected players are split into rookie candidates, veterans with a prior-season Yahoo rank, injured, and scoring gaps', () => {
-  const base = sanitizeWorkspace(raw);
+test('classification ignores prior-season Yahoo ranks: incoming rookies stay rookies, injured veterans and unknowns are never estimated', () => {
+  const base = sanitizeWorkspace(raw);               // board players have Yahoo numbers 0..59 => cutoff 59
+  const row = (name, n, extra = {}) => ({ name, yahooPlayerNumber: n, eligiblePositions: ['PG'], yahooAdp: 30, noDataReason: 'x', injuryStatus: null, priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null, ...extra });
   base.noData = [
-    { name: 'New Guy', eligiblePositions: ['PG'], yahooAdp: 40, noDataReason: 'x', injuryStatus: null, priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
-    { name: 'Hurt Vet', eligiblePositions: ['C'], yahooAdp: 60, noDataReason: 'x', injuryStatus: 'INJ', priorSeasonRanks: 3, lastSeasonYahooRank: null, identityMatch: null },
-    { name: 'Hurt Newbie', eligiblePositions: ['C'], yahooAdp: 70, noDataReason: 'x', injuryStatus: 'O', priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
-    { name: 'Gap', eligiblePositions: ['C'], yahooAdp: null, noDataReason: 'League scoring uses a stat the data provider does not supply', injuryStatus: null, priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
+    row('Incoming Rookie', 7000, { priorSeasonRanks: 3, lastSeasonYahooRank: 40 }),   // Yahoo ranks present, as seen in the real league
+    row('Injured Veteran', 20, { injuryStatus: 'INJ', priorSeasonRanks: 5 }),
+    row('Healthy Veteran Without Stats', 25),
+    row('Injured Newcomer', 7001, { injuryStatus: 'O' }),
+    row('No Id', null),
+    row('Scoring Gap', 7002, { noDataReason: 'League scoring uses a stat the data provider does not supply', yahooAdp: null }),
   ];
-  const c = analyzeSnapshot(base).rookieEstimateCoverage.unprojectedByClass;
-  assert.equal(c.rookie_or_new_candidate.total, 1);
-  assert.equal(c.veteran_missing_stats.total, 1);
-  assert.equal(c.injured_no_history.total, 1);
+  const cov = analyzeSnapshot(base).rookieEstimateCoverage;
+  const c = cov.unprojectedByClass;
+  assert.equal(cov.classification.cutoffPlayerNumber, 59);
+  assert.equal(c.rookie_or_new_entrant.total, 1);
+  assert.equal(c.earlier_player_no_recent_stats.total, 2);
+  assert.equal(c.new_entrant_injured.total, 1);
+  assert.equal(c.unknown.total, 1);
   assert.equal(c.scoring_gap.total, 1);
+  assert.deepEqual(cov.classification.wouldReceiveEstimate, ['Incoming Rookie']);
+});
+
+test('replacement baselines: exact per player, positions only when the rows isolate them, otherwise explicitly unavailable', () => {
+  const mk = (name, positions, sp, vorp) => ({ name, yahooPlayerNumber: 1, eligiblePositions: positions, overallRank: 1, draftPriority: 1, yahooAdp: null, lastSeasonGamesPlayed: 70, estimate: false, projectionMethod: null, marketLabel: null,
+    components: { production: 0.7, replacement: vorp / 3000, vorp, scarcity: 0.5, perGame: sp / 70, expectedGames: 70, seasonPoints: sp, confidence: 0.9, confidenceFactor: 0.99 } });
+  const overlapping = { meta: {}, league: null, noData: [], rankingsParity: [], board: [
+    ...Array.from({ length: 3 }, (_, i) => mk(`G${i}`, ['PG', 'G', 'UTIL'], 4000 - i, 2000 - i)), ...Array.from({ length: 3 }, (_, i) => mk(`H${i}`, ['SG', 'G', 'UTIL'], 3900 - i, 2100 - i)) ] };
+  const a = analyzeSnapshot(overlapping).pool;
+  assert.deepEqual(a.replacementBaselineByPosition, {});
+  assert.match(a.replacementBaselineByPositionNote, /unavailable/);
+  assert.ok(a.distinctReplacementBaselines.length >= 1);
+  const isolating = { meta: {}, league: null, noData: [], rankingsParity: [], board: Array.from({ length: 4 }, (_, i) => mk(`C${i}`, ['C', 'UTIL'], 4000, 2000)) };
+  assert.deepEqual(analyzeSnapshot(isolating).pool.replacementBaselineByPosition, { C: 2000 });
+  // exact per-player baseline in the trace
+  const traced = sanitizeWorkspace({ ...raw }, { trace: ['vet 3'] });
+  const t = analyzeSnapshot(traced, { highlight: ['vet 3'] }).traces[0];
+  assert.equal(t.replacementBaselineSeasonPoints, Math.round(t.components.seasonPoints - t.components.vorp));
+});
+
+test('projection method: uses the payload value when present, otherwise derives season-only vs blended honestly', () => {
+  const withFantasy = (perGame, last, method) => {
+    const clean = sanitizeWorkspace(raw, { trace: ['vet 3'] });
+    const row = clean.board.find((r) => r.name === 'Vet 3');
+    row.components.perGame = perGame; row.trace.lastSeasonFantasy = { season: 2025, points: last, breakdown: [] }; row.trace.projectionMethod = method;
+    return analyzeSnapshot(clean, { highlight: ['vet 3'] }).traces[0];
+  };
+  assert.equal(withFantasy(50, 50, null).projectionMethod, 'season_only (derived)');
+  assert.equal(withFantasy(53, 50, null).projectionMethod, 'blended_recent_season (derived)');
+  assert.equal(withFantasy(50, null, null).projectionMethod, 'unavailable');
+  const given = withFantasy(53, 50, 'season_only');
+  assert.equal(given.projectionMethod, 'season_only'); assert.equal(given.projectionMethodSource, 'payload');
 });
