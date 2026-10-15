@@ -85,3 +85,36 @@ Draft Priority in both models. The Rankings tab takes its `overallRank` from the
 - **v2 evidence:** supported by two independent backtests (height and position labels) and by the double-counting
   argument; it still needs your review of the diagnostic on a real league before merging.
 - ADP-derived estimates make rookie placement partly market-driven; that is why market comparisons are neutral.
+
+## 7. "Estimated" badge (client)
+- `EstimateBadge` (shared, `client/src/components/EstimateBadge.js`) renders a small "Estimated" badge with tooltip
+  "Estimate based on Yahoo ADP. Low confidence, and not an independent statistical projection. Value/Reach and
+  Draft Now/Wait comparisons are not shown for it." It appears next to the player name in **both** the Draft
+  Helper table and the Rankings tab, only when the server sends `estimate === true` (strict check).
+- For estimated players the Draft Helper recommendation cell shows "—" (tooltip explains) instead of "Fair Value";
+  the server already forces `marketLabel: neutral`, `adpVsProgm: null` and Yahoo-rank agreement `unknown`.
+- Verified: unit tests (render-to-markup; only `true` shows it), a server test that board and Rankings flag the
+  same players, and a headless-Chromium run of the built client with the API mocked by real server output
+  (72 players, 2 estimates): badges on exactly the 2 estimated rows in both tabs, none on the other 70, count
+  stayed 2 -> 2 -> 2 across Rankings -> Draft Helper -> Rankings, no page errors. With the flags off no row has
+  `estimate`, so no badge renders.
+
+## 8. Diagnostic on real cached Yahoo data
+**Not possible here.** No server process, database or Yahoo tokens exist in this environment, and the
+workspace cache is in-memory in the running server, so there was no real cached league to read. No Yahoo or
+provider request was made. The diagnostic route was exercised only with synthetic cached payloads. As a stand-in,
+the same comparison code was run on the offline 2025-26 stat pool (assumed default Yahoo scoring, simplified
+lineup, coarse G/F/C eligibility; it is not any user's league):
+
+| Player | Positions | Legacy | v2 | Per game | Exp. games | Season pts |
+|---|---|---|---|---|---|---|
+| Alperen Sengun | SF/PF/F/C | #5 | #8 | 43.9 | 60.1 | 2639 |
+| Cade Cunningham | PG/SG/G | #9 | #7 | 48.6 | 58.6 | 2847 |
+| Bam Adebayo | SF/PF/F/C | #10 | #15 | 40.8 | 60.3 | 2461 |
+
+Factors (value points): Sengun and Bam lose 4.9 scarcity points under legacy removal and gain ~3.5 production
+points from the moved weight; Cade loses 0.2 and gains 3.8. Top-50 overlap 47 of 50. In the legacy top 50
+(n=50): C-eligible players move -8.5 ranks on average (n=17), others +3.8 (n=33). Entering the top 50: Bane,
+Daniels, Castle; leaving: Gobert, Sarr, Vucevic. (Across all 418 pool players C-eligible players average -34 and others +14, inflated by
+the coarse labels that make 29% of the pool "C-eligible".)
+Exact steps to run it on the real league are in section 5.

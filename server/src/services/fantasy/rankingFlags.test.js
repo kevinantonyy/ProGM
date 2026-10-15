@@ -146,3 +146,27 @@ test('estimates are isolated: stats-only consumers never see them, draft views d
   assert.ok(draft.getProjection(r1).confidence <= 0.3);
   assert.equal(withEstimates(base, new Map()), base);                  // flag off: provider returned untouched
 });
+
+test('the Draft Helper board and Rankings flag exactly the same estimated players, with neutral market labels', () => {
+  const vets = Array.from({ length: 60 }, (_, i) => ({ key: `V${i + 1}`, adp: i + 1, pg: 60 - 8 * Math.log(i + 1) }));
+  const statProj = (v) => ({ projectedPoints: v.pg, perGame: v.pg, confidence: 0.9, method: 'season_only', history, lastSeason: { season: 2025, stats: { gamesPlayed: 70 } } });
+  const roster = [...vets.map((v) => player(v.key, v.adp % 2 ? 'PG' : 'C', { yahooAdp: v.adp, yahooOverallRank: v.adp + 1 })), player('R1', 'PG', { yahooAdp: 14, yahooOverallRank: 15 }), player('R2', 'C', { yahooAdp: 50, yahooOverallRank: 55 })];
+  const map = new Map(vets.map((v) => [v.key, statProj(v)])); for (const k of ['R1', 'R2']) map.set(k, { projectedPoints: null, method: 'no_data' });
+  const canonical = roster.map((p) => ({ canonicalId: p.playerKey, matched: map.get(p.playerKey).projectedPoints != null, matchMethod: null }));
+  const withEst = new Map(map); applyMarketPriors({ canonical, players: roster, projectionByCanonicalId: withEst, canonicalIdOf, seasonYear: 2026 });
+  const prov = withEstimates(makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf }), new Map([...withEst].filter(([, p]) => p.estimate === true)));
+  const draft = buildDraftBoard({ players: roster, settings: SETTINGS, projectionProvider: prov, currentSeason: 2026, availabilityOf: () => true, currentPick: 1, nextPick: 30, rankingModel: 'v2', rookieEstimates: true });
+  const overallRanks = new Map(draft.board.map((r) => [r.playerKey, r.overallRank]));
+  const rankings = buildRankings({ players: roster, projectionProvider: prov, overallRanks, rankScope: draft.rankScope, rankingModel: draft.rankingModel, sortBy: 'overall' });
+  const flagged = (rows) => rows.filter((r) => r.estimate === true).map((r) => r.playerKey).sort();
+  assert.deepEqual(flagged(draft.board), ['R1', 'R2']);
+  assert.deepEqual(flagged(rankings.players), ['R1', 'R2']);
+  for (const r of draft.board.filter((x) => x.estimate)) { assert.equal(r.marketLabel, 'neutral'); assert.equal(r.adpVsProgm, null); assert.equal(r.rankAgreement, 'unknown'); assert.ok(r.confidence <= 0.3); }
+  assert.ok(draft.board.filter((x) => !x.estimate).every((r) => r.estimate === false));
+  for (const r of rankings.players) assert.equal(r.overallRank, draft.board.find((b) => b.playerKey === r.playerKey).overallRank);
+  // flags OFF: same inputs without the estimate map flag nobody and list the rookies as no-data with a reason
+  const off = buildDraftBoard({ players: roster, settings: SETTINGS, projectionProvider: makeProjectionProvider({ projectionByCanonicalId: map, canonicalIdOf }), currentSeason: 2026, rookieEstimates: false });
+  assert.deepEqual(flagged(off.board), []);
+  assert.deepEqual(off.noData.map((r) => r.playerKey).sort(), ['R1', 'R2']);
+  assert.ok(off.noData.every((r) => /turned off/.test(r.noDataReason)));
+});
