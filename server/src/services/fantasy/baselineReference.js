@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { rankingProfile } from './rankingModel.js';
 
 /**
  * Frozen normalization reference for the shared ProGM Overall Rank.
@@ -21,8 +22,8 @@ function scoringSignature(statCategories) {
   return createHash('sha1').update(weighted.join('|')).digest('hex').slice(0, 12);
 }
 
-export function referenceKey({ leagueKey, season, statCategories }) {
-  return `bball:overall-ref:${leagueKey}:${season ?? 'na'}:${scoringSignature(statCategories)}`;
+export function referenceKey({ leagueKey, season, statCategories, profile = rankingProfile() }) {
+  return `bball:overall-ref:${profile}:${leagueKey}:${season ?? 'na'}:${scoringSignature(statCategories)}`;
 }
 
 export function loadBaselineReference(cache, key) {

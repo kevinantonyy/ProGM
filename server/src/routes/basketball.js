@@ -24,6 +24,8 @@ import {
 } from '../services/fantasy/draftResults.js';
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
+import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow, rankingDiagnosticsEnabled } from '../services/fantasy/rankingModel.js';
+import { compareRankingModels } from '../services/fantasy/rankingCompare.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
@@ -141,18 +143,68 @@ router.get('/workspace', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    const cacheKey = `bball:workspace:${req.userId}:${leagueKey}:${teamKey}`;
+    const cacheKey = `bball:workspace:${rankingProfileForUser(req.userId)}:${req.userId}:${leagueKey}:${teamKey}`;
     if (req.query.refresh !== 'true') {
       const cached = cache.get(cacheKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
     }
 
-    const workspace = await buildBasketballWorkspace({ yahooFantasy, accessToken: token, leagueKey, teamKey });
+    const shadowSink = resolveRankingShadow(process.env, req.userId) && rankingDiagnosticsEnabled() ? (result) => cache.set(`bball:ranking-shadow:${req.userId}:${leagueKey}:${teamKey}`, result, { provider: 'progm', ttl: WORKSPACE_TTL }) : null;
+    const workspace = await buildBasketballWorkspace({ yahooFantasy, accessToken: token, leagueKey, teamKey, userId: req.userId, shadowSink });
     cache.set(cacheKey, workspace, { provider: 'yahoo', ttl: WORKSPACE_TTL });
     res.json({ ...workspace, cache: { hit: false, fetchedAt: new Date().toISOString() } });
   } catch (error) {
     sendError(res, error, 'Could not load your Fantasy Basketball workspace');
   }
+});
+
+/**
+ * Shared guard for the ranking diagnostics. Order matters: closed unless explicitly enabled (404, nothing revealed),
+ * then a real user id, then well-formed keys where the team belongs to the league. Ownership: results are read ONLY from
+ * cache keys that include the authenticated user's id; those entries exist only if this user's own Yahoo token built the
+ * workspace for that league, so one user can never read another's data. Responses are never cacheable.
+ */
+function diagnosticScope(req, res) {
+  if (!rankingDiagnosticsEnabled()) { res.status(404).json({ error: 'Not found' }); return null; }
+  res.set('Cache-Control', 'no-store');
+  if (req.userId == null) { res.status(401).json({ error: 'Invalid token' }); return null; }
+  const leagueKey = typeof req.query.leagueKey === 'string' ? req.query.leagueKey : '';
+  const teamKey = typeof req.query.teamKey === 'string' ? req.query.teamKey : '';
+  if (!LEAGUE_KEY_RE.test(leagueKey) || !TEAM_KEY_RE.test(teamKey) || !teamKey.startsWith(`${leagueKey}.t.`)) {
+    res.status(400).json({ error: 'leagueKey and teamKey are required, and the team must belong to the league.' });
+    return null;
+  }
+  return { leagueKey, teamKey };
+}
+
+/**
+ * GET /api/basketball/diagnostics/ranking-compare?leagueKey=&teamKey=&highlight=Name,Name
+ * READ-ONLY. Compares legacy vs v2 ranks over the draft board already held in the server's workspace
+ * cache. It never calls Yahoo or any provider, never writes to the cache, and returns names and numbers
+ * only. Disabled unless PROGM_RANKING_DIAGNOSTIC=on. Open the Draft Helper first so the cache is warm.
+ */
+router.get('/diagnostics/ranking-compare', authenticate, (req, res) => {
+  const scope = diagnosticScope(req, res);
+  if (!scope) return;
+  const { leagueKey, teamKey } = scope;
+  const cached = cache.get(`bball:workspace:${rankingProfileForUser(req.userId)}:${req.userId}:${leagueKey}:${teamKey}`);
+  if (!cached?.value?.draftBoard?.board?.length) return res.status(409).json({ error: 'No cached Draft Helper data for this league under the current ranking flags. Open the Draft Helper first; this diagnostic never fetches from Yahoo.' });
+  const highlight = String(req.query.highlight || '').split(',').map((n) => n.trim()).filter(Boolean).slice(0, 10);
+  res.json({ activeRankingModel: cached.value.draftBoard.rankingModel || 'legacy', rookieEstimates: resolveRookieEstimates(), cacheFetchedAt: cached.meta.fetchedAt, ...compareRankingModels(cached.value.draftBoard.board, { top: 50, highlight }) });
+});
+
+/**
+ * GET /api/basketball/diagnostics/ranking-shadow?leagueKey=&teamKey=
+ * READ-ONLY. Returns the last legacy-vs-v2 shadow comparison stored by the workspace build for THIS user and league.
+ * Requires PROGM_RANKING_DIAGNOSTIC=on (and PROGM_RANKING_SHADOW=on to produce data). Never calls Yahoo or writes the cache.
+ */
+router.get('/diagnostics/ranking-shadow', authenticate, (req, res) => {
+  const scope = diagnosticScope(req, res);
+  if (!scope) return;
+  const { leagueKey, teamKey } = scope;
+  const hit = cache.get(`bball:ranking-shadow:${req.userId}:${leagueKey}:${teamKey}`);
+  if (!hit?.value) return res.status(409).json({ error: 'No shadow result yet. Start the server with PROGM_RANKING_SHADOW=on and open the Draft Helper (refresh=true if the workspace was already cached).' });
+  res.json({ shadowEnabled: resolveRankingShadow(process.env, req.userId), visibleRankingModel: resolveRankingModelForUser(req.userId), cacheFetchedAt: hit.meta.fetchedAt, ...hit.value });
 });
 
 /**
@@ -319,17 +371,24 @@ router.get('/draft', authenticate, async (req, res) => {
         players: [...availablePlayers, ...myRosterPlayers],
         statCategories: settings.statCategories || [],
         scoringSupported: true,
+        rookieEstimates,
       });
       externalAvailable = ctx.externalAvailable;
       const analysis = analyzeRoster({ players: myRosterPlayers, settings });
       const projectionProvider = ctx.projectionProvider && {
-        getProjection: (pl) => ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null,
+        getProjection: (pl) => {
+          const own = ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null;
+          if (own?.projectedPoints != null) return own;
+          return ctx.estimateByCanonicalId?.get(canonicalIdOf(pl)) || own;
+        },
         getProjectedValue: (pl) => (ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || {}).projectedPoints ?? null,
       };
       const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
       // Reuse the baseline captured pre-draft so Overall Rank stays stable as
       // other teams draft; without it ranks are labelled relative to available players.
-      const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories });
+      const rankingModel = resolveRankingModelForUser(req.userId);
+      const rookieEstimates = resolveRookieEstimates();
+      const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories, profile: rankingProfileForUser(req.userId) });
       board = buildDraftBoard({
         players: availablePlayers,
         settings,
@@ -341,6 +400,8 @@ router.get('/draft', authenticate, async (req, res) => {
         currentPick,
         nextPick, // null when snake slot not reliably recoverable -> no DRAFT NOW/WAIT
         currentSeason: league?.season || null, // for current-season Yahoo rank
+        rankingModel,
+        rookieEstimates,
       });
     }
 

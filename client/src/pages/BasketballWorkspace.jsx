@@ -6,6 +6,8 @@ import LoadingState from '../components/LoadingState';
 import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../utils/draftPolling';
 import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
 import { resolveDraftPhase } from '../utils/draftStatus';
+import EstimateBadge from '../components/EstimateBadge';
+import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
 // rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
@@ -356,7 +358,7 @@ function Rankings({ data }) {
             <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
               <td className="p-3 text-dark-400">{i + 1}</td>
               <td className="p-3 text-center font-bold text-primary-400">{p.overallRank ?? '—'}</td>
-              <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><EstimateBadge player={p} /><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
               <td className="p-3 text-right"><Proj value={p.projected} /></td>
               {data.scheduleAware && <td className="p-3 text-right">{p.periodProjected != null ? <span className="font-bold text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
               <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
@@ -511,6 +513,7 @@ function LiveDraftRoster({ live }) {
 }
 
 function DraftRecommendation({ player }) {
+  if (isEstimated(player)) return <span className="text-dark-500" title={ESTIMATE_TOOLTIP}>—</span>; // no circular market advice for ADP-implied estimates
   if (player.yahooAdp == null) return <span className="text-dark-500" title="Yahoo ADP is unavailable, so no market recommendation is shown.">—</span>;
   const labels = {
     'DRAFT NOW': ['Draft Now', 'badge-green'],
@@ -534,7 +537,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
     <tr className="border-b border-dark-700">
       <td className="p-3 text-center text-lg font-black text-primary-400">{player.overallRank ?? '—'}</td>
       <td className="p-3">
-        <div className="flex items-center gap-2"><PlayerLink player={player}>{player.name}</PlayerLink>{player.out && <span className="badge-red">OUT</span>}</div>
+        <div className="flex items-center gap-2"><PlayerLink player={player}>{player.name}</PlayerLink><EstimateBadge player={player} />{player.out && <span className="badge-red">OUT</span>}</div>
         <p className="pl-11 text-xs text-dark-400">{player.teamAbbr || 'FA'} · {player.eligiblePositions?.join('/') || 'Position unavailable'}{availabilityKnown ? ` · ${availability}` : ''}</p>
       </td>
       <td className="p-3 text-center font-semibold text-dark-300">{player.yahooOverallRank != null ? `#${player.yahooOverallRank}` : '—'}</td>
