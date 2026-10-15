@@ -158,3 +158,11 @@ read them before sharing.
 
 **Share:** the two output files, plus any note on things that looked wrong. Do not share the raw response, the
 HAR, or any URL containing league or team keys.
+
+## 7. Account-scoped v2 (`PROGM_RANKING_V2_USER_IDS`)
+- Comma/space separated numeric ProGM user ids (see `GET /api/auth/me`). Listed accounts get the v2 model; all others get the global
+  model, which is legacy unless `PROGM_RANKING_MODEL` is set (keep it unset). Non-numeric entries, `*`, `all` etc. are ignored (never a wildcard).
+- Applies per request to: the workspace (Draft Helper, Rankings tab), the live-draft route, the workspace cache key, the frozen
+  baseline reference key, and the diagnostics cache keys (`rankingProfileForUser`). Rookie estimates are unaffected (still off unless `PROGM_ROOKIE_ESTIMATES`).
+- Shadow mode only runs for accounts whose visible model is legacy.
+- Rollback: delete the variable and let Render restart. Nothing is persisted; caches are in memory.

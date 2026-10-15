@@ -27,6 +27,21 @@ export function rankingModelInfo(id) { return RANKING_MODELS[normalizeRankingMod
 
 export function resolveRankingModel(env = process.env) { return normalizeRankingModel(env?.PROGM_RANKING_MODEL); }
 
+/**
+ * Account-scoped v2: PROGM_RANKING_V2_USER_IDS is a comma/space separated list of numeric ProGM user ids. Listed accounts get v2;
+ * every other account (and any request without a user id) gets the global model, which stays legacy unless PROGM_RANKING_MODEL
+ * is set. Malformed entries are ignored, never treated as a wildcard.
+ */
+export function parseV2UserIds(env = process.env) {
+  return new Set(String(env?.PROGM_RANKING_V2_USER_IDS ?? '').split(/[\s,]+/).filter((x) => /^\d{1,12}$/.test(x)).map((x) => String(Number(x))));
+}
+
+export function resolveRankingModelForUser(userId, env = process.env) {
+  const id = userId == null ? '' : String(userId).trim();
+  if (/^\d{1,12}$/.test(id) && parseV2UserIds(env).has(String(Number(id)))) return 'v2';
+  return resolveRankingModel(env);
+}
+
 export function resolveRookieEstimates(env = process.env) {
   return ['on', 'true', '1'].includes(String(env?.PROGM_ROOKIE_ESTIMATES ?? '').trim().toLowerCase());
 }
@@ -39,13 +54,18 @@ export function rankingProfile(env = process.env) {
   return `${resolveRankingModel(env)}.${resolveRookieEstimates(env) ? 'est' : 'noest'}`;
 }
 
+/** Per-account cache identity: every cached ranking, workspace or frozen baseline must be keyed with THIS, never the global one. */
+export function rankingProfileForUser(userId, env = process.env) {
+  return `${resolveRankingModelForUser(userId, env)}.${resolveRookieEstimates(env) ? 'est' : 'noest'}`;
+}
+
 /**
  * Shadow mode: only while the visible model is legacy and rookie estimates are off, so the comparison is
  * legacy vs v2 over identical inputs. It never changes rankingProfile(), so cache identity and output are untouched.
  */
-export function resolveRankingShadow(env = process.env) {
+export function resolveRankingShadow(env = process.env, userId = null) {
   const on = ['on', 'true', '1'].includes(String(env?.PROGM_RANKING_SHADOW ?? '').trim().toLowerCase());
-  return on && resolveRankingModel(env) === 'legacy' && !resolveRookieEstimates(env);
+  return on && resolveRankingModelForUser(userId, env) === 'legacy' && !resolveRookieEstimates(env);
 }
 
 /**

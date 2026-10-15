@@ -39,7 +39,7 @@ import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { buildDraftBoard } from './draftHelper.js';
-import { resolveRankingModel, resolveRookieEstimates, rankingProfile, resolveRankingShadow } from './rankingModel.js';
+import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow } from './rankingModel.js';
 import { runWorkspaceShadow } from './rankingShadow.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
@@ -138,7 +138,7 @@ async function optionalPlayersRequest(yahooFantasy, accessToken, path) {
  * @param {string} params.leagueKey
  * @param {string} params.teamKey     the user's team in this league
  */
-export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leagueKey, teamKey, shadowSink = null }) {
+export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leagueKey, teamKey, userId = null, shadowSink = null }) {
   // 1. League settings + standings (Yahoo facts).
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
@@ -243,9 +243,9 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
   const draftPool = [...availablePlayers, ...myRoster];
   // Frozen overall-rank reference: captured pre-draft, reused while others draft.
-  const rankingModel = resolveRankingModel();
+  const rankingModel = resolveRankingModelForUser(userId);
   const rookieEstimates = resolveRookieEstimates();
-  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories, profile: rankingProfile() });
+  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories, profile: rankingProfileForUser(userId) });
   const draftProvider = withEstimates(projectionProvider, ctx.estimateByCanonicalId); // estimates only here and in Rankings
   const draftBoard = settings
     ? buildDraftBoard({
@@ -264,7 +264,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
   delete draftBoard.baselineReference; // internal; not sent to the client
   // Shadow mode (PROGM_RANKING_SHADOW, default off): v2 over the SAME objects that produced the legacy board above.
-  if (settings && typeof shadowSink === 'function' && resolveRankingShadow()) {
+  if (settings && typeof shadowSink === 'function' && resolveRankingShadow(process.env, userId)) {
     runWorkspaceShadow({ legacyBoard: draftBoard, draftPool, settings, projectionProvider: draftProvider, rosterAnalysis: analysis, availableKeys, league, leagueKey, cache: providers.cache, shadowSink });
   }
   // Rankings tab shares the Draft Helper's baseline: same Overall Rank per player.

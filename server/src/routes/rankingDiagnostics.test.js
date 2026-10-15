@@ -14,7 +14,7 @@ import { rankingProfile } from '../services/fantasy/rankingModel.js';
 const SECRET = 'test-secret-ranking-diag';
 const LEAGUE = '428.l.111111'; const TEAM = '428.l.111111.t.3';
 let server; let baseUrl; const saved = {};
-const ENV = ['PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW'];
+const ENV = ['PROGM_RANKING_V2_USER_IDS', 'PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW'];
 
 before(async () => {
   for (const k of ENV) saved[k] = process.env[k];
@@ -30,7 +30,7 @@ after(async () => {
   await new Promise((r) => server.close(r));
 });
 beforeEach(() => {
-  process.env.PROGM_RANKING_DIAGNOSTIC = 'on'; delete process.env.NODE_ENV; delete process.env.PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION;
+  process.env.PROGM_RANKING_DIAGNOSTIC = 'on'; delete process.env.NODE_ENV; delete process.env.PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION; delete process.env.PROGM_RANKING_V2_USER_IDS;
 });
 
 const tok = (userId) => jwt.sign({ userId }, SECRET, { expiresIn: '5m' });
@@ -92,3 +92,18 @@ for (const path of ['ranking-shadow', 'ranking-compare']) {
     for (const banned of [LEAGUE, TEAM, 'leagueKey', 'teamKey', 'token', 'accessToken', 'refresh', String(SECRET)]) assert.ok(!r.text.includes(banned), banned);
   });
 }
+
+test('account-scoped v2: workspace cache entries are separated per account and per model', async () => {
+  process.env.PROGM_RANKING_V2_USER_IDS = '71';
+  const put = (profile, userId, model) => cache.set(`bball:workspace:${profile}:${userId}:${LEAGUE}:${TEAM}`, { draftBoard: { rankingModel: model, board: [row('A', 1), row('B', 2)] } }, { provider: 'yahoo', ttl: 60000 });
+  put('v2.noest', 71, 'v2'); put('legacy.noest', 72, 'legacy');
+  const mine = await get('ranking-compare', { token: tok(71) });
+  assert.equal(mine.status, 200); assert.equal(JSON.parse(mine.text).activeRankingModel, 'v2');
+  const other = await get('ranking-compare', { token: tok(72) });
+  assert.equal(other.status, 200); assert.equal(JSON.parse(other.text).activeRankingModel, 'legacy');
+  // A legacy-profile entry for the listed account is never served as its v2 view, and nobody can read a v2 entry from another account.
+  cache.set(`bball:workspace:legacy.noest:73:${LEAGUE}:${TEAM}`, { draftBoard: { rankingModel: 'legacy', board: [row('A', 1)] } }, { provider: 'yahoo', ttl: 60000 });
+  process.env.PROGM_RANKING_V2_USER_IDS = '73';
+  assert.equal((await get('ranking-compare', { token: tok(73) })).status, 409);
+  assert.equal((await get('ranking-compare', { token: tok(74) })).status, 409);
+});
