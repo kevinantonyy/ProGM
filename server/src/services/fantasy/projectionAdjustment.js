@@ -26,6 +26,11 @@ export const RIDGE = 1.0;
 export const MIN_PAIRS = 150;             // fewer fitted pairs/triples than this => model unavailable => fallback
 export const MIN_TRIPLES = 150;
 export const MAX_RELATIVE_DELTA = 0.35;   // |delta| capped at 35% of the existing projection
+export const MAX_MEDIAN_RELATIVE_DELTA = 0.15; // if the typical adjustment is larger than this the inputs are treated as corrupt
+export const AGE_MIN = 18; export const AGE_MAX = 45;
+export const DEBUT_CHECK_MIN_PLAYERS = 20;     // age-convention plausibility check needs at least this many recent debutants
+export const DEBUT_AGE_BAND = [20.5, 24.0];    // plausible median age in a player's debut season (research data: 22-23)
+const MAX_DELTA_PER_MINUTE = 0.6;              // fitted aging change per minute beyond this is not credible (typical |delta| < 0.1)
 const PROXY_EXCLUDED_STAT_IDS = new Set([13, 14]); // OREB / DREB: absent from prior-season feeds
 
 export function parseUserIds(value) {
@@ -41,6 +46,19 @@ export function proxyCategories(statCategories) {
   return (statCategories || []).filter((c) => !PROXY_EXCLUDED_STAT_IDS.has(Number(c?.statId)));
 }
 
+const STAT_KEYS = ['points', 'rebounds', 'offRebounds', 'defRebounds', 'assists', 'steals', 'blocks', 'turnovers', 'personalFouls', 'fgMade', 'fgAtt', 'ftMade', 'ftAtt', 'threesMade'];
+/** Malformed or physically implausible feed rows are dropped, never repaired: numbers only, finite, non-negative, within per-game limits. */
+export function plausibleLine(line) {
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  if (!line || !num(line.gamesPlayed) || !num(line.minutes)) return false;
+  if (!(line.gamesPlayed > 0 && line.gamesPlayed <= 90) || !(line.minutes > 0 && line.minutes <= 48)) return false;
+  for (const k of STAT_KEYS) { const v = line[k]; if (v != null && (!num(v) || v < 0 || v > 70)) return false; }
+  for (const k of ['doubleDoubles', 'tripleDoubles']) { const v = line[k]; if (v != null && (!num(v) || v < 0 || v > 1.0001)) return false; }
+  return true;
+}
+
+export function validAge(age) { return typeof age === 'number' && Number.isFinite(age) && age >= AGE_MIN && age <= AGE_MAX; }
+
 /**
  * Season feed entries ([{externalId, season: StatLine}]) -> Map(id -> {fp, mpg, gp, minTotal}) using the proxy score.
  * A weighted stat that most rows in this feed lack (< 50% populated) is left out of the proxy for that season rather than
@@ -53,10 +71,10 @@ export function buildSeasonRows(entries, statCategories) {
   const rows = new Map();
   for (const e of valid) {
     const line = e.season; const id = String(e.externalId);
-    const gp = Number(line.gamesPlayed); const mpg = Number(line.minutes);
-    if (!(gp > 0) || !(mpg > 0)) continue;
+    if (!plausibleLine(line)) continue;
+    const gp = line.gamesPlayed; const mpg = line.minutes;
     const scored = scoreStatLine(line, cats);
-    if (scored.points == null || scored.unsupportedStats.length) continue;
+    if (scored.points == null || scored.unsupportedStats.length || !Number.isFinite(scored.points) || scored.points < 0 || scored.points / mpg > 6) continue;
     rows.set(id, { fp: scored.points, mpg, gp, minTotal: mpg * gp });
   }
   return rows;
@@ -121,6 +139,8 @@ export function fitAdjustmentModel({ tables, ageAt }) {
   for (let r = 0; r < k; r += 1) A[r][r] += RIDGE;
   const beta = solve(A, b);
   if (!beta || beta.some((v) => !Number.isFinite(v))) return null;
+  // A fit that is not credible is no fit: never extrapolate a garbage curve into rankings.
+  if (Object.values(delta).some((d) => !Number.isFinite(d) || Math.abs(d) > MAX_DELTA_PER_MINUTE) || !(beta[1] > 0 && beta[1] < 1.5)) return null;
   return { delta, beta, pairs: acc.length, triples: X.length, gameTotalBySeason: gameTotal };
 }
 
@@ -137,17 +157,39 @@ export function fitAdjustmentModel({ tables, ageAt }) {
  */
 export function adjustmentDelta({ model, last, prior, ageLast, lastPointsPerGame, lastMinutes, lastGameTotal }) {
   if (!model) return { reason: 'no_model' };
-  if (ageLast == null) return { reason: 'no_age' };
+  if (!validAge(ageLast)) return { reason: 'no_age' };
   if (!last) return { reason: 'no_proxy_row' };
   if (last.minTotal < MIN_SUPPORT_MINUTES) return { reason: 'below_support_minutes' };
-  if (!(lastPointsPerGame > 0) || !(lastMinutes > 0)) return { reason: 'no_last_season_points' };
+  if (!(Number.isFinite(lastPointsPerGame) && lastPointsPerGame > 0 && lastPointsPerGame < 250) || !(Number.isFinite(lastMinutes) && lastMinutes > 0 && lastMinutes <= 48)) return { reason: 'no_last_season_points' };
   const rpm = last.fp / last.mpg;
   const ageKey = Math.min(37, Math.max(19, Math.round(ageLast)));
   const rel = rpm > 0.5 ? Math.min(1.3, Math.max(0.7, Math.max(0, rpm + model.delta[ageKey]) / rpm)) : 1;
   const feats = minutesFeatures(last.mpg, prior?.mpg, ageLast + 1, Math.min(1, last.gp / (lastGameTotal || 82)));
   const mhat = Math.min(40, Math.max(8, feats.reduce((s, v, i) => s + v * model.beta[i], 0)));
   const adjusted = (lastPointsPerGame / lastMinutes) * rel * mhat;
+  if (!Number.isFinite(adjusted)) return { reason: 'non_finite' };
   return { delta: adjusted - lastPointsPerGame, ageFactor: rel, minutesPredicted: mhat, minutesLast: lastMinutes, ageLast };
+}
+
+/**
+ * The directory gives each player's CURRENT age; ages for other seasons are derived with a whole-year offset, and the model is fitted
+ * and applied on that same derived variable, so a constant offset cannot bias it. What can be checked without trusting the convention is
+ * plausibility: among recent debutants (directory debutYear within the last four completed seasons) the derived age in the debut season
+ * must look like a debut-season age. Gross errors (wrong units, wrong season base, unrelated numbers) fail it. A one-year drift is NOT
+ * detectable this way (see docs). Too few debutants to check => not verified => the adjustment is not applied.
+ */
+export function checkAgeConvention({ externalRefById, ageAt, lastSeason }) {
+  const ages = [];
+  for (const [id, ref] of externalRefById) {
+    const d = Number(ref?.debutYear);
+    if (!Number.isInteger(d) || d < lastSeason - 3 || d > lastSeason) continue;
+    const a = ageAt(id, d); if (a != null) ages.push(a);
+  }
+  if (ages.length < DEBUT_CHECK_MIN_PLAYERS) return { ok: false, reason: 'age_convention_unverifiable', debutants: ages.length };
+  ages.sort((a, b) => a - b);
+  const median = ages.length % 2 ? ages[(ages.length - 1) / 2] : (ages[ages.length / 2 - 1] + ages[ages.length / 2]) / 2;
+  const ok = median >= DEBUT_AGE_BAND[0] && median <= DEBUT_AGE_BAND[1];
+  return { ok, reason: ok ? null : 'age_convention_check_failed', debutants: ages.length, medianDebutAge: Number(median.toFixed(1)) };
 }
 
 /**
@@ -167,7 +209,10 @@ export function computeAdjustedProjections({ canonical, projectionByCanonicalId,
   const out = new Map();
   const tables = new Map();
   for (const [season, entries] of Object.entries(seasonEntries || {})) tables.set(Number(season), buildSeasonRows(entries, statCategories));
-  const ageAt = (id, season) => { const a = externalRefById.get(String(id))?.age; return Number.isFinite(a) ? a + (season - ageReferenceSeason) : null; };
+  const ageAt = (id, season) => { const a = externalRefById.get(String(id))?.age; return validAge(a) ? a + (season - ageReferenceSeason) : null; };
+  const convention = checkAgeConvention({ externalRefById, ageAt, lastSeason });
+  diagnostics.ageConvention = convention;
+  if (!convention.ok) { diagnostics.fallbacks[convention.reason] = canonical.length; return { adjustedByCanonicalId: out, diagnostics }; }
   const model = tables.has(lastSeason) ? fitAdjustmentModel({ tables, ageAt }) : null;
   if (!model) { diagnostics.fallbacks.no_model = canonical.length; return { adjustedByCanonicalId: out, diagnostics }; }
   diagnostics.modelAvailable = true; diagnostics.pairs = model.pairs; diagnostics.triples = model.triples;
@@ -190,6 +235,12 @@ export function computeAdjustedProjections({ canonical, projectionByCanonicalId,
     out.set(c.canonicalId, { ...proj, perGame, projectedPoints: perGame, method: 'age_minutes_adjusted', baseMethod: proj.method,
       adjustment: { deltaPerGame: Number(delta.toFixed(2)), ageFactor: Number(r.ageFactor.toFixed(3)), minutesPredicted: Number(r.minutesPredicted.toFixed(1)), minutesLast: Number(r.minutesLast.toFixed(1)), ageLast: r.ageLast, basePerGame: proj.projectedPoints } });
     diagnostics.applied += 1;
+  }
+  const rel = [...out.values()].map((a) => Math.abs(a.adjustment.deltaPerGame) / Math.max(1, a.adjustment.basePerGame)).sort((a, b) => a - b);
+  const medianRel = rel.length ? rel[Math.floor(rel.length / 2)] : 0;
+  diagnostics.medianRelativeDelta = Number(medianRel.toFixed(4));
+  if (medianRel > MAX_MEDIAN_RELATIVE_DELTA) { // corrupt feed symptom: discard everything rather than rank on it
+    diagnostics.fallbacks.implausible_aggregate = out.size; diagnostics.applied = 0; out.clear();
   }
   return { adjustedByCanonicalId: out, diagnostics };
 }

@@ -298,10 +298,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
     try {
       const last = Number(projectionSeason);
       const seasonEntries = {};
-      for (const s of [last, last - 1, last - 2, last - 3]) {
-        const r = await providers.getSeasonStatsAll(s); // cached league-wide feed; no per-player requests
-        if (r?.value) seasonEntries[s] = r.value;
-      }
+      const wanted = [last, last - 1, last - 2, last - 3];
+      const fetched = await Promise.all(wanted.map((s) => providers.getSeasonStatsAll(s).catch(() => null))); // 4 cached league-wide feeds, in parallel
+      wanted.forEach((s, i) => { if (fetched[i]?.value) seasonEntries[s] = fetched[i].value; });
       const result = computeAdjustedProjections({
         canonical, projectionByCanonicalId, statsByExternalId, externalRefById, seasonEntries, statCategories, lastSeason: last, ageReferenceSeason: currentNbaSeason,
       });

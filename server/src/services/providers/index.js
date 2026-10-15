@@ -217,19 +217,27 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
   return null;
 }
 
+const OPTIONAL_FAILURE_COOLDOWN_MS = 15 * 60 * 1000;
+const optionalFailures = new Map(); // `${provider}:${season}` -> retry-after timestamp
+
 /**
  * Full league-wide season table from the bulk path (same cache entry as getSeasonStats*, so a cached season costs no request).
- * Used by the optional age/minutes projection adjustment to fit on every listed player. Returns null when unavailable.
+ * OPTIONAL data for the experimental age/minutes projection, so it is deliberately gentler than the primary path:
+ *  - it never records a failure against provider health (optional requests must not open the circuit breaker the primary path uses),
+ *  - it skips an unhealthy provider instead of probing it,
+ *  - a failed season is not retried for 15 minutes (no repeated slow requests on every workspace build).
+ * Returns null when unavailable.
  */
 export async function getSeasonStatsAll(season) {
   const candidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
   for (const provider of candidates) {
+    const failKey = `${provider.name}:${season}`;
+    if ((optionalFailures.get(failKey) || 0) > Date.now()) continue;
     try {
       const result = await cache.remember(`seasonStatsAll:${season}:${provider.name}`, { provider: provider.name, ttl: cache.TTL.seasonStats }, () => provider.getSeasonStatsBulk(season));
-      if (!result.meta.cacheHit) health.recordSuccess(provider.name);
       if (Array.isArray(result.value) && result.value.length) return { value: result.value, meta: result.meta };
-    } catch (error) {
-      health.recordFailure(provider.name, error);
+    } catch {
+      optionalFailures.set(failKey, Date.now() + OPTIONAL_FAILURE_COOLDOWN_MS);
     }
   }
   return null;

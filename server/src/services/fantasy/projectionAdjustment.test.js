@@ -4,7 +4,7 @@ import { buildDraftBoard } from './draftHelper.js';
 import { canonicalIdOf, withAdjustedProjections } from './insights.js';
 import { rankingProfileForUser } from './rankingModel.js';
 import {
-  MAX_RELATIVE_DELTA, adjustmentDelta, buildSeasonRows, computeAdjustedProjections, fitAdjustmentModel, parseUserIds, proxyCategories, resolveProjectionAdjustmentForUser,
+  MAX_RELATIVE_DELTA, adjustmentDelta, checkAgeConvention, plausibleLine, validAge, buildSeasonRows, computeAdjustedProjections, fitAdjustmentModel, parseUserIds, proxyCategories, resolveProjectionAdjustmentForUser,
 } from './projectionAdjustment.js';
 import { projectPlayer } from './projection.js';
 
@@ -28,7 +28,7 @@ function makeLeague(n = 400) {
       fpm = Math.max(0.3, fpm + ageGrowth(age) + (rnd() - 0.5) * 0.04); mpg = Math.min(38, Math.max(12, mpg + 0.4 * (28 - mpg) / 4 + (rnd() - 0.5) * 3));
     }
     for (const h of hist) seasonEntries[h.season].push({ externalId: `p${i}`, season: line(h.fpm, h.mpg, h.gp, h.season === LAST) });
-    refs.set(`p${i}`, { age: ageLast + 1 });
+    refs.set(`p${i}`, { age: ageLast + 1, debutYear: ageLast >= 22 && ageLast <= 25 ? LAST - (ageLast - 22) : (ageLast < 22 ? LAST : LAST - 10) });
   }
   return { seasonEntries, refs };
 }
@@ -191,4 +191,36 @@ test('adjusted account: ranks and values change only because per-game points cha
   const ra = new Map(a.board.map((r) => [r.playerKey, r])); 
   for (const r of b.board) { assert.deepEqual(r.eligiblePositions, ra.get(r.playerKey).eligiblePositions); assert.equal(r.components.confidence, ra.get(r.playerKey).components.confidence); assert.equal(r.projectionMethod, 'age_minutes_adjusted'); }
   assert.notEqual(JSON.stringify(a.board.map((r) => r.value)), JSON.stringify(b.board.map((r) => r.value)));
+});
+
+test('malformed or implausible feed rows are dropped, never repaired', () => {
+  const ok = line(1, 30, 70, false);
+  assert.equal(plausibleLine(ok), true);
+  for (const bad of [{ ...ok, minutes: 80 }, { ...ok, minutes: '30' }, { ...ok, gamesPlayed: 200 }, { ...ok, points: -3 }, { ...ok, points: NaN }, { ...ok, rebounds: 500 }, { ...ok, doubleDoubles: 4 }, null, {}]) assert.equal(plausibleLine(bad), false);
+  assert.equal(validAge(25), true); for (const a of [null, undefined, NaN, '25', 5, 99]) assert.equal(validAge(a), false);
+});
+
+test('age convention: debutant ages must look like debut-season ages; too few debutants means unverified', () => {
+  const { externalRefById } = adjusted();
+  const ageAt = (id, season) => { const a = externalRefById.get(String(id))?.age; return a == null ? null : a + (season - REF); };
+  const good = checkAgeConvention({ externalRefById, ageAt, lastSeason: LAST });
+  assert.equal(good.ok, true); assert.ok(good.debutants >= 20);
+  const shifted = (id, season) => ageAt(id, season) + 8;                                   // grossly wrong convention
+  assert.equal(checkAgeConvention({ externalRefById, ageAt: shifted, lastSeason: LAST }).reason, 'age_convention_check_failed');
+  const noDebut = new Map([...externalRefById].map(([id, r]) => [id, { age: r.age }]));
+  assert.equal(checkAgeConvention({ externalRefById: noDebut, ageAt, lastSeason: LAST }).reason, 'age_convention_unverifiable');
+});
+
+test('unverified age convention or a corrupt feed leaves every projection unchanged', () => {
+  const noDebut = adjusted(); noDebut.externalRefById = new Map([...noDebut.externalRefById].map(([id, r]) => [id, { age: r.age }]));
+  const r1 = computeAdjustedProjections(noDebut);
+  assert.equal(r1.adjustedByCanonicalId.size, 0); assert.ok(r1.diagnostics.fallbacks.age_convention_unverifiable > 0);
+  const corrupt = adjusted();
+  for (const s of Object.keys(corrupt.seasonEntries)) corrupt.seasonEntries[s] = corrupt.seasonEntries[s].map((e) => ({ ...e, season: { ...e.season, minutes: 99, points: 1e6 } }));
+  const r2 = computeAdjustedProjections(corrupt);
+  assert.equal(r2.adjustedByCanonicalId.size, 0); // every row implausible -> no model -> fallback
+  const mixed = adjusted();
+  mixed.seasonEntries[LAST] = mixed.seasonEntries[LAST].map((e, i) => (i % 3 === 0 ? { ...e, season: { ...e.season, minutes: 'x' } } : e));
+  const r3 = computeAdjustedProjections(mixed);
+  for (const a of r3.adjustedByCanonicalId.values()) assert.ok(Math.abs(a.adjustment.deltaPerGame) <= MAX_RELATIVE_DELTA * a.adjustment.basePerGame + 0.011);
 });
