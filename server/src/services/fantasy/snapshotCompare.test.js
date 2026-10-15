@@ -87,6 +87,8 @@ test('classification ignores prior-season Yahoo ranks: incoming rookies stay roo
   assert.equal(c.unknown.total, 1);
   assert.equal(c.scoring_gap.total, 1);
   assert.deepEqual(cov.classification.wouldReceiveEstimate, ['Incoming Rookie']);
+  assert.equal(cov.wouldBeEstimated, 1);          // veterans, injured and unknown players are not counted as estimable
+  assert.equal(cov.players.length, 1);
 });
 
 test('replacement baselines: exact per player, positions only when the rows isolate them, otherwise explicitly unavailable', () => {

@@ -87,7 +87,11 @@ export function analyzeSnapshot(clean, { highlight = ['Cade Cunningham', 'Bam Ad
   const model = fitMarketPrior(calibration);
   const medianGames = median(clean.board.map((r) => r.components.expectedGames).filter((g) => g != null));
   const seasonPts = clean.board.map((r) => r.components.seasonPoints).filter((x) => x != null).sort((a, b) => b - a);
+  const cutoff = lastSeasonCutoff(clean.board.map((r) => ({ playerNumber: r.yahooPlayerNumber, hasRealStats: !r.estimate && r.components.perGame != null })));
+  const verdictOf = (r) => classifyUnprojected({ playerNumber: r.yahooPlayerNumber, cutoff, matched: false, status: r.injuryStatus, scoringGap: /league scoring/i.test(r.noDataReason || '') });
   const candidates = clean.noData.map((r) => {
+    const verdict = verdictOf(r);
+    if (verdict.class !== 'rookie_or_new_entrant') return { status: `not_estimated_${verdict.class}`, name: r.name, adp: r.yahooAdp };
     if (r.yahooAdp == null) return { status: 'no_adp', name: r.name, reason: r.noDataReason };
     if (!model) return { status: 'calibration_unavailable', name: r.name };
     const pg = marketPriorPerGame(model, r.yahooAdp);
@@ -105,14 +109,9 @@ export function analyzeSnapshot(clean, { highlight = ['Cade Cunningham', 'Bam Ad
   };
   // Unprojected players: classified with the SAME function production uses for estimate eligibility.
   // Cutoff = highest Yahoo player number among players that have a real stat-based projection (every board row).
-  const cutoff = lastSeasonCutoff(clean.board.map((r) => ({ playerNumber: r.yahooPlayerNumber, hasRealStats: !r.estimate && r.components.perGame != null })));
   const byClass = {};
   for (const r of clean.noData) {
-    const verdict = classifyUnprojected({
-      playerNumber: r.yahooPlayerNumber, cutoff, matched: false, status: r.injuryStatus,
-      scoringGap: /league scoring/i.test(r.noDataReason || ''),
-    });
-    const k = verdict.class; (byClass[k] ||= { total: 0, withAdp: 0, namesWithAdp: [] }); byClass[k].total += 1;
+    const k = verdictOf(r).class; (byClass[k] ||= { total: 0, withAdp: 0, namesWithAdp: [] }); byClass[k].total += 1;
     if (r.yahooAdp != null) { byClass[k].withAdp += 1; byClass[k].namesWithAdp.push({ name: r.name, adp: r.yahooAdp, yahooPlayerNumber: r.yahooPlayerNumber, status: r.injuryStatus, priorSeasonRankCount: r.priorSeasonRanks }); }
   }
   coverage.unprojectedByClass = byClass;
