@@ -118,3 +118,43 @@ points from the moved weight; Cade loses 0.2 and gains 3.8. Top-50 overlap 47 of
 Daniels, Castle; leaving: Gobert, Sarr, Vucevic. (Across all 418 pool players C-eligible players average -34 and others +14, inflated by
 the coarse labels that make 29% of the pool "C-eligible".)
 Exact steps to run it on the real league are in section 5.
+
+## 9. Real-league validation from a saved workspace response (no database, no tokens, no new requests)
+Supersedes the local-server procedure. `node server/scripts/snapshotCompare.mjs <saved-response.json> [outDir]`
+reads ONE local file and touches nothing else: no database, no environment variables, no network, no Yahoo.
+
+**Is an existing snapshot enough?** The `/basketball/workspace` response your browser already receives contains,
+for every player in the Draft Helper pool, the components both models need (production, replacement, VORP,
+scarcity, per-game points, expected games, season points, confidence factor), eligible positions and ranks, plus
+the unprojected players with their ADP and the Rankings tab list. So **legacy vs v2, the top 50, positional
+shifts and Rankings/Draft Helper parity can be reproduced exactly** from it, with identical scoring, pool,
+eligibility and projections for both models by construction.
+**Not reproducible from a flags-off production response:** the exact rank/value an estimated rookie would get
+inside the board (that needs the raw projection inputs) and the badge on real rows. The script instead reports,
+from the same file, which unprojected players the fallback would estimate, the implied points per game and an
+approximate position by projected season points (labelled approximate). Exact rookie placement and the badge on
+real names would need one flagged run later (separate decision).
+
+**Capture (about 2 minutes, zero extra requests):**
+1. Open the production app normally and load Fantasy Basketball > Rankings once (the request you would make anyway).
+2. DevTools > Network > click the `workspace` request > Response tab > select all and copy (or right-click >
+   Copy > Copy response). Copy the **response body only**; do not use "Save all as HAR" or "Copy as cURL",
+   which include the Authorization header.
+3. Paste into a local file, e.g. `~/workspace-response.json`. It contains private data (roster, league name):
+   keep it local and delete it afterwards.
+
+**Run (needs only Node 20 and this branch, no .env):**
+```
+git checkout feature/ranking-integration && cd server
+node scripts/snapshotCompare.mjs ~/workspace-response.json ~/progm-out
+```
+It prints a summary and writes `progm-sanitized-snapshot.json` and `progm-ranking-comparison.json`.
+
+**What the sanitizer keeps / drops:** keeps only per-player public numbers (name, eligible positions, ranks, ADP,
+component numbers, projection flags, draft status). Drops team and league names, ids and keys, tokens, roster,
+standings, ownership and availability, and does not write the Rankings list to disk (board minus Rankings would
+reveal your roster; the parity check is done in memory and reports counts only). Open both output files and
+read them before sharing.
+
+**Share:** the two output files, plus any note on things that looked wrong. Do not share the raw response, the
+HAR, or any URL containing league or team keys.
