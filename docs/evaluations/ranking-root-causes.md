@@ -41,7 +41,7 @@ built from the 327-player pool; the live pool differs, so values are within ~2 g
 | Bam | 56, 75, 71, 78, 73 | 0.90 | 0.866 | 71.5 / 70 |
 | Sengun | 72, 75, 63, 76, 72 | 0.87 | 0.844 | 69.2 / n/a |
 
-- **Sensitivity to the previous season:** +10 games last season -> +3.1 (Cade 3.1, Bam 2.7-3.7, Sengun 3.1)
+- **Sensitivity to the previous season:** +10 games last season -> about +3 (Cade 3.1, Bam 2.7, Sengun 3.1)
   expected games, i.e. 0.31 per game. Empirically (2,251 player-seasons 2016-2026), +10 games last season is
   followed by **+3.6** games next season (players who play; 4.9 including those who do not). The model is, if
   anything, slightly *under*-reactive to last season, not over-reactive.
