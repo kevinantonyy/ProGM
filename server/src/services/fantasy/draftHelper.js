@@ -416,6 +416,12 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
       periodProjected: scheduleAware ? (period.periodProjectedPoints ?? null) : null, // display only
       expectedGames: scheduleAware ? (period.expectedGames ?? null) : null, // display only
       confidence: proj?.confidence ?? null,
+      // Provenance: how this projection was built and whether it is an estimate
+      // (no NBA stat line; market-implied, low confidence) rather than a stat-based projection.
+      projectionMethod: proj?.method ?? null,
+      estimate: proj?.estimate === true,
+      estimateBasis: proj?.estimate === true ? (proj.estimateBasis ?? null) : null,
+      identityMatch: proj?.matchMethod ?? null,
       // Availability is priced once, via expected games (no second injury penalty).
       draftConfidence: proj?.confidence == null ? null : Math.min(1, proj.confidence + (proj.confidenceGamesPlayedShortfall ?? 0)),
       injury: proj?.injury ?? null,
@@ -530,7 +536,9 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     const overallRank = rankAmong(referenceValues, p.baselineValue);
     // Market context compares ProGM rank (this board position) vs Yahoo ADP.
     // DRAFT NOW/WAIT only when a reliable nextPick was supplied.
-    const market = computeMarketContext({
+    // Estimates are derived from Yahoo ADP, so ADP/Yahoo-rank comparisons for them are circular: neutral.
+    const isEstimate = p.estimate === true;
+    const market = isEstimate ? { adpVsProgm: null, label: 'neutral', reason: 'Estimate is derived from Yahoo ADP; no independent market comparison.' } : computeMarketContext({
       progmRank: overallRank, // VALUE/REACH use the single ProGM Rank
       actionRank: draftPriority, // DRAFT NOW/WAIT keep roster-aware board position
       yahooAdp: p.yahooAdp,
@@ -538,7 +546,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
       nextPick,
     });
     // ProGM-vs-Yahoo RANK agreement (independent of ADP; never reorders board).
-    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: p.yahooOverallRank });
+    const rankCmp = computeRankComparison({ progmRank: overallRank, yahooOverallRank: isEstimate ? null : p.yahooOverallRank });
     const row = {
       overallRank, // stable baseline rank (no roster fit); same value in Rankings
       draftPriority, // order of this board (adds roster fit once a roster exists)

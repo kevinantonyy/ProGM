@@ -53,6 +53,7 @@ export function buildRankings({ players, projectionProvider, overallRanks = null
       periodProjected: period?.scheduleAware ? (period.periodProjectedPoints ?? null) : null,
       expectedGames: period?.scheduleAware ? (period.expectedGames ?? null) : null,
       projectionKnown: proj?.projectedPoints != null,
+      estimate: proj?.estimate === true, // no NBA stat line: market-implied, low confidence
     };
   });
 

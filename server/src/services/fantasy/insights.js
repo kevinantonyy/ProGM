@@ -18,6 +18,7 @@
 import * as providers from '../providers/index.js';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
+import { applyMarketPriors } from './marketPrior.js';
 
 /** canonicalId used across the app for a normalized Yahoo player. */
 export function canonicalIdOf(player) {
@@ -268,6 +269,12 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
+  // 4b. Players with no usable stat line (incoming rookies, long-absent
+  //     veterans) get a clearly-labelled, low-confidence market-implied estimate
+  //     calibrated on this pool's players WITH stats. Never applied to a player
+  //     that has a real projection, and skipped when ADP/calibration is missing.
+  const { estimateCount } = applyMarketPriors({ canonical, players, projectionByCanonicalId, canonicalIdOf, seasonYear });
+
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
@@ -279,7 +286,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionProvider,
     projectionByCanonicalId,
     imageByCanonicalId,
-    identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
+    identityDiagnostics: { ...diagnostics, projectedCount, estimatedCount: estimateCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
     freshness,
     providerStatus: providers.providerStatus(),
     // Per-source availability so the UI/report can see what the primary served.
