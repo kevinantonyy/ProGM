@@ -47,3 +47,15 @@ export function resolveRankingShadow(env = process.env) {
   const on = ['on', 'true', '1'].includes(String(env?.PROGM_RANKING_SHADOW ?? '').trim().toLowerCase());
   return on && resolveRankingModel(env) === 'legacy' && !resolveRookieEstimates(env);
 }
+
+/**
+ * Ranking diagnostics endpoints (ranking-compare, ranking-shadow). Off by default. In NODE_ENV=production they stay
+ * closed unless PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION=yes is ALSO set, so a stray flag cannot open them on Render.
+ */
+export function rankingDiagnosticsEnabled(env = process.env) {
+  if (String(env?.PROGM_RANKING_DIAGNOSTIC ?? '').trim().toLowerCase() !== 'on') return false;
+  if (String(env?.NODE_ENV ?? '').trim().toLowerCase() === 'production') {
+    return String(env?.PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION ?? '').trim().toLowerCase() === 'yes';
+  }
+  return true;
+}

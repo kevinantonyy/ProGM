@@ -40,7 +40,7 @@ import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { buildDraftBoard } from './draftHelper.js';
 import { resolveRankingModel, resolveRookieEstimates, rankingProfile, resolveRankingShadow } from './rankingModel.js';
-import { runRankingShadow, shadowLogLine } from './rankingShadow.js';
+import { runWorkspaceShadow } from './rankingShadow.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -263,27 +263,9 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     : { available: false, availabilityKnown: true, board: [], noData: [], note: 'League settings unavailable.' };
   if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
   delete draftBoard.baselineReference; // internal; not sent to the client
-  // Shadow mode (PROGM_RANKING_SHADOW, default off): build v2 from the SAME cached pool, projections and settings,
-  // for diagnostics only. Reads the legacy board; never alters it, never calls Yahoo, never throws.
+  // Shadow mode (PROGM_RANKING_SHADOW, default off): v2 over the SAME objects that produced the legacy board above.
   if (settings && typeof shadowSink === 'function' && resolveRankingShadow()) {
-    const v2RefKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories, profile: 'v2.noest' });
-    const shadow = runRankingShadow({
-      legacyBoard: draftBoard,
-      buildV2: () => {
-        const v2 = buildDraftBoard({
-          players: draftPool, settings, projectionProvider: draftProvider, poolComplete: league?.draftStatus === 'predraft',
-          baselineReference: loadBaselineReference(providers.cache, v2RefKey), rosterAnalysis: analysis,
-          availabilityOf: (p) => availableKeys.has(p.playerKey), currentSeason: league?.season || null,
-          rankingModel: 'v2', rookieEstimates: false,
-        });
-        if (v2.baselineReference) saveBaselineReference(providers.cache, v2RefKey, v2.baselineReference);
-        delete v2.baselineReference;
-        return v2;
-      },
-    });
-    try { shadowSink(shadow); } catch { /* sink failure must never affect the workspace */ }
-    const line = shadowLogLine(shadow);
-    if (line) console.info(line);
+    runWorkspaceShadow({ legacyBoard: draftBoard, draftPool, settings, projectionProvider: draftProvider, rosterAnalysis: analysis, availableKeys, league, leagueKey, cache: providers.cache, shadowSink });
   }
   // Rankings tab shares the Draft Helper's baseline: same Overall Rank per player.
   const overallRanks = new Map((draftBoard.board || []).map((row) => [row.playerKey, row.overallRank]));

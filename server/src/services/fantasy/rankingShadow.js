@@ -9,6 +9,8 @@
  */
 import { compareRankingModels } from './rankingCompare.js';
 import { normalizeName } from '../identity/playerIdentity.js';
+import { buildDraftBoard } from './draftHelper.js';
+import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 
 export const SHADOW_HIGHLIGHT = ['Cade Cunningham', 'Jalen Johnson', 'Bam Adebayo', 'Alperen Sengun'];
 const POSITIONS = ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C'];
@@ -125,4 +127,30 @@ export function shadowLogLine(result) {
   if (result.skipped) return `[ranking-shadow] skipped reason=${result.skipped}`;
   const c = result.comparison;
   return `[ranking-shadow] ok players=${c.players} top50=${c.topOverlap[1].overlap}/${c.topOverlap[1].legacyCount} anomalies=${c.anomalies.length} ms=${result.ms}`;
+}
+
+/**
+ * Workspace wiring. Receives the very objects the legacy board was built from (pool, provider, settings, analysis,
+ * availability), so v2 cannot see different data. Makes no network call and never throws. Reads the legacy board only.
+ * The only cache write is v2's own frozen baseline under the 'v2.noest' key; the legacy reference is never touched.
+ */
+export function runWorkspaceShadow({ legacyBoard, draftPool, settings, projectionProvider, rosterAnalysis, availableKeys, league, leagueKey, cache, shadowSink, log = console.info }) {
+  const shadow = runRankingShadow({
+    legacyBoard,
+    buildV2: () => {
+      const v2RefKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories, profile: 'v2.noest' });
+      const v2 = buildDraftBoard({
+        players: draftPool, settings, projectionProvider, poolComplete: league?.draftStatus === 'predraft',
+        baselineReference: loadBaselineReference(cache, v2RefKey), rosterAnalysis,
+        availabilityOf: (p) => availableKeys.has(p.playerKey), currentSeason: league?.season || null,
+        rankingModel: 'v2', rookieEstimates: false,
+      });
+      if (v2.baselineReference) saveBaselineReference(cache, v2RefKey, v2.baselineReference);
+      delete v2.baselineReference;
+      return v2;
+    },
+  });
+  try { shadowSink(shadow); } catch { /* sink failure must never affect the workspace */ }
+  try { const line = shadowLogLine(shadow); if (line) log(line); } catch { /* logging is best effort */ }
+  return shadow;
 }

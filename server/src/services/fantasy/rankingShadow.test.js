@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { buildDraftBoard } from './draftHelper.js';
 import { buildRankings } from './rankings.js';
 import { rankingProfile, resolveRankingShadow } from './rankingModel.js';
-import { compareBoards, runRankingShadow, shadowLogLine } from './rankingShadow.js';
+import { compareBoards, runRankingShadow, runWorkspaceShadow, shadowLogLine } from './rankingShadow.js';
+import { referenceKey, saveBaselineReference } from './baselineReference.js';
 
 // Synthetic players only.
 const SETTINGS = { teamCount: 4, rosterSlots: [
@@ -88,4 +89,56 @@ test('result carries names and numbers only (no league/team identifiers)', () =>
   const text = JSON.stringify(r);
   for (const banned of ['leagueKey', 'teamKey', 'token', 'playerKey', 'teamName', '.l.', '.t.']) assert.ok(!text.includes(banned), banned);
   assert.match(shadowLogLine(r), /^\[ranking-shadow\] ok players=36 top50=\d+\/\d+ anomalies=0 ms=\d+$/);
+});
+
+function spyCache() {
+  const store = new Map(); const writes = [];
+  return { writes, get: (k) => (store.has(k) ? { value: store.get(k), meta: { stale: false } } : null), set: (k, v) => { writes.push(k); store.set(k, v); } };
+}
+const workspaceArgs = (cache, extra = {}) => {
+  const frozen = deepFreeze({ players: mk(), settings: SETTINGS, rosterAnalysis: analysis });
+  const availableKeys = new Set(frozen.players.map((p) => p.playerKey));
+  return { draftPool: frozen.players, settings: frozen.settings, projectionProvider: proj, rosterAnalysis: frozen.rosterAnalysis, availableKeys, league: { season: '2026', draftStatus: 'predraft' }, leagueKey: '428.l.1', cache, log: () => {}, ...extra };
+};
+
+test('workspace wiring: same pool/settings/projections feed both boards; legacy output and legacy cache untouched; no network', () => {
+  const cache = spyCache(); const realFetch = global.fetch; let fetched = 0;
+  global.fetch = () => { fetched += 1; throw new Error('shadow must not use the network'); };
+  try {
+    const a = workspaceArgs(cache);
+    // Legacy board as the workspace builds it, and its frozen reference in the cache.
+    const legacyBoard = buildDraftBoard({ players: a.draftPool, settings: a.settings, projectionProvider: a.projectionProvider, rosterAnalysis: a.rosterAnalysis, poolComplete: true, availabilityOf: (p) => a.availableKeys.has(p.playerKey), currentSeason: '2026', rankingModel: 'legacy' });
+    const legacyKey = referenceKey({ leagueKey: '428.l.1', season: '2026', statCategories: SETTINGS.statCategories, profile: 'legacy.noest' });
+    saveBaselineReference(cache, legacyKey, legacyBoard.baselineReference);
+    cache.writes.length = 0;
+    const visible = JSON.stringify(legacyBoard); const legacyRef = JSON.stringify(cache.get(legacyKey).value);
+    const sunk = [];
+    const shadow = runWorkspaceShadow({ ...a, legacyBoard, shadowSink: (r) => sunk.push(r) });
+    assert.equal(shadow.ok, true, shadow.error);
+    assert.equal(sunk.length, 1);
+    assert.equal(fetched, 0);
+    assert.equal(JSON.stringify(legacyBoard), visible);
+    assert.equal(JSON.stringify(cache.get(legacyKey).value), legacyRef);
+    assert.ok(cache.writes.every((k) => k.includes(':v2.noest:')), cache.writes.join());
+    // Same inputs: v2 differs from legacy only by weights, never by data.
+    const v2Board = buildDraftBoard({ players: a.draftPool, settings: a.settings, projectionProvider: a.projectionProvider, rosterAnalysis: a.rosterAnalysis, poolComplete: true, availabilityOf: (p) => a.availableKeys.has(p.playerKey), currentSeason: '2026', rankingModel: 'v2' });
+    const lv = new Map(legacyBoard.board.map((r) => [r.playerKey, r]));
+    assert.equal(v2Board.board.length, legacyBoard.board.length);
+    for (const r of v2Board.board) {
+      const l = lv.get(r.playerKey);
+      assert.deepEqual(r.eligiblePositions, l.eligiblePositions);
+      for (const f of ['perGame', 'expectedGames', 'seasonPoints', 'production', 'replacement', 'confidence']) assert.equal(r.components[f], l.components[f], f);
+    }
+  } finally { global.fetch = realFetch; }
+});
+
+test('workspace wiring: a throwing sink or v2 failure never reaches the caller', () => {
+  const cache = spyCache(); const a = workspaceArgs(cache);
+  const legacyBoard = buildDraftBoard({ players: a.draftPool, settings: a.settings, projectionProvider: a.projectionProvider, rosterAnalysis: a.rosterAnalysis, poolComplete: true, rankingModel: 'legacy' });
+  const before = JSON.stringify(legacyBoard);
+  assert.doesNotThrow(() => runWorkspaceShadow({ ...a, legacyBoard, shadowSink: () => { throw new Error('sink down'); } }));
+  const broken = { ...a, projectionProvider: { getProjection: () => { throw new TypeError('projection exploded'); } } };
+  const r = runWorkspaceShadow({ ...broken, legacyBoard, shadowSink: () => {} });
+  assert.deepEqual({ ok: r.ok, error: r.error }, { ok: false, error: 'TypeError' });
+  assert.equal(JSON.stringify(legacyBoard), before);
 });
