@@ -71,6 +71,7 @@ npm run dev
 
 ### 4. Retrieve and save sanitized diagnostics to your Desktop (terminal 3)
 ```powershell
+Add-Type -AssemblyName System.Web
 $workspaceUrl = Read-Host "Paste the workspace Request URL"
 $q = [System.Web.HttpUtility]::ParseQueryString(([uri]$workspaceUrl).Query)
 $league = $q["leagueKey"]; $team = $q["teamKey"]
