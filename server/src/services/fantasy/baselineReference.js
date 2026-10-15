@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { RANKING_MODEL_VERSION } from './draftHelper.js';
 
 /**
  * Frozen normalization reference for the shared ProGM Overall Rank.
@@ -22,7 +23,7 @@ function scoringSignature(statCategories) {
 }
 
 export function referenceKey({ leagueKey, season, statCategories }) {
-  return `bball:overall-ref:${leagueKey}:${season ?? 'na'}:${scoringSignature(statCategories)}`;
+  return `bball:overall-ref:${RANKING_MODEL_VERSION}:${leagueKey}:${season ?? 'na'}:${scoringSignature(statCategories)}`;
 }
 
 export function loadBaselineReference(cache, key) {

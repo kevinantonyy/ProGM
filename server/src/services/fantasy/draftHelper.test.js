@@ -177,7 +177,8 @@ test('components are normalized so no single raw scale dominates (bounded 0..1)'
   }
   // Weights are the documented blend (float-safe sum check).
   assert.ok(Math.abs(Object.values(DRAFT_WEIGHTS).reduce((sum, value) => sum + value, 0) - 1) < 1e-9);
-  assert.equal(DRAFT_WEIGHTS.production, 0.70);
+  assert.equal(DRAFT_WEIGHTS.production, 0.75);
+  assert.equal(DRAFT_WEIGHTS.scarcity, 0); // no separate positional bonus: replacement already prices supply
   assert.equal(DRAFT_WEIGHTS.replacement, 0.20);
 });
 

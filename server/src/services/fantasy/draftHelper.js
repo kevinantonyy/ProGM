@@ -33,7 +33,7 @@ const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
  *                        never treated as zero production)
  *   roster fit   (0..1)  selected team's positional need (secondary only)
  *
- *   rawScore = 0.70*production + 0.20*replacement + 0.05*scarcity + 0.05*fit
+ *   rawScore = 0.75*production + 0.20*replacement + 0.00*scarcity + 0.05*fit
  *   draftValue = rawScore
  *                * (CONF_FLOOR + (1-CONF_FLOOR)*confidence)   // confidence penalty
  *
@@ -41,7 +41,13 @@ const OUT_STATUSES = new Set(['O', 'OUT', 'IL', 'INJ', 'NA', 'SUSP']);
  * verified season-ending injury cap, so no separate durability or injury
  * multiplier is applied. This prevents double-counting availability risk.
  */
-export const DRAFT_WEIGHTS = Object.freeze({ production: 0.70, replacement: 0.20, scarcity: 0.05, rosterFit: 0.05 });
+// Model v2: the separate min-max scarcity bonus is removed (weight 0, still reported for
+// explanation). It double-counted positional supply already priced by the replacement baseline
+// and saturated at the maximum for every center. Its 0.05 went to the position-neutral
+// production term so scores stay on the same scale; backtest effect of that move is negligible
+// (Spearman 0.6081 -> 0.6082, same positional bias). See docs/evaluations/ranking-accuracy-audit.md.
+export const RANKING_MODEL_VERSION = 'v2-no-scarcity';
+export const DRAFT_WEIGHTS = Object.freeze({ production: 0.75, replacement: 0.20, scarcity: 0, rosterFit: 0.05 });
 const CONF_FLOOR = 0.9; // data quality is a restrained 0-10% adjustment, never the primary ranking signal
 
 /** Max scarcity weight among a player's eligible positions (>=1). */
@@ -263,6 +269,16 @@ export function describePriorityDifference({ personalized, poolPosition, draftPr
   return `Roster fit: ${why}, so draft recommendations rate this player ${moved > 0 ? 'slightly higher' : 'slightly lower'} than ProGM Rank alone.`;
 }
 
+/** Plain-language reason a player could not be ranked (never silently dropped). */
+export function explainNoData(proj, player) {
+  if (!proj || proj.method === 'no_data') {
+    if (player?.yahooAdp == null) return 'No NBA stats for the projection season and no Yahoo ADP to base an estimate on (e.g. an incoming rookie or a player who missed last season).';
+    return 'No NBA stats for the projection season, and the Yahoo ADP was outside the range that can be estimated reliably.';
+  }
+  if (proj.method === 'incomplete_scoring_data') return 'League scoring uses a stat the data provider does not supply, so points cannot be projected.';
+  return 'Insufficient data to project this player.';
+}
+
 /** Concise, data-only explanation of the main ranking factors. */
 export function describeRankingFactors(row, seasonPointsRank, poolSize) {
   const c = row.components || {};
@@ -443,7 +459,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
     });
     // Historical availability (optional) rides on the projection object.
     const history = proj?.history ?? null;
-    if (perGame == null) { noData.push({ ...base, value: null }); continue; }
+    if (perGame == null) { noData.push({ ...base, value: null, noDataReason: explainNoData(proj, p) }); continue; }
     prelim.push({ ...base, perGame, history });
   }
 
@@ -594,7 +610,7 @@ export function buildDraftBoard({ players, settings, projectionProvider, poolCom
         'projected season points = league-scored projected fantasy points/game × expected regular-season games',
         'expected games = 35% independent older-career availability + 40% recent availability + 25% historical age/experience baseline',
         'career and recent samples are disjoint and empirically shrunk by eligible games and independent seasons; missing/pre-debut seasons are not zero',
-        'draft value = normalized blend of projected season production (70%), positional replacement/VORP (20%), scarcity (5%), and roster fit (5%)',
+        'draft value = normalized blend of projected season production (75%), positional replacement/VORP (20%), and roster fit (5%); no separate scarcity bonus (replacement already prices positional supply)',
         'confidence makes a restrained data-quality adjustment; expected games accounts for availability once, with no second durability/injury multiplier',
         'current-period schedule totals do NOT drive draft value',
         'Yahoo ADP shown as MARKET context (VALUE/REACH/DRAFT NOW/WAIT) — it never changes the ProGM ranking',

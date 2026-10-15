@@ -23,7 +23,7 @@ import {
   deriveDraftState, picksForTeam, deriveNextPick,
 } from '../services/fantasy/draftResults.js';
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
-import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
+import { buildDraftBoard, RANKING_MODEL_VERSION } from '../services/fantasy/draftHelper.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
@@ -141,7 +141,7 @@ router.get('/workspace', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    const cacheKey = `bball:workspace:${req.userId}:${leagueKey}:${teamKey}`;
+    const cacheKey = `bball:workspace:${RANKING_MODEL_VERSION}:${req.userId}:${leagueKey}:${teamKey}`;
     if (req.query.refresh !== 'true') {
       const cached = cache.get(cacheKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });

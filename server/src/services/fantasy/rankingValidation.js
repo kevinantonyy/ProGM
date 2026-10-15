@@ -8,7 +8,7 @@ import { spearmanCorrelation } from './backtest/metrics.js';
  *
  * Variants (all keep the 70% production and 20% replacement terms; neutral
  * roster fit, same confidence factor):
- *   A  current: production + replacement + min-max-normalized scarcity (5%)
+ *   A  legacy v1 (reconstructed; production ranking no longer uses it): production + replacement + min-max-normalized scarcity (5%)
  *   B  production + replacement, no scarcity
  *   C  production + replacement + absolute supply/demand scarcity (5%), where
  *      a position is only "scarce" in proportion to how much its pressure
@@ -47,7 +47,10 @@ export function rankVariants({ players, projectionProvider, settings, currentSea
     const sC = Math.max(0, ...(r.eligiblePositions || []).map((pos) => scarcityC[pos] ?? 0));
     return {
       playerKey: r.playerKey, positions: r.eligiblePositions, perGame: r.perGame, seasonPoints: r.seasonPoints,
-      A: r.baselineValue,
+      // A is reconstructed as the LEGACY (v1) formula so the harness keeps a fixed reference now
+      // that production runs the scarcity-free v2 model (r.baselineValue).
+      A: (base + W.scarcity * c.scarcity + 0.05 * 0.5) * c.confidenceFactor * 100,
+      PROD_V2: r.baselineValue,
       B: base * c.confidenceFactor * 100,
       C: (base + W.scarcity * sC) * c.confidenceFactor * 100,
     };

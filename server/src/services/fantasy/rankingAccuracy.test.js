@@ -21,14 +21,18 @@ const provider = { getProjection: (p) => (p._pts == null ? null : { projectedPoi
 const board = (players = pool) => buildDraftBoard({ players, settings: SETTINGS, projectionProvider: provider, poolComplete: true });
 const row = (b, key) => b.board.find((r) => r.playerKey === key);
 
-test('positional bias: equal projections differ only by the bounded replacement + scarcity terms', () => {
+test('positional bias: equal projections differ only by the bounded replacement term (no separate scarcity bonus)', () => {
   const b = board();
   const g = row(b, 'G1'); const c = row(b, 'C1');
   assert.equal(g.perGame, c.perGame);
   const gap = c.value - g.value;
   // 0.20*replacement + 0.05*scarcity can move a player by at most 25 raw points of 100 scale; require far less here.
-  assert.ok(gap >= 0 && gap <= 12, `positional advantage ${gap.toFixed(2)} must stay bounded`);
+  assert.ok(gap >= 0 && gap <= 8, `positional advantage ${gap.toFixed(2)} must stay bounded`);
   assert.ok(c.components.scarcity <= 1 && c.components.replacement <= 1);
+  // The gap is explained by replacement alone: rebuild the value without it and the two tie.
+  const w = (r) => (0.75 * r.components.production + 0.05 * 0.5) * r.components.confidenceFactor * 100;
+  assert.ok(Math.abs(w(g) - w(c)) < 0.02);
+  assert.ok(Math.abs(gap - 0.2 * (c.components.replacement - g.components.replacement) * c.components.confidenceFactor * 100) < 0.05);
 });
 
 test('positional bias: a clearly better player is never outranked by a thin-position player', () => {
@@ -45,9 +49,10 @@ test('missing data: players without a projection are listed as no-data, never ra
   assert.equal(b.board.length, pool.length);
 });
 
-test('ranking consistency: every ranked player has a unique, contiguous baseline order that matches value order', () => {
-  const b = board();
+test('ranking consistency: every ranked player has a consistent baseline order that matches value order', () => {
+  const b = board(pool.map((p) => (p.playerKey === 'G1' ? { ...p, _pts: 51 } : p.playerKey === 'G3' ? { ...p, _pts: 41 } : p.playerKey === 'G6' ? { ...p, _pts: 27 } : p)));
   const byRank = [...b.board].sort((a, c) => a.overallRank - c.overallRank);
   for (let i = 1; i < byRank.length; i += 1) assert.ok(byRank[i].baselineValue <= byRank[i - 1].baselineValue);
-  assert.equal(new Set(b.board.map((r) => r.overallRank)).size, b.board.length);
+  // Competition ranking: rank = 1 + number of strictly better baseline values (ties share a rank).
+  for (const r of b.board) assert.equal(r.overallRank, 1 + b.board.filter((o) => o.baselineValue > r.baselineValue).length);
 });
