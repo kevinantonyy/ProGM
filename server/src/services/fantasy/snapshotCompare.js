@@ -12,7 +12,8 @@ import { fitMarketPrior, marketPriorPerGame, MIN_CALIBRATION_GAMES, MIN_POINTS }
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const COMPONENT_KEYS = ['production', 'replacement', 'vorp', 'scarcity', 'perGame', 'expectedGames', 'seasonPoints', 'confidence', 'confidenceFactor'];
 
-export function sanitizeWorkspace(raw) {
+export function sanitizeWorkspace(raw, { trace = [] } = {}) {
+  const traced = new Set(trace.map((n) => String(n).trim().toLowerCase()));
   const board = raw?.draftBoard?.board;
   if (!Array.isArray(board) || !board.length) throw new Error('This file has no draftBoard.board. Save the response of the /basketball/workspace request.');
   const pick = (c) => Object.fromEntries(COMPONENT_KEYS.map((k) => [k, num(c?.[k])]));
@@ -22,19 +23,44 @@ export function sanitizeWorkspace(raw) {
       rankScope: raw.draftBoard.rankScope ?? null, rankingModel: raw.draftBoard.rankingModel ?? 'legacy',
       draftStatus: typeof raw.connection?.draftStatus === 'string' ? raw.connection.draftStatus : null,
     },
+    league: raw.settings ? {
+      scoringFormat: raw.settings.scoringFormat ?? null, teamCount: num(raw.settings.teamCount),
+      statCategories: (raw.settings.statCategories || []).map((c) => ({ statId: num(c.statId), abbr: String(c.abbr ?? ''), pointValue: num(c.pointValue), enabled: c.enabled !== false })),
+      rosterSlots: (raw.settings.rosterSlots || []).map((c) => ({ position: String(c.position ?? ''), count: num(c.count), isStarting: c.isStarting === true })),
+    } : null,
     board: board.map((r) => ({
       name: String(r.name ?? ''), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
       overallRank: num(r.overallRank), draftPriority: num(r.draftPriority), yahooAdp: num(r.yahooAdp),
       lastSeasonGamesPlayed: num(r.lastSeasonNba?.gamesPlayed), estimate: r.estimate === true,
       projectionMethod: typeof r.projectionMethod === 'string' ? r.projectionMethod : null, marketLabel: typeof r.marketLabel === 'string' ? r.marketLabel : null,
       components: pick(r.components),
+      ...(traced.has(String(r.name ?? '').toLowerCase()) ? { trace: traceRow(r) } : {}),
     })),
     noData: (Array.isArray(raw.draftBoard.noData) ? raw.draftBoard.noData : []).map((r) => ({
       name: String(r.name ?? ''), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
       yahooAdp: num(r.yahooAdp), noDataReason: typeof r.noDataReason === 'string' ? r.noDataReason : null,
+      injuryStatus: typeof r.status === 'string' ? r.status : null, priorSeasonRanks: Array.isArray(r.yahooPriorSeasonRanks) ? r.yahooPriorSeasonRanks.length : 0,
+      lastSeasonYahooRank: num(r.lastSeasonYahooRank), identityMatch: typeof r.identityMatch === 'string' ? r.identityMatch : null,
     })),
     // Only used in memory for the parity check; names are NOT kept (board minus rankings would reveal your roster).
     rankingsParity: (raw.rankings?.players || []).map((p) => [String(p.name ?? ''), num(p.overallRank)]),
+  };
+}
+
+/** Public per-player numbers behind one row's projection (only for explicitly traced names). */
+function traceRow(r) {
+  const a = r.components?.availability || {};
+  const keep = (o, keys) => Object.fromEntries(keys.map((k) => [k, typeof o?.[k] === 'number' || typeof o?.[k] === 'string' ? o[k] : null]));
+  return {
+    age: num(r.age), debutYear: num(r.debutYear), identityMatch: typeof r.identityMatch === 'string' ? r.identityMatch : null,
+    projectionMethod: typeof r.projectionMethod === 'string' ? r.projectionMethod : null, injuryStatus: typeof r.status === 'string' ? r.status : null,
+    lastSeasonNba: r.lastSeasonNba ? keep(r.lastSeasonNba, ['season', 'points', 'rebounds', 'assists', 'gamesPlayed']) : null,
+    lastSeasonFantasy: r.lastSeasonFantasy ? { season: r.lastSeasonFantasy.season ?? null, points: num(r.lastSeasonFantasy.points), breakdown: (r.lastSeasonFantasy.breakdown || []).map((b) => keep(b, ['abbr', 'perGame', 'weight', 'points'])) } : null,
+    availability: {
+      ...keep(a, ['expectedGames', 'availability', 'careerRate', 'independentCareerRate', 'recentRate', 'weightedRate', 'posteriorRate', 'baselineAvailability', 'historyCoverage', 'shrinkageFactor', 'evidenceGames', 'seasonsObserved', 'historicalPattern']),
+      isolatedAbsenceAdjusted: Array.isArray(a.isolatedAbsenceAdjusted) ? a.isolatedAbsenceAdjusted : [],
+      perSeason: (a.perSeason || []).map((x) => keep(x, ['season', 'gamesPlayed', 'gameTotal', 'availability'])),
+    },
   };
 }
 
@@ -76,5 +102,31 @@ export function analyzeSnapshot(clean, { highlight = ['Cade Cunningham', 'Bam Ad
     calibration: model ? { players: model.n, r2: model.r2, slope: Number(model.slope.toFixed(2)), adpRange: [model.minAdp, model.maxAdp], minRequired: MIN_POINTS } : { players: calibration.length, usable: false },
     players: candidates.filter((c) => c.status === 'would_be_estimated').slice(0, 25),
   };
-  return { snapshot: clean.meta, comparison: cmp, rankingsVsDraftHelper: parity, rookieEstimateCoverage: coverage };
+  // Unprojected players by what the data can actually distinguish (diagnostic only; nothing here changes a ranking).
+  const classOf = (r) => {
+    if (r.noDataReason && /league scoring/i.test(r.noDataReason)) return 'scoring_gap';
+    if (r.priorSeasonRanks > 0 || r.lastSeasonYahooRank != null) return 'veteran_missing_stats'; // has a Yahoo rank from an earlier season
+    if (r.injuryStatus) return 'injured_no_history';
+    return 'rookie_or_new_candidate';
+  };
+  const byClass = {};
+  for (const r of clean.noData) { const k = classOf(r); (byClass[k] ||= { total: 0, withAdp: 0, namesWithAdp: [] }); byClass[k].total += 1; if (r.yahooAdp != null) { byClass[k].withAdp += 1; byClass[k].namesWithAdp.push(`${r.name} (ADP ${r.yahooAdp}${r.injuryStatus ? ', ' + r.injuryStatus : ''}, identity ${r.identityMatch ?? 'unmatched'})`); } }
+  coverage.unprojectedByClass = byClass;
+
+  // Replacement baselines recovered from published components: baseline = seasonPoints - vorp; spread = vorp / replacement.
+  const singles = {};
+  const spreads = [];
+  for (const r of clean.board) {
+    const c = r.components; if (c.seasonPoints == null || c.vorp == null) continue;
+    const pos = r.eligiblePositions.filter((p) => p !== 'UTIL');
+    if (pos.length === 1) (singles[pos[0]] ||= []).push(c.seasonPoints - c.vorp);
+    if (c.replacement != null && c.replacement > 0.02 && c.replacement < 0.98 && c.vorp > 0) spreads.push(c.vorp / c.replacement);
+  }
+  const baselines = Object.fromEntries(Object.entries(singles).map(([k, v]) => [k, Math.round(median(v))]));
+  const spread = median(spreads);
+  const poolMax = median(clean.board.filter((r) => r.components.production > 0.2).map((r) => r.components.seasonPoints / r.components.production));
+  const poolDiag = { replacementBaselineByPosition: baselines, spread: spread == null ? null : Math.round(spread), poolMaxSeasonPoints: poolMax == null ? null : Math.round(poolMax) };
+
+  const traces = clean.board.filter((r) => r.trace).map((r) => ({ name: r.name, eligiblePositions: r.eligiblePositions, components: r.components, ...r.trace }));
+  return { snapshot: clean.meta, league: clean.league, comparison: cmp, rankingsVsDraftHelper: parity, rookieEstimateCoverage: coverage, pool: poolDiag, traces };
 }

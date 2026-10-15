@@ -53,3 +53,31 @@ test('rookie coverage: unprojected players are classified honestly (estimated / 
   assert.equal(out.players[0].name, 'Rookie X');
   assert.ok(out.players[0].impliedFantasyPointsPerGame > 0);
 });
+
+test('trace option adds public availability/scoring detail for named players only, still without identity data', () => {
+  const clean = sanitizeWorkspace({ ...raw, settings: { scoringFormat: 'points', teamCount: 4, statCategories: [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }], rosterSlots: [{ position: 'C', count: 2, isStarting: true }] } }, { trace: ['vet 3'] });
+  const traced = clean.board.filter((r) => r.trace);
+  assert.equal(traced.length, 1); assert.equal(traced[0].name, 'Vet 3');
+  assert.ok(Array.isArray(traced[0].trace.availability.perSeason) && traced[0].trace.availability.perSeason.length >= 1);
+  assert.equal(clean.league.statCategories[0].pointValue, 1);
+  const text = JSON.stringify({ ...clean, rankingsParity: undefined });
+  for (const bad of ['SECRET', 'tok-123', '466.l', '466.p', 'MY ROSTER', 'Rival']) assert.equal(text.includes(bad), false, bad);
+  const out = analyzeSnapshot(clean, { highlight: ['vet 3'] });
+  assert.equal(out.traces.length, 1);
+  assert.ok(out.pool.replacementBaselineByPosition.PG != null || out.pool.replacementBaselineByPosition.C != null);
+});
+
+test('unprojected players are split into rookie candidates, veterans with a prior-season Yahoo rank, injured, and scoring gaps', () => {
+  const base = sanitizeWorkspace(raw);
+  base.noData = [
+    { name: 'New Guy', eligiblePositions: ['PG'], yahooAdp: 40, noDataReason: 'x', injuryStatus: null, priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
+    { name: 'Hurt Vet', eligiblePositions: ['C'], yahooAdp: 60, noDataReason: 'x', injuryStatus: 'INJ', priorSeasonRanks: 3, lastSeasonYahooRank: null, identityMatch: null },
+    { name: 'Hurt Newbie', eligiblePositions: ['C'], yahooAdp: 70, noDataReason: 'x', injuryStatus: 'O', priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
+    { name: 'Gap', eligiblePositions: ['C'], yahooAdp: null, noDataReason: 'League scoring uses a stat the data provider does not supply', injuryStatus: null, priorSeasonRanks: 0, lastSeasonYahooRank: null, identityMatch: null },
+  ];
+  const c = analyzeSnapshot(base).rookieEstimateCoverage.unprojectedByClass;
+  assert.equal(c.rookie_or_new_candidate.total, 1);
+  assert.equal(c.veteran_missing_stats.total, 1);
+  assert.equal(c.injured_no_history.total, 1);
+  assert.equal(c.scoring_gap.total, 1);
+});
