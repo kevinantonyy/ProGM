@@ -7,6 +7,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, '..', '..', '.env') });
 
+import { assertLocalDatabaseIfRequired } from './localGuard.js';
+
+// Opt-in safety for local testing (PROGM_REQUIRE_LOCAL_DB=on): refuse to even create a pool for a non-local database.
+assertLocalDatabaseIfRequired();
+
 const { Pool } = pg;
 const postgres = new Pool({
   connectionString: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL,

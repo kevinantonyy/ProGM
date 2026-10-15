@@ -8,7 +8,8 @@
     "dev": "node --watch src/index.js",
     "seed": "node src/db/seed.js",
     "test": "node --test",
-    "backtest:historical": "node src/services/fantasy/backtest/cli.js"
+    "backtest:historical": "node src/services/fantasy/backtest/cli.js",
+    "shadow:local": "node scripts/shadowStart.mjs"
   },
   "dependencies": {
     "bcryptjs": "2.4.3",
