@@ -121,3 +121,11 @@ test('projection method: uses the payload value when present, otherwise derives 
   const given = withFantasy(53, 50, 'season_only');
   assert.equal(given.projectionMethod, 'season_only'); assert.equal(given.projectionMethodSource, 'payload');
 });
+
+test('trace carries the injury fields, season weights and baseline context needed to audit expected games', () => {
+  const clean = sanitizeWorkspace(raw, { trace: ['vet 3'] });
+  const a = clean.board.find((r) => r.name === 'Vet 3').trace.availability;
+  for (const k of ['injuryType', 'injuryCap', 'injuryReason', 'injuryAdjustmentGames', 'seasonWeights', 'baselineContext', 'perSeason']) assert.ok(k in a, k);
+  assert.ok(a.baselineContext.globalRate > 0);
+  assert.ok(Array.isArray(a.seasonWeights) && a.seasonWeights.length >= 1);
+});

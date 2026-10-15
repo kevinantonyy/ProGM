@@ -50,3 +50,10 @@ test('estimate rows are flagged and rows without components are skipped, never i
   assert.equal(cmp.summary.estimateRows, 1);
   assert.equal(cmp.topByLegacy.some((r) => r.name === 'No Components'), false);
 });
+
+test('highlight lookup ignores accents so a Yahoo name with diacritics is found', () => {
+  const board = rows('legacy').map((r, i) => (i === 0 ? { ...r, name: 'Alperen Şengün' } : r));
+  const cmp = compareRankingModels(board, { top: 5, highlight: ['Alperen Sengun'] });
+  assert.equal(cmp.highlighted.length, 1);
+  assert.equal(cmp.highlighted[0].name, 'Alperen Şengün');
+});

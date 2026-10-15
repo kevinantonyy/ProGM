@@ -11,6 +11,7 @@ import { computeDraftValue, computeReplacementBaselines } from './draftHelper.js
 import { scarcityWeights } from './playerValue.js';
 import { ESTIMATE_CONFIDENCE, MIN_CALIBRATION_GAMES, fitMarketPrior, marketPriorPerGame } from './marketPrior.js';
 import { classifyUnprojected, lastSeasonCutoff } from './unprojectedClass.js';
+import { normalizeName } from '../identity/playerIdentity.js';
 
 const EXPECTED_SEASON_GAMES = 82;
 
@@ -20,7 +21,7 @@ function competitionRanks(values) {
 }
 const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 
-export function replayPipeline(clean, { model = 'legacy', rookieEstimates = false } = {}) {
+export function replayPipeline(clean, { model = 'legacy', rookieEstimates = false, rookieOverrides = null } = {}) {
   if (!clean.league?.rosterSlots?.length) throw new Error('The snapshot has no league roster settings, so the value stage cannot be replayed.');
   const settings = { teamCount: clean.league.teamCount || 12, rosterSlots: clean.league.rosterSlots };
   const rows = clean.board.filter((r) => r.components.perGame != null && r.components.expectedGames != null).map((r) => ({
@@ -39,8 +40,8 @@ export function replayPipeline(clean, { model = 'legacy', rookieEstimates = fals
       if (verdict.class !== 'rookie_or_new_entrant' || !fit || n.yahooAdp == null || globalRate == null) continue;
       const pg = marketPriorPerGame(fit, n.yahooAdp);
       if (pg == null) continue;
-      const games = Number((EXPECTED_SEASON_GAMES * globalRate).toFixed(1)); // production: no history -> league-wide availability
-      const row = { name: n.name, eligiblePositions: n.eligiblePositions, perGame: pg, expectedSeasonGames: games, seasonPoints: pg * games, confidence: ESTIMATE_CONFIDENCE, estimate: true, legacySnapshotRank: null, yahooAdp: n.yahooAdp, statusNote: verdict.statusNote ?? null };
+      const games = rookieOverrides?.games ?? Number((EXPECTED_SEASON_GAMES * globalRate).toFixed(1)); // production: no history -> league-wide availability
+      const row = { name: n.name, eligiblePositions: n.eligiblePositions, perGame: pg, expectedSeasonGames: games, seasonPoints: pg * games, confidence: rookieOverrides?.confidence ?? ESTIMATE_CONFIDENCE, estimate: true, legacySnapshotRank: null, yahooAdp: n.yahooAdp, statusNote: verdict.statusNote ?? null };
       rows.push(row); rookieInfo.push(row);
     }
   }
@@ -55,12 +56,36 @@ export function replayPipeline(clean, { model = 'legacy', rookieEstimates = fals
   return { model, rookieEstimates, replacement, rows: rows.map((r, i) => ({ ...r, value: values[i], rank: ranks[i] })) };
 }
 
-/** Compare the replay of the production setting with the ranks the app actually displayed (fidelity of the replay). */
+/**
+ * Compare the replay of the production setting with the ranks the app actually displayed.
+ * Mismatches are explained: the snapshot stores per-game points to 2 decimals, games to 1 and the confidence factor to 3,
+ * so the replayed value can differ slightly from the unrounded value the app used. A mismatch is "explained by rounding"
+ * when its nearest rival in value is closer than the largest value change those roundings can cause.
+ */
 export function fidelity(clean) {
   const base = replayPipeline(clean, { model: 'legacy', rookieEstimates: false });
-  const diffs = base.rows.filter((r) => r.legacySnapshotRank != null).map((r) => Math.abs(r.rank - r.legacySnapshotRank));
+  const settings = { teamCount: clean.league.teamCount || 12, rosterSlots: clean.league.rosterSlots };
+  const weights = scarcityWeights(settings, base.rows);
+  const poolMax = base.rows.reduce((m, r) => Math.max(m, r.seasonPoints), 0);
+  const val = (r, d = {}) => computeDraftValue({
+    seasonPoints: (r.perGame + (d.pg || 0)) * (r.expectedSeasonGames + (d.g || 0)), perGame: r.perGame + (d.pg || 0), expectedGames: r.expectedSeasonGames + (d.g || 0),
+    confidence: Math.max(0, Math.min(1, r.confidence + (d.c || 0))), eligiblePositions: r.eligiblePositions, weights, poolMaxSeasonPoints: poolMax, replacement: base.replacement, rosterFitScore: 0.5, rankingModel: 'legacy',
+  }).value;
+  const shown = base.rows.filter((r) => r.legacySnapshotRank != null);
+  const mismatches = shown.filter((r) => r.rank !== r.legacySnapshotRank);
+  const details = mismatches.map((r) => {
+    let bound = 0;
+    for (const pg of [-0.005, 0.005]) for (const g of [-0.05, 0.05]) for (const c of [-0.005, 0.005]) bound = Math.max(bound, Math.abs(val(r, { pg, g, c }) - r.value));
+    const gap = Math.min(...base.rows.filter((o) => o !== r).map((o) => Math.abs(o.value - r.value)));
+    return { name: r.name, shownRank: r.legacySnapshotRank, replayRank: r.rank, rankDifference: r.rank - r.legacySnapshotRank, nearestRivalValueGap: Number(gap.toFixed(3)), maxRoundingValueChange: Number(bound.toFixed(3)), explainedByRounding: gap <= 2 * bound };
+  });
+  const diffs = shown.map((r) => Math.abs(r.rank - r.legacySnapshotRank));
   const n = diffs.length;
-  return { players: n, exactRankMatches: diffs.filter((d) => d === 0).length, within2Ranks: diffs.filter((d) => d <= 2).length, maxAbsRankDifference: Math.max(0, ...diffs), meanAbsRankDifference: Number((diffs.reduce((s, d) => s + d, 0) / (n || 1)).toFixed(2)) };
+  return {
+    players: n, exactRankMatches: diffs.filter((d) => d === 0).length, nonExact: mismatches.length, within2Ranks: diffs.filter((d) => d <= 2).length,
+    maxAbsRankDifference: Math.max(0, ...diffs), meanAbsRankDifference: Number((diffs.reduce((s, d) => s + d, 0) / (n || 1)).toFixed(2)),
+    nonExactExplainedByRounding: details.filter((d) => d.explainedByRounding).length, nonExactDetails: details.sort((a, b) => Math.abs(b.rankDifference) - Math.abs(a.rankDifference)),
+  };
 }
 
 const byName = (rows) => new Map(rows.map((r) => [r.name, r]));
@@ -90,10 +115,16 @@ export function compareScenarios(clean, { highlight = [] } = {}) {
   // Veterans pushed down only because rookies joined the pool (same model, with vs without rookies).
   const displaced = v2.rows.filter((r) => fullBy.get(r.name).rank > r.rank).length;
   const highlighted = highlight.map((name) => {
-    const k = [...prodBy.keys()].find((x) => x.toLowerCase() === String(name).toLowerCase());
+    const k = [...prodBy.keys()].find((x) => normalizeName(x) === normalizeName(name));
     return k ? { name: k, legacy: prodBy.get(k).rank, v2: v2By.get(k).rank, experimental: fullBy.get(k).rank, perGame: r1(prodBy.get(k).perGame), expectedGames: prodBy.get(k).expectedSeasonGames } : { name, found: false };
   });
-  return { poolSizes: { production: production.rows.length, experimental: full.rows.length }, bands, rookies, majorMovers: movers, veteransDisplacedByRookies: displaced, highlighted };
+  // Why is a rookie where he is? Re-rank with the rookie-only assumptions relaxed one at a time.
+  const vetGames = [...v2.rows].map((r) => r.expectedSeasonGames).sort((a, b) => a - b);
+  const medianVetGames = vetGames.length ? vetGames[Math.floor(vetGames.length / 2)] : null;
+  const rankIn = (opts) => new Map(replayPipeline(clean, { model: 'v2', rookieEstimates: true, rookieOverrides: opts }).rows.filter((r) => r.estimate).map((r) => [r.name, r.rank]));
+  const gamesOnly = rankIn({ games: medianVetGames }), confOnly = rankIn({ confidence: 0.9 }), both = rankIn({ games: medianVetGames, confidence: 0.9 });
+  const rookieSensitivity = rookies.map((r) => ({ name: r.name, yahooAdp: r.yahooAdp, asEstimated: r.proGMRank, ifVeteranMedianGames: gamesOnly.get(r.name), ifFullConfidence: confOnly.get(r.name), ifBoth: both.get(r.name), medianVeteranGames: medianVetGames, rookieGames: r.expectedGames }));
+  return { rookieSensitivity, poolSizes: { production: production.rows.length, experimental: full.rows.length }, bands, rookies, majorMovers: movers, veteransDisplacedByRookies: displaced, highlighted };
 }
 
 /** Evidence on whether Yahoo player numbers behave like creation order, using ESPN debut years already in the payload. */
@@ -110,12 +141,16 @@ export function playerNumberEvidence(clean) {
   const mx = mean(rx), my = mean(ry);
   const num = rx.reduce((s, v, i) => s + (v - mx) * (ry[i] - my), 0);
   const den = Math.sqrt(rx.reduce((s, v) => s + (v - mx) ** 2, 0) * ry.reduce((s, v) => s + (v - my) ** 2, 0));
+  const allNumbered = clean.board.filter((r) => Number.isFinite(r.yahooPlayerNumber));
+  const highest = [...allNumbered].sort((a, b) => b.yahooPlayerNumber - a.yahooPlayerNumber).slice(0, 25).map((r) => ({ name: r.name, yahooPlayerNumber: r.yahooPlayerNumber, debutYear: r.debutYear ?? null }));
   const newest = [...withBoth].sort((a, b) => b.yahooPlayerNumber - a.yahooPlayerNumber).slice(0, 8).map((r) => ({ name: r.name, debutYear: r.debutYear, yahooPlayerNumber: r.yahooPlayerNumber }));
   const minLatestDebut = years.length ? Math.max(...years) : null;
   const veteransAboveLatestCohortMin = minLatestDebut == null ? null : withBoth.filter((r) => r.debutYear < minLatestDebut && r.yahooPlayerNumber > cohorts[minLatestDebut].min).map((r) => ({ name: r.name, debutYear: r.debutYear, yahooPlayerNumber: r.yahooPlayerNumber }));
   return {
     playersWithNumberAndDebutYear: withBoth.length, spearmanNumberVsDebutYear: Number((den ? num / den : NaN).toFixed(3)),
-    newestCohorts: latest, highestNumbersWithStats: newest,
+    debutYearCoverage: { stats: allNumbered.length, withDebutYear: withBoth.length, missingDebutYear: allNumbered.length - withBoth.length, missingAmongTop25Numbers: highest.filter((h) => h.debutYear == null).length },
+    allDebutYearCohorts: years.map((y) => ({ debutYear: y, players: cohorts[y].n, minNumber: cohorts[y].min, maxNumber: cohorts[y].max })),
+    newestCohorts: latest, highestNumbersWithStats: highest, highestWithDebutYear: newest,
     veteransNumberedAboveTheNewestStatCohort: veteransAboveLatestCohortMin,
     reading: 'A reliable ordering shows a high correlation and no player with an older debut year numbered above the newest stat-bearing cohort.',
   };

@@ -9,12 +9,13 @@
 import { compareRankingModels } from './rankingCompare.js';
 import { fitMarketPrior, marketPriorPerGame, MIN_CALIBRATION_GAMES, MIN_POINTS } from './marketPrior.js';
 import { classifyUnprojected, lastSeasonCutoff, yahooPlayerNumber } from './unprojectedClass.js';
+import { normalizeName } from '../identity/playerIdentity.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const COMPONENT_KEYS = ['production', 'replacement', 'vorp', 'scarcity', 'perGame', 'expectedGames', 'seasonPoints', 'confidence', 'confidenceFactor'];
 
 export function sanitizeWorkspace(raw, { trace = [] } = {}) {
-  const traced = new Set(trace.map((n) => String(n).trim().toLowerCase()));
+  const traced = new Set(trace.map((n) => normalizeName(n)));
   const board = raw?.draftBoard?.board;
   if (!Array.isArray(board) || !board.length) throw new Error('This file has no draftBoard.board. Save the response of the /basketball/workspace request.');
   const pick = (c) => Object.fromEntries(COMPONENT_KEYS.map((k) => [k, num(c?.[k])]));
@@ -37,7 +38,7 @@ export function sanitizeWorkspace(raw, { trace = [] } = {}) {
       lastSeasonGamesPlayed: num(r.lastSeasonNba?.gamesPlayed), debutYear: num(r.debutYear), estimate: r.estimate === true,
       projectionMethod: typeof r.projectionMethod === 'string' ? r.projectionMethod : null, marketLabel: typeof r.marketLabel === 'string' ? r.marketLabel : null,
       components: pick(r.components),
-      ...(traced.has(String(r.name ?? '').toLowerCase()) ? { trace: traceRow(r) } : {}),
+      ...(traced.has(normalizeName(r.name)) ? { trace: traceRow(r) } : {}),
     })),
     noData: (Array.isArray(raw.draftBoard.noData) ? raw.draftBoard.noData : []).map((r) => ({
       name: String(r.name ?? ''), yahooPlayerNumber: yahooPlayerNumber(r), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
@@ -60,7 +61,9 @@ function traceRow(r) {
     lastSeasonNba: r.lastSeasonNba ? keep(r.lastSeasonNba, ['season', 'points', 'rebounds', 'assists', 'gamesPlayed']) : null,
     lastSeasonFantasy: r.lastSeasonFantasy ? { season: r.lastSeasonFantasy.season ?? null, points: num(r.lastSeasonFantasy.points), breakdown: (r.lastSeasonFantasy.breakdown || []).map((b) => keep(b, ['abbr', 'perGame', 'weight', 'points'])) } : null,
     availability: {
-      ...keep(a, ['expectedGames', 'availability', 'careerRate', 'independentCareerRate', 'recentRate', 'weightedRate', 'posteriorRate', 'baselineAvailability', 'historyCoverage', 'shrinkageFactor', 'evidenceGames', 'seasonsObserved', 'historicalPattern']),
+      ...keep(a, ['expectedGames', 'availability', 'careerRate', 'independentCareerRate', 'recentRate', 'weightedRate', 'posteriorRate', 'baselineAvailability', 'historyCoverage', 'shrinkageFactor', 'evidenceGames', 'seasonsObserved', 'historicalPattern', 'injuryType', 'injuryCap', 'injuryReason', 'injuryAdjustmentGames', 'age', 'debutYear']),
+      seasonWeights: Array.isArray(a.seasonWeights) ? a.seasonWeights.filter((x) => typeof x === 'number') : [],
+      baselineContext: a.baselineContext ? { rate: num(a.baselineContext.rate), globalRate: num(a.baselineContext.globalRate), ageCohortRate: num(a.baselineContext.ageCohort?.rate), experienceCohortRate: num(a.baselineContext.experienceCohort?.rate), targetAge: num(a.baselineContext.targetAge), experience: num(a.baselineContext.experience) } : null,
       isolatedAbsenceAdjusted: Array.isArray(a.isolatedAbsenceAdjusted) ? a.isolatedAbsenceAdjusted : [],
       perSeason: (a.perSeason || []).map((x) => keep(x, ['season', 'gamesPlayed', 'gameTotal', 'availability'])),
     },

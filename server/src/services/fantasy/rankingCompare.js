@@ -7,6 +7,7 @@
  * Output carries player names and numbers only: no league keys, team names, tokens or roster contents.
  */
 import { RANKING_MODELS } from './rankingModel.js';
+import { normalizeName } from '../identity/playerIdentity.js';
 
 const NEUTRAL_FIT = 0.5; // baseline (ProGM Rank) uses neutral roster fit for everyone
 
@@ -53,8 +54,9 @@ export function compareRankingModels(boardRows, { top = 50, highlight = [] } = {
   const topLegacy = byLegacy.slice(0, top);
   const inTopLegacy = new Set(topLegacy);
   const topV2 = [...items].sort((a, b) => vr.get(a) - vr.get(b)).slice(0, top);
-  const wanted = new Set((highlight || []).map((n) => String(n).trim().toLowerCase()));
-  const highlighted = items.filter((it) => wanted.has(String(it.r.name || '').toLowerCase()));
+  // Accent- and suffix-insensitive ("Alperen Sengun" finds Yahoo's "Alperen Şengün").
+  const wanted = new Set((highlight || []).map((n) => normalizeName(n)));
+  const highlighted = items.filter((it) => wanted.has(normalizeName(it.r.name)));
   const overlap = topV2.filter((it) => inTopLegacy.has(it)).length;
   const cElig = items.filter((it) => (it.r.eligiblePositions || []).includes('C'));
   const others = items.filter((it) => !(it.r.eligiblePositions || []).includes('C'));

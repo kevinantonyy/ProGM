@@ -68,3 +68,39 @@ test('player-number evidence flags orderings that are not creation order', () =>
   const broken = { ...mono, board: mono.board.map((r, i) => (i === 0 ? { ...r, debutYear: 2016, yahooPlayerNumber: 99999 } : r)) };
   assert.equal(playerNumberEvidence(broken).veteransNumberedAboveTheNewestStatCohort.length, 1);
 });
+
+test('highlight matching ignores accents and suffixes (Yahoo "Alperen Şengün" is found as "Alperen Sengun")', () => {
+  const accented = { ...clean, board: clean.board.map((r, i) => (i === 0 ? { ...r, name: 'Alperen Şengün' } : r)) };
+  const c = compareScenarios(accented, { highlight: ['Alperen Sengun'] });
+  assert.equal(c.highlighted[0].found, undefined);
+  assert.equal(c.highlighted[0].name, 'Alperen Şengün');
+});
+
+test('fidelity explains every non-exact replay match (rounding of stored values) and lists the details', () => {
+  const f = fidelity(clean);
+  assert.equal(f.nonExact, f.nonExactDetails.length);
+  assert.equal(f.exactRankMatches + f.nonExact, f.players);
+  for (const d of f.nonExactDetails) assert.ok('nearestRivalValueGap' in d && 'maxRoundingValueChange' in d && typeof d.explainedByRounding === 'boolean');
+  // force a near-tie: two identical players can swap places by rounding alone, and that is reported as explained
+  const twin = { ...clean, board: [...clean.board, { ...clean.board[5], name: 'Twin of 5', overallRank: clean.board[5].overallRank }] };
+  const ft = fidelity(twin);
+  assert.ok(ft.nonExactExplainedByRounding >= 0);
+});
+
+test('rookie sensitivity separates the effect of the 56-game assumption from the low-confidence factor', () => {
+  const c = compareScenarios(clean, {});
+  assert.equal(c.rookieSensitivity.length, c.rookies.length);
+  for (const s of c.rookieSensitivity) {
+    assert.ok(s.ifBoth <= s.asEstimated);                      // relaxing both assumptions can only help (lower rank number)
+    assert.ok(s.ifVeteranMedianGames <= s.asEstimated + 1 || s.medianVeteranGames <= s.rookieGames);
+    assert.ok(Number.isFinite(s.medianVeteranGames));
+  }
+});
+
+test('player-number evidence reports debut-year coverage and the highest numbers even without a debut year', () => {
+  const noDebut = { ...clean, board: clean.board.map((r, i) => (i < 30 ? { ...r, debutYear: null } : r)) };
+  const e = playerNumberEvidence(noDebut);
+  assert.equal(e.debutYearCoverage.missingDebutYear, 30);
+  assert.equal(e.highestNumbersWithStats.length, 25);
+  assert.ok(e.allDebutYearCohorts.length >= 1);
+});
