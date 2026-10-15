@@ -12,6 +12,7 @@ import { scarcityWeights } from './playerValue.js';
 import { ESTIMATE_CONFIDENCE, MIN_CALIBRATION_GAMES, fitMarketPrior, marketPriorPerGame } from './marketPrior.js';
 import { classifyUnprojected, lastSeasonCutoff } from './unprojectedClass.js';
 import { normalizeName } from '../identity/playerIdentity.js';
+import { SCENARIOS, effectiveSeasonPoints } from './replacementAware.js';
 
 const EXPECTED_SEASON_GAMES = 82;
 
@@ -21,7 +22,7 @@ function competitionRanks(values) {
 }
 const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 
-export function replayPipeline(clean, { model = 'legacy', rookieEstimates = false, rookieOverrides = null } = {}) {
+export function replayPipeline(clean, { model = 'legacy', rookieEstimates = false, rookieOverrides = null, replacement: repl = null } = {}) {
   if (!clean.league?.rosterSlots?.length) throw new Error('The snapshot has no league roster settings, so the value stage cannot be replayed.');
   const settings = { teamCount: clean.league.teamCount || 12, rosterSlots: clean.league.rosterSlots };
   const rows = clean.board.filter((r) => r.components.perGame != null && r.components.expectedGames != null).map((r) => ({
@@ -44,6 +45,11 @@ export function replayPipeline(clean, { model = 'legacy', rookieEstimates = fals
       const row = { name: n.name, eligiblePositions: n.eligiblePositions, perGame: pg, expectedSeasonGames: games, seasonPoints: pg * games, confidence: rookieOverrides?.confidence ?? ESTIMATE_CONFIDENCE, estimate: true, legacySnapshotRank: null, yahooAdp: n.yahooAdp, statusNote: verdict.statusNote ?? null };
       rows.push(row); rookieInfo.push(row);
     }
+  }
+  // Optional prototype: value rows on the slot's effective output (missed games partly covered by a replacement).
+  if (repl && repl.rho > 0) {
+    const eff = effectiveSeasonPoints(rows, settings, repl);
+    rows.forEach((r, i) => { r.seasonPointsPlain = r.seasonPoints; r.seasonPoints = eff[i]; });
   }
   const replacement = computeReplacementBaselines(rows, settings);
   const weights = scarcityWeights(settings, rows);
@@ -89,6 +95,40 @@ export function fidelity(clean) {
 }
 
 const byName = (rows) => new Map(rows.map((r) => [r.name, r]));
+
+/**
+ * Replacement-aware prototype: the experimental board (v2 + rookie estimates) valued under several replacement-availability
+ * scenarios, compared with the same board where missed games are worth zero (and with production legacy).
+ */
+export function compareReplacementScenarios(clean, { highlight = [], model = 'v2', rookieEstimates = true } = {}) {
+  const production = replayPipeline(clean, { model: 'legacy', rookieEstimates: false });
+  const runs = SCENARIOS.map((sc) => ({ sc, run: replayPipeline(clean, { model, rookieEstimates, replacement: { rho: sc.rho, fill: sc.fill, depth: sc.depth } }) }));
+  const base = runs[0].run, baseBy = byName(base.rows), prodBy = byName(production.rows);
+  const topSet = (rows, n) => new Set(rows.filter((r) => r.rank <= n).map((r) => r.name));
+  const wanted = highlight.map((h) => normalizeName(h));
+  const scenarios = runs.map(({ sc, run }) => {
+    const by = byName(run.rows);
+    const bands = {};
+    for (const n of [25, 50, 100]) {
+      const a = topSet(base.rows, n), b = topSet(run.rows, n), c = topSet(production.rows, n);
+      bands[`top${n}`] = { overlapWithCurrentModel: [...b].filter((x) => a.has(x)).length, overlapWithProductionLegacy: [...b].filter((x) => c.has(x)).length,
+        entering: [...b].filter((x) => !a.has(x)).map((x) => `${x} (#${baseBy.get(x).rank} -> #${by.get(x).rank})`), leaving: [...a].filter((x) => !b.has(x)).map((x) => `${x} (#${baseBy.get(x).rank} -> #${by.get(x).rank})`) };
+    }
+    const movers = run.rows.filter((r) => baseBy.has(r.name) && (baseBy.get(r.name).rank <= 100 || r.rank <= 100))
+      .map((r) => ({ name: r.name, positions: r.eligiblePositions.filter((p) => p !== 'UTIL').join('/'), games: r.expectedSeasonGames, perGame: r1(r.perGame), current: baseBy.get(r.name).rank, scenario: r.rank, change: baseBy.get(r.name).rank - r.rank }))
+      .filter((m) => Math.abs(m.change) >= 8).sort((x, y) => Math.abs(y.change) - Math.abs(x.change)).slice(0, 20);
+    const highlighted = run.rows.filter((r) => wanted.includes(normalizeName(r.name))).map((r) => ({ name: r.name, games: r.expectedSeasonGames, perGame: r1(r.perGame), production: prodBy.get(r.name)?.rank ?? null, current: baseBy.get(r.name).rank, scenario: r.rank }));
+    // Do the moves favour injury-prone stars specifically? Mean rank change by projected-games tercile among the top 100.
+    const top = run.rows.filter((r) => baseBy.get(r.name)?.rank <= 100 || r.rank <= 100);
+    const games = top.map((r) => r.expectedSeasonGames).sort((x, y) => x - y);
+    const lo = games[Math.floor(games.length / 3)], hi = games[Math.floor((2 * games.length) / 3)];
+    const mean = (a) => (a.length ? Number((a.reduce((x, y) => x + y, 0) / a.length).toFixed(1)) : null);
+    const delta = (r) => baseBy.get(r.name).rank - r.rank;
+    return { ...sc, bands, majorMovers: movers, highlighted,
+      meanRankGainByProjectedGames: { fewestGames: mean(top.filter((r) => r.expectedSeasonGames <= lo).map(delta)), middle: mean(top.filter((r) => r.expectedSeasonGames > lo && r.expectedSeasonGames < hi).map(delta)), mostGames: mean(top.filter((r) => r.expectedSeasonGames >= hi).map(delta)) } };
+  });
+  return { baseline: `${model}${rookieEstimates ? ' + rookie estimates' : ''}, missed games worth 0`, assumptions: 'Replacement per-game production is taken from the snapshot pool at the league\'s own slots and team count; coverage (rho) is an assumption, not measured.', scenarios };
+}
 
 export function compareScenarios(clean, { highlight = [] } = {}) {
   const production = replayPipeline(clean, { model: 'legacy', rookieEstimates: false });
