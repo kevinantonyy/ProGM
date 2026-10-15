@@ -2,6 +2,7 @@
  * Server-side ranking feature flags. Both default OFF, so production keeps the legacy model.
  *
  *   PROGM_RANKING_MODEL=v2        draft value without the separate min-max scarcity bonus
+ *   PROGM_RANKING_SHADOW=on       compute v2 beside the legacy board for diagnostics only; users still get legacy
  *   PROGM_ROOKIE_ESTIMATES=on     low-confidence, clearly flagged estimates for players with no NBA stat line
  *
  * Weights (value = (sum of weight*component) * (0.9 + 0.1*confidence) * 100):
@@ -36,4 +37,13 @@ export function resolveRookieEstimates(env = process.env) {
  */
 export function rankingProfile(env = process.env) {
   return `${resolveRankingModel(env)}.${resolveRookieEstimates(env) ? 'est' : 'noest'}`;
+}
+
+/**
+ * Shadow mode: only while the visible model is legacy and rookie estimates are off, so the comparison is
+ * legacy vs v2 over identical inputs. It never changes rankingProfile(), so cache identity and output are untouched.
+ */
+export function resolveRankingShadow(env = process.env) {
+  const on = ['on', 'true', '1'].includes(String(env?.PROGM_RANKING_SHADOW ?? '').trim().toLowerCase());
+  return on && resolveRankingModel(env) === 'legacy' && !resolveRookieEstimates(env);
 }
