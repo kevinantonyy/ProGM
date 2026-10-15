@@ -33,7 +33,8 @@ import { analyzeRoster } from './rosterAnalysis.js';
 import { optimizeLineup } from './lineupOptimizer.js';
 import { rankWaivers } from './waiverEngine.js';
 import { buildRosterIntelligence } from './rosterIntelligence.js';
-import { buildProjectionContext, canonicalIdOf, withEstimates } from './insights.js';
+import { buildProjectionContext, canonicalIdOf, withEstimates, withAdjustedProjections } from './insights.js';
+import { resolveProjectionAdjustmentForUser } from './projectionAdjustment.js';
 import { analyzeStartSit } from './startSit.js';
 import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
@@ -197,6 +198,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     statCategories: settings?.statCategories || [],
     scoringSupported,
     rookieEstimates: resolveRookieEstimates(),
+    projectionAdjustment: resolveProjectionAdjustmentForUser(userId),
   });
 
   // 3b. Team schedules (Tank01, cached 12h, SHARED). One orchestrated call set;
@@ -246,7 +248,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const rankingModel = resolveRankingModelForUser(userId);
   const rookieEstimates = resolveRookieEstimates();
   const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories, profile: rankingProfileForUser(userId) });
-  const draftProvider = withEstimates(projectionProvider, ctx.estimateByCanonicalId); // estimates only here and in Rankings
+  const draftProvider = withEstimates(withAdjustedProjections(projectionProvider, ctx.adjustedByCanonicalId), ctx.estimateByCanonicalId); // estimates only here and in Rankings
   const draftBoard = settings
     ? buildDraftBoard({
         players: draftPool,

@@ -218,6 +218,24 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
 }
 
 /**
+ * Full league-wide season table from the bulk path (same cache entry as getSeasonStats*, so a cached season costs no request).
+ * Used by the optional age/minutes projection adjustment to fit on every listed player. Returns null when unavailable.
+ */
+export async function getSeasonStatsAll(season) {
+  const candidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
+  for (const provider of candidates) {
+    try {
+      const result = await cache.remember(`seasonStatsAll:${season}:${provider.name}`, { provider: provider.name, ttl: cache.TTL.seasonStats }, () => provider.getSeasonStatsBulk(season));
+      if (!result.meta.cacheHit) health.recordSuccess(provider.name);
+      if (Array.isArray(result.value) && result.value.length) return { value: result.value, meta: result.meta };
+    } catch (error) {
+      health.recordFailure(provider.name, error);
+    }
+  }
+  return null;
+}
+
+/**
  * Official NBA league-wide OREB/DREB totals, normalized to per-game values.
  * This is a single cached request per completed season and is independent of
  * the general nba.com fallback flag because ESPN's bulk feed omits the splits.

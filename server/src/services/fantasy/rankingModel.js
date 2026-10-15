@@ -13,6 +13,8 @@
  *
  * Anything other than the exact documented values (including unset, empty or a typo) keeps the legacy model.
  */
+import { resolveProjectionAdjustmentForUser } from './projectionAdjustment.js';
+
 export const RANKING_MODELS = Object.freeze({
   legacy: Object.freeze({ id: 'legacy', weights: Object.freeze({ production: 0.70, replacement: 0.20, scarcity: 0.05, rosterFit: 0.05 }) }),
   v2: Object.freeze({ id: 'v2', weights: Object.freeze({ production: 0.75, replacement: 0.20, scarcity: 0, rosterFit: 0.05 }) }),
@@ -56,7 +58,8 @@ export function rankingProfile(env = process.env) {
 
 /** Per-account cache identity: every cached ranking, workspace or frozen baseline must be keyed with THIS, never the global one. */
 export function rankingProfileForUser(userId, env = process.env) {
-  return `${resolveRankingModelForUser(userId, env)}.${resolveRookieEstimates(env) ? 'est' : 'noest'}`;
+  // '.pam' (projection: age+minutes) only for accounts on the experimental projection, so every other account keeps its exact keys.
+  return `${resolveRankingModelForUser(userId, env)}.${resolveRookieEstimates(env) ? 'est' : 'noest'}${resolveProjectionAdjustmentForUser(userId, env) ? '.pam' : ''}`;
 }
 
 /**

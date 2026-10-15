@@ -19,6 +19,7 @@ import * as providers from '../providers/index.js';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
 import { applyMarketPriors } from './marketPrior.js';
+import { computeAdjustedProjections } from './projectionAdjustment.js';
 import { classifyUnprojected, lastSeasonCutoff, yahooPlayerNumber } from './unprojectedClass.js';
 
 /** canonicalId used across the app for a normalized Yahoo player. */
@@ -62,10 +63,11 @@ export function supplementReboundSplits(stats, split) {
  * @param {Array} params.players                 normalized Yahoo players to project
  * @param {Array} params.statCategories          league settings.statCategories
  * @param {boolean} [params.scoringSupported]    whether league scoring can be applied
+ * @param {boolean} [params.projectionAdjustment]  experimental age+minutes adjustment (account-scoped, default off); result lives in adjustedByCanonicalId only
  * @param {boolean} [params.rookieEstimates]     add flagged, low-confidence Yahoo-ADP-implied estimates for players with no stat line (default off)
  * @returns {Promise<Object>} projection context
  */
-export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false }) {
+export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false, projectionAdjustment = false }) {
   const base = {
     externalAvailable: false,
     projectionProvider: null,
@@ -288,6 +290,27 @@ export async function buildProjectionContext({ season, players, statCategories, 
     for (const [id, proj] of result.skipped) estimateByCanonicalId.set(id, proj); // annotated "no projection" entries (reason only)
   }
 
+  // Optional (account-scoped, default off): age + minutes adjusted projections for the draft board only. Own map; the base
+  // projections above are never modified. Any failure or missing data leaves the map empty (existing projections apply).
+  let adjustedByCanonicalId = new Map();
+  let adjustmentDiagnostics = null;
+  if (projectionAdjustment && Number.isInteger(Number(projectionSeason))) {
+    try {
+      const last = Number(projectionSeason);
+      const seasonEntries = {};
+      for (const s of [last, last - 1, last - 2, last - 3]) {
+        const r = await providers.getSeasonStatsAll(s); // cached league-wide feed; no per-player requests
+        if (r?.value) seasonEntries[s] = r.value;
+      }
+      const result = computeAdjustedProjections({
+        canonical, projectionByCanonicalId, statsByExternalId, externalRefById, seasonEntries, statCategories, lastSeason: last, ageReferenceSeason: currentNbaSeason,
+      });
+      adjustedByCanonicalId = result.adjustedByCanonicalId; adjustmentDiagnostics = result.diagnostics;
+    } catch {
+      adjustedByCanonicalId = new Map(); adjustmentDiagnostics = { error: true };
+    }
+  }
+
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
@@ -299,6 +322,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionProvider,
     projectionByCanonicalId,
     estimateByCanonicalId,
+    adjustedByCanonicalId,
+    adjustmentDiagnostics,
     imageByCanonicalId,
     identityDiagnostics: { ...diagnostics, projectedCount, estimatedCount: estimateCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
     freshness,
@@ -318,6 +343,18 @@ export async function buildProjectionContext({ season, players, statCategories, 
       },
     },
     reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',
+  };
+}
+
+/**
+ * Draft-board view with age+minutes adjusted projections (experimental, account-scoped). A player without an adjusted entry
+ * keeps the provider's own projection. getProjectedValue / period values stay untouched.
+ */
+export function withAdjustedProjections(provider, adjustedByCanonicalId) {
+  if (!provider || !adjustedByCanonicalId?.size) return provider;
+  return {
+    ...provider,
+    getProjection: (player) => adjustedByCanonicalId.get(canonicalIdOf(player)) || provider.getProjection(player),
   };
 }
 

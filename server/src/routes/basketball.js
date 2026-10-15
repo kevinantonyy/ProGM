@@ -25,6 +25,7 @@ import {
 import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow, rankingDiagnosticsEnabled } from '../services/fantasy/rankingModel.js';
+import { resolveProjectionAdjustmentForUser } from '../services/fantasy/projectionAdjustment.js';
 import { compareRankingModels } from '../services/fantasy/rankingCompare.js';
 import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
@@ -372,13 +373,14 @@ router.get('/draft', authenticate, async (req, res) => {
         statCategories: settings.statCategories || [],
         scoringSupported: true,
         rookieEstimates,
+        projectionAdjustment: resolveProjectionAdjustmentForUser(req.userId),
       });
       externalAvailable = ctx.externalAvailable;
       const analysis = analyzeRoster({ players: myRosterPlayers, settings });
       const projectionProvider = ctx.projectionProvider && {
         getProjection: (pl) => {
           const own = ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null;
-          if (own?.projectedPoints != null) return own;
+          if (own?.projectedPoints != null) return ctx.adjustedByCanonicalId?.get(canonicalIdOf(pl)) || own; // experimental, account-scoped
           return ctx.estimateByCanonicalId?.get(canonicalIdOf(pl)) || own;
         },
         getProjectedValue: (pl) => (ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || {}).projectedPoints ?? null,
