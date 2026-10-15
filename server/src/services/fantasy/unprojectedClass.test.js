@@ -22,7 +22,12 @@ test('only a healthy, unmatched player newer than every stat-bearing player is a
   assert.equal(classifyUnprojected({ ...base, playerNumber: 5000 }).class, RookieClass.EARLIER_PLAYER);   // veteran / injured veteran
   assert.equal(classifyUnprojected({ ...base, playerNumber: 6000 }).class, RookieClass.EARLIER_PLAYER);   // boundary is excluded
   assert.equal(classifyUnprojected({ ...base, status: 'INJ' }).class, RookieClass.NEW_ENTRANT_INJURED);
-  assert.equal(classifyUnprojected({ ...base, status: 'GTD' }).class, RookieClass.NEW_ENTRANT_INJURED);  // any flag blocks
+  for (const s of ['O', 'OUT', 'INJ', 'IL', 'NA', 'SUSP']) assert.equal(classifyUnprojected({ ...base, status: s }).class, RookieClass.NEW_ENTRANT_INJURED, s);
+  for (const s of ['Q', 'GTD', 'DTD', 'q']) {                                                             // day-to-day tags do not block
+    const v = classifyUnprojected({ ...base, status: s });
+    assert.equal(v.class, RookieClass.ROOKIE, s); assert.match(v.statusNote, /day-to-day/);
+  }
+  assert.equal(classifyUnprojected({ ...base, status: 'Q', playerNumber: 5000 }).class, RookieClass.EARLIER_PLAYER); // a Q veteran is still never estimated
   assert.equal(classifyUnprojected({ ...base, matched: true }).class, RookieClass.UNKNOWN);              // provider knows him: do not guess
   assert.equal(classifyUnprojected({ ...base, playerNumber: null }).class, RookieClass.UNKNOWN);
   assert.equal(classifyUnprojected({ ...base, cutoff: null }).class, RookieClass.UNKNOWN);

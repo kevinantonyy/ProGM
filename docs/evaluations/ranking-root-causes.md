@@ -148,3 +148,43 @@ player's Yahoo number so you can check Boozer, Dybantsa, Wilson and Peterson sit
   when exactly one is shared (marked inferred); otherwise it states "unavailable" with the reason.
 
 No weights, expected-games formulas or scoring were changed.
+
+---
+## Final offline validation: full experimental pipeline on the saved league snapshot
+`node server/scripts/snapshotCompare.mjs ~/workspace-response.json ~/progm-out` now also writes
+`progm-offline-pipeline.json` (share it with the other two files; names and numbers only).
+
+**What is replayed.** The value stage of the draft board, with the league's own roster slots and the snapshot's
+pool, calling production code (`computeReplacementBaselines`, `scarcityWeights`, `computeDraftValue`) under three
+settings: production (legacy), v2, and v2 + rookie estimates. Each veteran's per-game points, expected games and
+confidence are taken from the snapshot (their upstream inputs are not in a saved response). Estimated rookies get
+the ADP-implied per-game points, the league-wide no-history games rate recorded in the snapshot, confidence 0.3,
+and enter the same pool, so their ProGM Rank is a real rank among all players, not an approximation.
+**Self-check:** `fidelityOfReplay` replays legacy-without-rookies and compares it with the ranks the app showed.
+Trust the rest only if nearly all ranks match exactly and none differ by more than ~2 (rounding of stored values).
+
+**Output:** per-rookie ProGM Rank, implied points per game, games, season points and value; overlap, entering
+and leaving players for the top 25 / 50 / 100 against legacy; veterans moved 10+ ranks; veterans displaced by the
+rookies; Cade, Bam and Sengun at each stage; and `yahooPlayerNumberEvidence`.
+
+**Injury-status rule.** A questionable/day-to-day tag (`Q`, `GTD`, `DTD`) on an otherwise qualifying incoming
+player no longer blocks his estimate (e.g. a rookie listed Q in preseason); the estimate then carries a
+`statusNote`. Out/injured/IL/NA/suspended still block it, and a veteran (number at or below the cutoff) is never
+estimated whatever his status. Limit: Yahoo's `Q` does not say how long the absence is, so a rookie with a
+serious but under-reported injury would still get a normal-availability estimate; the estimate is labelled low
+confidence and is not an injury-adjusted projection.
+
+**Is Yahoo player-number ordering reliable enough?** Not provable from one league. The check printed in
+`yahooPlayerNumberEvidence` compares the number with ESPN's debut year for every player with stats: rank
+correlation, the number range of each of the newest debut cohorts, and any older-debut player numbered above the
+newest stat-bearing cohort's lowest number. Reliable means: correlation near 1, 2026 rookies above the 2025
+cohort's maximum, and no veteran above that cohort. The rule fails safe (a wrong cutoff only removes
+estimates), but it is a single undocumented property of Yahoo ids. Recommended guards before any production use:
+derive the cutoff only from a large stat-bearing sample, disable estimates if the evidence block shows
+inversions, and log how many players qualify each load. A safer long-term source is an authoritative draft
+class list (not integrated; licensing and data availability unverified).
+
+**Decision rubric.** Ship (behind the flag, trial in staging) if the replay fidelity is high, the rookies' ranks
+follow their ADP order with plausible placement, the top 25/50 overlap is high with no unexplained moves, and the
+number evidence is clean. Revise if the replay differs or the evidence shows inversions. Hold if rookies
+displace many established veterans or the ordering is clearly not creation order.

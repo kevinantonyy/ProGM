@@ -128,6 +128,7 @@ export function applyMarketPriors({ canonical, players, projectionByCanonicalId,
     estimate.matchMethod = c.matchMethod ?? null;
     estimate.matched = Boolean(c.matched);
     estimate.unprojectedClass = verdict.class;
+    if (verdict.statusNote) estimate.estimateBasis = { ...estimate.estimateBasis, statusNote: verdict.statusNote };
     projectionByCanonicalId.set(c.canonicalId, estimate);
     estimateCount += 1;
   }

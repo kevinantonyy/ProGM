@@ -23,6 +23,8 @@ export function sanitizeWorkspace(raw, { trace = [] } = {}) {
     meta: {
       rankScope: raw.draftBoard.rankScope ?? null, rankingModel: raw.draftBoard.rankingModel ?? 'legacy',
       draftStatus: typeof raw.connection?.draftStatus === 'string' ? raw.connection.draftStatus : null,
+      // League-wide availability rate the production model gives a player with no history (identical on every row).
+      noHistoryGamesRate: board.map((r) => num(r.components?.availability?.baselineContext?.globalRate)).find((v) => v != null) ?? null,
     },
     league: raw.settings ? {
       scoringFormat: raw.settings.scoringFormat ?? null, teamCount: num(raw.settings.teamCount),
@@ -32,7 +34,7 @@ export function sanitizeWorkspace(raw, { trace = [] } = {}) {
     board: board.map((r) => ({
       name: String(r.name ?? ''), yahooPlayerNumber: yahooPlayerNumber(r), eligiblePositions: Array.isArray(r.eligiblePositions) ? r.eligiblePositions.map(String) : [],
       overallRank: num(r.overallRank), draftPriority: num(r.draftPriority), yahooAdp: num(r.yahooAdp),
-      lastSeasonGamesPlayed: num(r.lastSeasonNba?.gamesPlayed), estimate: r.estimate === true,
+      lastSeasonGamesPlayed: num(r.lastSeasonNba?.gamesPlayed), debutYear: num(r.debutYear), estimate: r.estimate === true,
       projectionMethod: typeof r.projectionMethod === 'string' ? r.projectionMethod : null, marketLabel: typeof r.marketLabel === 'string' ? r.marketLabel : null,
       components: pick(r.components),
       ...(traced.has(String(r.name ?? '').toLowerCase()) ? { trace: traceRow(r) } : {}),
