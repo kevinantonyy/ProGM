@@ -18,6 +18,7 @@
 import * as providers from '../providers/index.js';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
+import { applyMarketPriors } from './marketPrior.js';
 
 /** canonicalId used across the app for a normalized Yahoo player. */
 export function canonicalIdOf(player) {
@@ -60,9 +61,10 @@ export function supplementReboundSplits(stats, split) {
  * @param {Array} params.players                 normalized Yahoo players to project
  * @param {Array} params.statCategories          league settings.statCategories
  * @param {boolean} [params.scoringSupported]    whether league scoring can be applied
+ * @param {boolean} [params.rookieEstimates]     add flagged, low-confidence Yahoo-ADP-implied estimates for players with no stat line (default off)
  * @returns {Promise<Object>} projection context
  */
-export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true }) {
+export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false }) {
   const base = {
     externalAvailable: false,
     projectionProvider: null,
@@ -268,6 +270,16 @@ export async function buildProjectionContext({ season, players, statCategories, 
     projectionByCanonicalId.set(c.canonicalId, projection);
   }
 
+  // Optional (flag-gated): clearly labelled estimates for players with no NBA stat line. Off by default.
+  // Estimates live in their OWN map: waivers, trades, lineups and start/sit never see them.
+  const estimateByCanonicalId = new Map();
+  let estimateCount = 0;
+  if (rookieEstimates) {
+    const withEstimates = new Map(projectionByCanonicalId);
+    estimateCount = applyMarketPriors({ canonical, players, projectionByCanonicalId: withEstimates, canonicalIdOf, seasonYear }).estimateCount;
+    for (const [id, proj] of withEstimates) if (proj?.estimate === true) estimateByCanonicalId.set(id, proj);
+  }
+
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
@@ -278,8 +290,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
     externalAvailable: true,
     projectionProvider,
     projectionByCanonicalId,
+    estimateByCanonicalId,
     imageByCanonicalId,
-    identityDiagnostics: { ...diagnostics, projectedCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
+    identityDiagnostics: { ...diagnostics, projectedCount, estimatedCount: estimateCount, recentFormPlayers: recentCount, historyPlayers: historyCount },
     freshness,
     providerStatus: providers.providerStatus(),
     // Per-source availability so the UI/report can see what the primary served.
@@ -297,6 +310,22 @@ export async function buildProjectionContext({ season, players, statCategories, 
       },
     },
     reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',
+  };
+}
+
+/**
+ * Draft-board view of a projection provider: falls back to a flagged estimate ONLY for getProjection
+ * (rank and projected points). getProjectedValue / period values stay stats-only.
+ */
+export function withEstimates(provider, estimateByCanonicalId) {
+  if (!provider || !estimateByCanonicalId?.size) return provider;
+  return {
+    ...provider,
+    getProjection: (player) => {
+      const own = provider.getProjection(player);
+      if (own?.projectedPoints != null) return own;           // a real stat-based projection always wins
+      return estimateByCanonicalId.get(canonicalIdOf(player)) || own || null;
+    },
   };
 }
 

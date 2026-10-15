@@ -33,12 +33,13 @@ import { analyzeRoster } from './rosterAnalysis.js';
 import { optimizeLineup } from './lineupOptimizer.js';
 import { rankWaivers } from './waiverEngine.js';
 import { buildRosterIntelligence } from './rosterIntelligence.js';
-import { buildProjectionContext, canonicalIdOf } from './insights.js';
+import { buildProjectionContext, canonicalIdOf, withEstimates } from './insights.js';
 import { analyzeStartSit } from './startSit.js';
 import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
 import { buildDraftBoard } from './draftHelper.js';
+import { resolveRankingModel, resolveRookieEstimates, rankingProfile } from './rankingModel.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -194,6 +195,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     players: [...myRoster, ...availablePlayers, ...opponentPlayersFlat],
     statCategories: settings?.statCategories || [],
     scoringSupported,
+    rookieEstimates: resolveRookieEstimates(),
   });
 
   // 3b. Team schedules (Tank01, cached 12h, SHARED). One orchestrated call set;
@@ -240,17 +242,22 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
   const draftPool = [...availablePlayers, ...myRoster];
   // Frozen overall-rank reference: captured pre-draft, reused while others draft.
-  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories });
+  const rankingModel = resolveRankingModel();
+  const rookieEstimates = resolveRookieEstimates();
+  const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings?.statCategories, profile: rankingProfile() });
+  const draftProvider = withEstimates(projectionProvider, ctx.estimateByCanonicalId); // estimates only here and in Rankings
   const draftBoard = settings
     ? buildDraftBoard({
         players: draftPool,
         settings,
-        projectionProvider,
+        projectionProvider: draftProvider,
         poolComplete: league?.draftStatus === 'predraft',
         baselineReference: loadBaselineReference(providers.cache, refKey),
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentSeason: league?.season || null, // for current-season Yahoo rank
+        rankingModel,
+        rookieEstimates,
       })
     : { available: false, availabilityKnown: true, board: [], noData: [], note: 'League settings unavailable.' };
   if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
@@ -259,9 +266,10 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const overallRanks = new Map((draftBoard.board || []).map((row) => [row.playerKey, row.overallRank]));
   const rankings = buildRankings({
     players: availablePlayers,
-    projectionProvider,
+    projectionProvider: draftProvider,
     overallRanks,
     rankScope: draftBoard.rankScope || null,
+    rankingModel: draftBoard.rankingModel || null,
     sortBy: overallRanks.size ? 'overall' : (periodWindow ? 'period' : 'projected'),
   });
 
