@@ -74,7 +74,7 @@ MAE difference versus production (games; negative = better), paired bootstrap 95
 Data-driven weights: a grid search over all four-bucket schedules (step 0.1) on development folds ranks 70/20/10/0
 (15.92) first, then 60/20/20/0, 70/10/20/0, 60/30/10/0; **no top schedule puts any weight on seasons 4+**. Choosing weights
 on past folds only (expanding window, folds 2021-2026) picks 60-70 / 20-30 / 10-20 / 0 every time; its out-of-sample MAE
-beats production by 0.01-0.11 games in each fold and your 50/30/15/5 by 0.00-0.12.
+beats production in five of six folds (by 0.02-0.23 games; 0.03 worse in 2026) and your 50/30/15/5 in every fold (by 0.01-0.12).
 
 What this says:
 - **More recency helps, but only slightly**: 0.05-0.11 games of 16 (under 1%). Statistically detectable on development
