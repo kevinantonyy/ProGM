@@ -132,11 +132,26 @@ node scripts\injuryLog.mjs record --yahoo $HOME\workspace-response.json
 ```
 
    Read the output: `written` is the number of new status changes, `duplicates` the players unchanged since their last record.
-   The first run writes about 600 baseline records; later runs usually write few or none. `written: 0` is normal.
+   The first run writes one baseline record per player in the board (740 on the first real run); later runs usually write few or none. `written: 0` is normal.
 6. Do not commit, share or upload `workspace-response.json`: it contains your league data. Delete it when you are done if you
    prefer; the logger keeps only player keys, names and statuses.
 
 The log is written to `%LOCALAPPDATA%\ProGM\injury-log\status-log.jsonl` (override with `--dir` or `PROGM_INJURY_LOG_DIR`).
+
+### What "out" means in the summary
+`summary` counts **normalized** statuses. `out` is not only injuries: under the v1 table it includes every Yahoo code that
+maps to `out`, notably **`NA` (Not Active)**, which Yahoo uses for players who are inactive for non-injury reasons (for example
+unsigned, waived, two-way or G League assignments), as well as `O`, `INJ`, `IL`, `IL+`. The mapping follows the app's existing
+`OUT_STATUSES`. The raw code is always stored in `rawStatus`, so nothing is lost. To see what is behind the `out` count:
+
+```powershell
+cd C:\path\to\ProGM-injury-logger\server
+node scripts\injuryLog.mjs summary --as-of 2099-01-01T00:00:00Z --by-raw-status
+node scripts\injuryLog.mjs summary --as-of 2099-01-01T00:00:00Z --list-raw NA
+```
+`--by-raw-status` shows lines such as `out <- NA` and `out <- INJ`; `--list-raw <CODE>` lists the players with that raw code.
+Both are read-only. The mapping is changed only with evidence from these breakdowns, and any change gets a new `mappingVersion`
+(old records keep the version they were written with).
 
 ### Weekly verification
 ```powershell
@@ -179,7 +194,7 @@ To verify a backup, copy it into an otherwise empty folder under the name `statu
 | `node` is not recognised | Install Node 20+ and open a new PowerShell window |
 | `git worktree add` says the path already exists | The worktree is already set up. `cd` into it and use `git -C` to update it as above, or choose a different folder name |
 | `git worktree add` fails after you deleted the folder by hand | Run `git worktree prune`, then add it again |
-| Tests fail on Windows | Send the output. The logger was developed and tested on Linux; Windows is untested |
+| Tests fail on Windows | Send the output. Two Windows-only failures found in the first run (CRLF `.gitignore` check and path separators in the default-directory test) were fixed; the suite is otherwise developed on Linux |
 
 ## Limits you should know about
 * **ESPN is not collected.** The app fetches the ESPN injuries feed and caches it in memory only, so there is no existing

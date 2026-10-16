@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { MAPPING_VERSION, STATUSES, mapStatus, reasonCategory } from './statusMap.js';
 import { buildRecord, canonicalJson, contentHashOf, validateStoredRecord } from './record.js';
-import { LOG_FILE, appendObservations, checkLogDir, readLog, recordsAsOf, snapshotAsOf, statusAsOf, verifyLog } from './store.js';
+import { LOG_FILE, appendObservations, checkLogDir, findRepoRoot, readLog, recordsAsOf, snapshotAsOf, statusAsOf, verifyLog } from './store.js';
 import { ESPN_FEED_URL, fromEspnInjuries, fromYahooPlayers, yahooRowsFromFile } from './ingest.js';
 import { defaultLogDir } from './paths.js';
 import { findPrivateData } from './privacy.js';
@@ -256,7 +256,29 @@ test('the log must be outside any Git work tree, or inside the gitignored .progm
   const r = appendObservations(path.join(repoRoot, 'server', 'logs'), [obs()], { clock: T('2026-10-02T00:00:00Z') });
   assert.equal(r.ok, false); assert.equal(r.error.code, 'unsafe-directory');
   assert.equal(fs.existsSync(path.join(repoRoot, 'server', 'logs')), false);
-  assert.ok(fs.readFileSync(path.join(repoRoot, '.gitignore'), 'utf8').split('\n').includes('.progm-private/'), '.gitignore lists the private directory');
+  assert.ok(ignoreListsEntry(fs.readFileSync(path.join(repoRoot, '.gitignore'), 'utf8'), '.progm-private/'), '.gitignore lists the private directory');
+});
+
+// Git for Windows commonly checks text files out with CRLF line endings (core.autocrlf), so a ".gitignore" line ends in "\r".
+function ignoreListsEntry(text, entry) { return text.split(/\r?\n/).some((line) => line.trim() === entry); }
+test('regression: the .gitignore check tolerates CRLF checkouts but still requires the exact entry', () => {
+  assert.equal(ignoreListsEntry('node_modules/\r\n.progm-private/\r\n', '.progm-private/'), true);
+  assert.equal(ignoreListsEntry('node_modules/\n.progm-private/\n', '.progm-private/'), true);
+  assert.equal(ignoreListsEntry('.progm-private/\r\n', '.progm-private/'), true, 'last line without trailing newline also works');
+  assert.equal(ignoreListsEntry('node_modules/\r\n#.progm-private/\r\n', '.progm-private/'), false, 'commented out is not enough');
+  assert.equal(ignoreListsEntry('.progm-private\r\n', '.progm-private/'), false, 'a different pattern does not count');
+  assert.equal(ignoreListsEntry('', '.progm-private/'), false);
+});
+
+test('regression: a Git worktree (".git" is a file, not a directory) is recognised as a work tree', () => {
+  const wt = tmp();
+  fs.writeFileSync(path.join(wt, '.git'), 'gitdir: /elsewhere/.git/worktrees/x\n');
+  fs.mkdirSync(path.join(wt, 'server', 'deep'), { recursive: true });
+  assert.equal(findRepoRoot(path.join(wt, 'server', 'deep')), wt);
+  assert.equal(checkLogDir(path.join(wt, 'server', 'deep')).ok, false, 'inside a worktree: refused');
+  assert.equal(checkLogDir(path.join(wt, '.progm-private', 'injury-log')).ok, true, 'the gitignored directory is allowed in a worktree too');
+  const r = appendObservations(path.join(wt, 'docs'), [obs()], { clock: T('2026-10-02T00:00:00Z') });
+  assert.equal(r.error.code, 'unsafe-directory'); assert.equal(fs.existsSync(path.join(wt, 'docs')), false);
 });
 
 // ---------- privacy ----------
@@ -314,11 +336,17 @@ test('yahoo file shapes: array, {players}, saved workspace response; anything el
   assert.equal(yahooRowsFromFile({ foo: 1 }), null); assert.equal(yahooRowsFromFile(null), null);
 });
 
-test('default log directory is per-user and outside the repository', () => {
-  assert.equal(defaultLogDir({ env: { LOCALAPPDATA: 'C:\\Users\\k\\AppData\\Local' }, platform: 'win32', home: 'C:\\Users\\k' }), 'C:\\Users\\k\\AppData\\Local\\ProGM\\injury-log');
-  assert.equal(defaultLogDir({ env: {}, platform: 'win32', home: 'C:\\Users\\k' }), 'C:\\Users\\k\\AppData\\Local\\ProGM\\injury-log');
-  assert.equal(defaultLogDir({ env: {}, platform: 'linux', home: '/home/k' }), '/home/k/.progm/injury-log');
-  assert.equal(defaultLogDir({ env: { PROGM_INJURY_LOG_DIR: '/x/y' }, platform: 'linux', home: '/home/k' }), path.resolve('/x/y'));
+test('default log directory is per-user, outside the repository, and host-independent in path flavour', () => {
+  const win = { env: { LOCALAPPDATA: 'C:\\Users\\k\\AppData\\Local' }, platform: 'win32', home: 'C:\\Users\\k' };
+  assert.equal(defaultLogDir(win), 'C:\\Users\\k\\AppData\\Local\\ProGM\\injury-log');
+  assert.equal(defaultLogDir({ ...win, env: {} }), 'C:\\Users\\k\\AppData\\Local\\ProGM\\injury-log');
+  assert.equal(defaultLogDir({ env: { PROGM_INJURY_LOG_DIR: 'D:\\logs\\x' }, platform: 'win32', home: 'C:\\Users\\k' }), 'D:\\logs\\x');
+  const nix = defaultLogDir({ env: {}, platform: 'linux', home: '/home/k' });
+  assert.equal(nix, '/home/k/.progm/injury-log');
+  assert.ok(!nix.includes('\\'), 'a POSIX result never contains backslashes, even when the host is Windows');
+  assert.ok(!defaultLogDir(win).includes('/'), 'a Windows result never contains forward slashes, even when the host is Linux');
+  assert.equal(defaultLogDir({ env: { PROGM_INJURY_LOG_DIR: '/x/y' }, platform: 'linux', home: '/home/k' }), '/x/y');
+  assert.equal(defaultLogDir({ env: {}, platform: 'darwin', home: '/Users/k' }), '/Users/k/.progm/injury-log');
 });
 
 // ---------- independence from production ----------
@@ -366,6 +394,19 @@ test('CLI: record -> duplicate re-run -> change -> as-of queries -> verify (end 
   const sum = JSON.parse(run(['summary', '--as-of', '2999-01-01T00:00:00Z', '--dir', dir]).stdout);
   assert.deepEqual(sum.byStatus, { questionable: 2, available: 1 });
   const v = run(['verify', '--dir', dir]); assert.equal(v.status, 0); assert.equal(JSON.parse(v.stdout).records, 4);
+});
+
+test('CLI: summary --by-raw-status and --list-raw break "out" down by source code (read-only)', () => {
+  const dir = tmp(); const work = tmp(); const f = path.join(work, 'y.json');
+  fs.writeFileSync(f, JSON.stringify([{ playerKey: '466.p.1', name: 'Zed Hurt', status: 'INJ' }, { playerKey: '466.p.2', name: 'Abe Inactive', status: 'NA' }, { playerKey: '466.p.3', name: 'Cy Inactive', status: 'NA' }, { playerKey: '466.p.4', name: 'Dee Fine' }, { playerKey: '466.p.5', name: 'Eve Maybe', status: 'GTD' }]));
+  assert.equal(run(['record', '--yahoo', f, '--dir', dir]).status, 0);
+  const before = logText(dir);
+  const j = JSON.parse(run(['summary', '--as-of', '2999-01-01T00:00:00Z', '--by-raw-status', '--list-raw', 'na', '--dir', dir]).stdout);
+  assert.deepEqual(j.byStatus, { out: 3, available: 1, questionable: 1 });
+  assert.deepEqual(j.byRawStatus, { 'out <- INJ': 1, 'out <- NA': 2, 'available <- (none: absent status)': 1, 'questionable <- GTD': 1 });
+  assert.deepEqual(j.listRaw.players.map((p) => p.name), ['Abe Inactive', 'Cy Inactive']);
+  assert.equal(logText(dir), before, 'diagnostics never write');
+  assert.equal('byRawStatus' in JSON.parse(run(['summary', '--as-of', '2999-01-01T00:00:00Z', '--dir', dir]).stdout), false, 'default output unchanged');
 });
 
 test('CLI: usage errors exit 2, bad inputs exit 1 and write nothing, repo directories are refused', () => {
