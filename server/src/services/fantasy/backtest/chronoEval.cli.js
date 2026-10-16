@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { importHistoricalExport } from './datasetAdapter.js';
-import { DEFAULT_BASELINES } from './evalModels.js';
+import { DEFAULT_BASELINES, ageMinutesModel, blendModel, hybridModel, precomputedModel, productionModel } from './evalModels.js';
 import { leakageCanary, runChronologicalEvaluation, toPredictionLog } from './chronoEval.js';
 
 const arg = (name) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : null; };
@@ -17,10 +17,22 @@ export function runEvaluationCli() {
   const imported = importHistoricalExport({ input: data, format, provenance, fieldMap: data?.fieldMap });
   const scoring = load(scoringPath); const statCategories = scoring.statCategories || scoring;
   const models = DEFAULT_BASELINES();
-  const targets = [...new Set(imported.snapshots.map((r) => r.season))].sort((a, b) => a - b).slice(1);
+  // Offline ML predictions: --ml file.json (repeatable). Pre-specified hybrids swap in ML games only.
+  const mlFiles = process.argv.flatMap((v, i) => (v === '--ml' ? [process.argv[i + 1]] : []));
+  for (const f of mlFiles) {
+    const ml = precomputedModel(load(f)); models.push(ml);
+    models.push(hybridModel({ id: `production+${ml.id}_games`, production: productionModel(), games: precomputedModel(load(f)) }));
+    models.push(hybridModel({ id: `age_minutes+${ml.id}_games`, production: ageMinutesModel(), games: precomputedModel(load(f)) }));
+    if (process.argv.includes('--ensembles')) {
+      models.push(blendModel({ id: `ens_games(production,${ml.id})+age_minutes`, perGame: [ageMinutesModel()], games: [productionModel(), precomputedModel(load(f))] }));
+      models.push(blendModel({ id: `ens_all(age_minutes,${ml.id})`, perGame: [ageMinutesModel(), precomputedModel(load(f))], games: [productionModel(), precomputedModel(load(f))] }));
+    }
+  }
+  const allTargets = [...new Set(imported.snapshots.map((r) => r.season))].sort((a, b) => a - b).slice(1);
+  const targets = arg('--targets') ? (() => { const [lo, hi] = arg('--targets').split('-').map(Number); return allTargets.filter((t) => t >= lo && t <= hi); })() : allTargets;
   const canary = leakageCanary({ snapshots: imported.snapshots, models, statCategories, targetSeasons: targets.slice(-2) });
   if (!canary.ok) throw new Error(`Leakage canary failed for ${JSON.stringify(canary.leaked)}; report withheld.`);
-  const report = runChronologicalEvaluation({ snapshots: imported.snapshots, provenance: imported.provenance, statCategories, models });
+  const report = runChronologicalEvaluation({ snapshots: imported.snapshots, provenance: imported.provenance, statCategories, models, targetSeasons: targets });
   const { records, ...rest } = report;
   fs.mkdirSync(path.resolve(outDir), { recursive: true });
   fs.writeFileSync(path.join(path.resolve(outDir), 'chrono-eval-report.json'), JSON.stringify({ canary, ...rest }, null, 2));

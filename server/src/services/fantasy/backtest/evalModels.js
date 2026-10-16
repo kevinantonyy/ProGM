@@ -12,6 +12,7 @@ import { scoreStatLine } from '../scoring.js';
 import { buildAvailabilityBaselineModel, estimateExpectedGames } from '../durability.js';
 import { adjustmentDelta, buildSeasonRows, fitAdjustmentModel, MAX_RELATIVE_DELTA } from '../projectionAdjustment.js';
 import { snapshotToStatLine } from './snapshot.js';
+import { emptyStatLine } from '../../providers/types.js';
 
 export function strictScore(statLine, statCategories) {
   const s = scoreStatLine(statLine, statCategories);
@@ -97,6 +98,63 @@ export function naiveGamesModel() {
     id: 'naive_games', version: 'progm.naive-games.v1', description: 'Last season games played (games target only).',
     fit(view, { targetSeason }) {
       return { diagnostics: {}, predict(playerId) { const l = view.historyOf(playerId).find((r) => r.season === targetSeason - 1); return l ? { fppg: null, minutes: null, games: l.gamesPlayed } : null; } };
+    },
+  };
+}
+
+/**
+ * Precomputed (offline-trained) model, e.g. Python ML v1. Predictions are basketball statistics; fantasy points are computed HERE with
+ * the league's exact weights, so every model is scored by the same deterministic code. Each prediction must declare that it was trained
+ * only on seasons before its target and forecast no later than the evaluation's forecast time; otherwise the fold is refused.
+ */
+export function precomputedModel(doc) {
+  if (doc?.schema !== 'progm.ml-predictions.v1' || !doc.model?.id || !doc.model?.version) throw new Error('Unsupported ML predictions document.');
+  const byTarget = new Map();
+  for (const p of doc.predictions || []) { if (!byTarget.has(p.targetSeason)) byTarget.set(p.targetSeason, new Map()); byTarget.get(p.targetSeason).set(String(p.playerId), p); }
+  return {
+    id: doc.model.id, version: doc.model.version, description: `Precomputed offline model (${doc.model.version}, features ${doc.model.featureHash})`,
+    fit(view, { statCategories, targetSeason, asOf }) {
+      const rows = byTarget.get(targetSeason) || new Map();
+      for (const p of rows.values()) {
+        if (!(p.trainedThroughSeason < targetSeason) || !(p.dataCutoffSeason < targetSeason) || Date.parse(p.asOf) > Date.parse(asOf)) {
+          throw new Error(`Leakage: ${doc.model.id} prediction for ${p.playerId}/${targetSeason} was trained or dated after the forecast point.`);
+        }
+      }
+      return {
+        diagnostics: { precomputed: rows.size, provenanceHash: doc.provenanceHash ?? null },
+        predict(playerId) {
+          const p = rows.get(playerId); if (!p) return null;
+          const line = { ...emptyStatLine(), ...p.statLine, gamesPlayed: null };
+          return { fppg: strictScore(line, statCategories), minutes: p.minutes ?? null, games: p.games ?? null };
+        },
+      };
+    },
+  };
+}
+
+/** Component swap: take one model's per-game production and another's games played (pre-specified hybrids only). */
+export function hybridModel({ id, production, games }) {
+  return {
+    id, version: `${production.version}+games:${games.version}`, description: `${production.id} per-game production with ${games.id} games played`,
+    fit(view, ctx) {
+      const a = production.fit(view, ctx); const b = games.fit(view, ctx);
+      return { diagnostics: { production: a.diagnostics, games: b.diagnostics }, predict(playerId) { const x = a.predict(playerId); if (!x) return null; const y = b.predict(playerId); return { ...x, games: y?.games ?? x.games, fallback: x.fallback ?? null }; } };
+    },
+  };
+}
+
+/** Equal-weight (or given-weight) average of several models' per-game points, minutes and/or games. Pre-specified ensembles only. */
+export function blendModel({ id, perGame, games }) {
+  const parts = [...new Set([...perGame, ...games])];
+  return {
+    id, version: `blend(perGame:${perGame.map((m) => m.id).join('+')};games:${games.map((m) => m.id).join('+')})`, description: `Equal-weight blend; per-game from ${perGame.map((m) => m.id).join(', ')}, games from ${games.map((m) => m.id).join(', ')}`,
+    fit(view, ctx) {
+      const fitted = new Map(parts.map((m) => [m, m.fit(view, ctx)]));
+      const avg = (models, key, playerId) => { const v = models.map((m) => fitted.get(m).predict(playerId)?.[key]).filter(Number.isFinite); return v.length === models.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+      return { diagnostics: {}, predict(playerId) {
+        if (!fitted.get(perGame[0]).predict(playerId)) return null;
+        return { fppg: avg(perGame, 'fppg', playerId), minutes: avg(perGame, 'minutes', playerId), games: avg(games, 'games', playerId) };
+      } };
     },
   };
 }

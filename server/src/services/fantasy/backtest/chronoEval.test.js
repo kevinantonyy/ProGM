@@ -145,3 +145,34 @@ test('CLI writes a report and an outcome-free prediction log, and refuses unauth
   assert.notEqual(spawnSync(process.execPath, [script, '--data', data, '--scoring', scoring, '--out', out], { encoding: 'utf8' }).status, 0);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ---- offline (precomputed) ML predictions ----
+import { blendModel, hybridModel, precomputedModel } from './evalModels.js';
+const mlDoc = (over = {}) => ({
+  schema: 'progm.ml-predictions.v1', model: { id: 'ml_test', version: 't1', featureHash: 'x' }, provenanceHash: 'h',
+  predictions: DATA.snapshots.filter((r) => r.season === 2021 && (r.minutesTotal ?? 0) >= 800).map((r) => ({
+    targetSeason: 2022, playerId: r.player.id, asOf: forecastAsOf(2022), trainedThroughSeason: 2021, dataCutoffSeason: 2021, games: 60, minutes: 30,
+    statLine: { points: 20, rebounds: 5, assists: 4, minutes: 30 }, ...over,
+  })),
+});
+
+test('precomputed ML predictions are scored with the league weights here, and leaky metadata is refused', () => {
+  const rep = runChronologicalEvaluation({ snapshots: DATA.snapshots, provenance: DATA.provenance, statCategories: SCORING, models: [productionModel(), precomputedModel(mlDoc())], targetSeasons: [2022] });
+  const r = rep.records.find((x) => x.modelId === 'ml_test');
+  assert.equal(r.predicted.fppg, 20 + 1.2 * 5 + 1.5 * 4); assert.equal(r.predicted.games, 60); assert.equal(r.predicted.total, 60 * r.predicted.fppg);
+  for (const bad of [{ trainedThroughSeason: 2022 }, { dataCutoffSeason: 2022 }, { asOf: '2022-12-01T00:00:00.000Z' }]) {
+    assert.throws(() => runChronologicalEvaluation({ snapshots: DATA.snapshots, provenance: DATA.provenance, statCategories: SCORING, models: [precomputedModel(mlDoc(bad))], targetSeasons: [2022] }), /Leakage/);
+  }
+  assert.throws(() => precomputedModel({ schema: 'other' }), /Unsupported/);
+});
+
+test('hybrid swaps only games; blend averages the named components', () => {
+  const ml = precomputedModel(mlDoc());
+  const ctx = { statCategories: SCORING, targetSeason: 2022, asOf: forecastAsOf(2022) }; const view = createPointInTimeView(DATA.snapshots, ctx.asOf);
+  const pid = mlDoc().predictions[0].playerId;
+  const prod = productionModel().fit(view, ctx).predict(pid);
+  const h = hybridModel({ id: 'h', production: productionModel(), games: precomputedModel(mlDoc()) }).fit(view, ctx).predict(pid);
+  assert.equal(h.fppg, prod.fppg); assert.equal(h.games, 60);
+  const b = blendModel({ id: 'b', perGame: [productionModel()], games: [productionModel(), ml] }).fit(view, ctx).predict(pid);
+  assert.equal(b.fppg, prod.fppg); assert.ok(Math.abs(b.games - (prod.games + 60) / 2) < 1e-9);
+});
