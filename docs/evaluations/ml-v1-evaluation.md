@@ -10,7 +10,7 @@ Branch `feature/ml-v1` (from `feature/ml-eval-framework`). Experimental only: no
 - Nothing is imputed into the data; models handle missing features (LightGBM natively, ridge with median plus a missing indicator). Provenance (repo, commit, file SHA-256, owner authorization) is in the dataset manifest and every prediction record.
 
 ## Models (Python, fixed hyperparameters chosen before evaluation)
-Separate models for: games (share of season played; absent = 0) with 10%/90% quantile models, minutes per game with quantiles, per-minute rates for points, OREB, DREB, assists, steals, blocks, turnovers, FGM, FTM, 3PM, PF, and per-game double/triple-double rates. Per-game statistics = rate x minutes. Two learners: LightGBM (`ml_lgbm`) and ridge (`ml_ridge`) on the same 50 point-in-time features (three seasons of availability, minutes, usage; last-season rates; three-season rates; age, experience, draft, height; game-log availability features).
+Separate models for: games (share of season played; absent = 0) with 10%/90% quantile models, minutes per game with quantiles, per-minute rates for points, OREB, DREB, assists, steals, blocks, turnovers, FGM, FTM, 3PM, PF, and per-game double/triple-double rates. Per-game statistics = rate x minutes. Two learners: LightGBM (`ml_lgbm`) and ridge (`ml_ridge`) on the same 55 point-in-time features (three seasons of availability, minutes, usage; last-season rates; three-season rates; age, experience, draft, height; game-log availability features).
 Walk-forward: for target season t, trained only on target seasons 2014..t-1 with features from seasons before each training target. Nine evaluation folds: 2017-18 to 2025-26.
 
 ## Evaluation setup
