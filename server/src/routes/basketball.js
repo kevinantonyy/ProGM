@@ -32,6 +32,11 @@ import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fanta
 import { cache } from '../services/providers/index.js';
 import { loadBaselineReference, referenceKey } from '../services/fantasy/baselineReference.js';
 
+const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool };
+
+// Injectable I/O keeps endpoint regressions testable without Yahoo or a database.
+export function createBasketballRouter(overrides = {}) {
+const { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool } = { ...routeDependencies, ...overrides };
 const router = Router();
 const LEAGUE_KEY_RE = /^\d+\.l\.\d+$/;
 const TEAM_KEY_RE = /^\d+\.l\.\d+\.t\.\d+$/;
@@ -366,6 +371,7 @@ router.get('/draft', authenticate, async (req, res) => {
             .map((p) => ({ playerKey: p.playerKey, name: '', eligiblePositions: [], teamAbbr: null }));
         }
       }
+      const rookieEstimates = resolveRookieEstimates();
       const ctx = await buildProjectionContext({
         season: league?.season,
         players: [...availablePlayers, ...myRosterPlayers],
@@ -387,7 +393,6 @@ router.get('/draft', authenticate, async (req, res) => {
       // Reuse the baseline captured pre-draft so Overall Rank stays stable as
       // other teams draft; without it ranks are labelled relative to available players.
       const rankingModel = resolveRankingModelForUser(req.userId);
-      const rookieEstimates = resolveRookieEstimates();
       const refKey = referenceKey({ leagueKey, season: league?.season, statCategories: settings.statCategories, profile: rankingProfileForUser(req.userId) });
       board = buildDraftBoard({
         players: availablePlayers,
@@ -458,4 +463,7 @@ router.get('/draft', authenticate, async (req, res) => {
   }
 });
 
-export default router;
+return router;
+}
+
+export default createBasketballRouter();
