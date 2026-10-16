@@ -176,3 +176,26 @@ test('hybrid swaps only games; blend averages the named components', () => {
   const b = blendModel({ id: 'b', perGame: [productionModel()], games: [productionModel(), ml] }).fit(view, ctx).predict(pid);
   assert.equal(b.fppg, prod.fppg); assert.ok(Math.abs(b.games - (prod.games + 60) / 2) < 1e-9);
 });
+
+// ---- tier shrinkage and frozen prospective snapshot ----
+import { tierShrinkGamesModel } from './evalModels.js';
+import { buildSnapshot } from './prospectiveSnapshot.js';
+
+test('tier shrinkage uses the reference games for the top tier and the given ML weight for the rest; no player-specific inputs', () => {
+  const ctx = { statCategories: SCORING, targetSeason: 2022, asOf: forecastAsOf(2022) }; const view = createPointInTimeView(DATA.snapshots, ctx.asOf);
+  const m = tierShrinkGamesModel({ id: 't', perGame: productionModel(), reference: productionModel(), ml: precomputedModel(mlDoc()), topN: 10, weights: { top: 0, rest: 0.6 } }).fit(view, ctx);
+  const prod = productionModel().fit(view, ctx);
+  const ids = mlDoc().predictions.map((p) => p.playerId);
+  const ranked = ids.map((id) => [id, prod.predict(id).fppg * prod.predict(id).games]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const top = ranked[0][0]; const rest = ranked[ranked.length - 1][0];
+  assert.equal(m.predict(top).games, prod.predict(top).games);
+  assert.ok(Math.abs(m.predict(rest).games - (0.6 * 60 + 0.4 * prod.predict(rest).games)) < 1e-9);
+});
+
+test('prospective snapshot uses only pre-season data and records versions, cutoff and fingerprint for every model', () => {
+  const snap = buildSnapshot({ snapshots: DATA.snapshots, provenance: DATA.provenance, statCategories: SCORING, registered: [{ role: 'reference', model: productionModel() }], targetSeason: 2025, commit: 'abc', generatedAt: 'g' });
+  const m = snap.models[0];
+  assert.equal(m.dataCutoffSeason, 2024); assert.equal(m.asOf, forecastAsOf(2025)); assert.ok(m.dataFingerprint && m.version);
+  assert.ok(m.predictions.length > 50 && m.predictions.every((p) => !('aTotal' in p)));
+  assert.equal(snap.scoringHash.length, 16);
+});

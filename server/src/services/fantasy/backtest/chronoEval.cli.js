@@ -17,6 +17,7 @@ export function runEvaluationCli() {
   const imported = importHistoricalExport({ input: data, format, provenance, fieldMap: data?.fieldMap });
   const scoring = load(scoringPath); const statCategories = scoring.statCategories || scoring;
   const models = DEFAULT_BASELINES();
+  if (process.argv.includes('--fidelity')) models.push(productionModel({ profilePool: 'active', id: 'production_active_pool' }));
   // Offline ML predictions: --ml file.json (repeatable). Pre-specified hybrids swap in ML games only.
   const mlFiles = process.argv.flatMap((v, i) => (v === '--ml' ? [process.argv[i + 1]] : []));
   for (const f of mlFiles) {

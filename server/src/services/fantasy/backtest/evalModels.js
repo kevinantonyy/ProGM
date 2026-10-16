@@ -23,10 +23,14 @@ function gameTotals(rows) {
   const t = {}; for (const r of rows) if (Number.isFinite(r.gamesPlayed)) t[r.season] = Math.min(82, Math.max(t[r.season] || 1, r.gamesPlayed)); return t;
 }
 
-function durabilityGames(view, targetSeason) {
+function durabilityGames(view, targetSeason, { profilePool = 'all' } = {}) {
   const totals = gameTotals(view.rows);
   const byPlayer = new Map();
-  for (const r of view.rows) { if (!byPlayer.has(r.player.id)) byPlayer.set(r.player.id, []); byPlayer.get(r.player.id).push(r); }
+  // 'active' mirrors production more closely: the availability baseline is built from players still in the league (production builds it
+  // from the current Yahoo pool), not from everyone who ever appeared in the history.
+  const active = new Set(view.rows.filter((r) => r.season === targetSeason - 1).map((r) => r.player.id));
+  for (const r of view.rows) {
+    if (profilePool === 'active' && !active.has(r.player.id)) continue; if (!byPlayer.has(r.player.id)) byPlayer.set(r.player.id, []); byPlayer.get(r.player.id).push(r); }
   const profileOf = (rows) => {
     const sorted = [...rows].sort((a, b) => b.season - a.season); const latest = sorted[0];
     return {
@@ -44,12 +48,12 @@ function durabilityGames(view, targetSeason) {
   };
 }
 
-export function productionModel() {
+export function productionModel({ profilePool = 'all', id = 'production' } = {}) {
   return {
-    id: 'production', version: 'progm.production-carry-forward+durability.v1',
+    id, version: profilePool === 'all' ? 'progm.production-carry-forward+durability.v1' : `progm.production-carry-forward+durability.v1.pool-${profilePool}`,
     description: 'Last-season stat line (league scoring), last-season minutes, production durability model for games.',
     fit(view, { statCategories, targetSeason }) {
-      const gamesOf = durabilityGames(view, targetSeason);
+      const gamesOf = durabilityGames(view, targetSeason, { profilePool });
       return {
         diagnostics: { trainingRows: view.rowCount, cutoffSeason: view.cutoffSeason },
         predict(playerId) {
@@ -154,6 +158,29 @@ export function blendModel({ id, perGame, games }) {
       return { diagnostics: {}, predict(playerId) {
         if (!fitted.get(perGame[0]).predict(playerId)) return null;
         return { fppg: avg(perGame, 'fppg', playerId), minutes: avg(perGame, 'minutes', playerId), games: avg(games, 'games', playerId) };
+      } };
+    },
+  };
+}
+
+/**
+ * Tier-dependent games shrinkage: games = w * ML + (1 - w) * reference, with w chosen per tier (top N by the reference model's predicted
+ * season total vs the rest). Weights are fixed inputs (frozen before evaluation); per-game production comes from `perGame`.
+ */
+export function tierShrinkGamesModel({ id, perGame, reference, ml, topN, weights }) {
+  return {
+    id, version: `tier-shrink(top${topN}:${weights.top};rest:${weights.rest})(${perGame.id}|${reference.id}|${ml.id})`, description: `Per-game from ${perGame.id}; games ${weights.top}/${weights.rest} ML weight for the top ${topN} by ${reference.id} season total / the rest`,
+    fit(view, ctx) {
+      const a = perGame.fit(view, ctx); const ref = reference.fit(view, ctx); const m = ml.fit(view, ctx);
+      const ids = [...new Set(view.rows.filter((r) => r.season === ctx.targetSeason - 1).map((r) => r.player.id))];
+      const totals = ids.map((pid) => { const p = ref.predict(pid); return [pid, p && Number.isFinite(p.fppg) && Number.isFinite(p.games) ? p.fppg * p.games : -Infinity]; })
+        .sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]));
+      const top = new Set(totals.slice(0, topN).map(([pid]) => pid));
+      return { diagnostics: { topTier: top.size }, predict(playerId) {
+        const x = a.predict(playerId); if (!x) return null;
+        const g0 = ref.predict(playerId)?.games; const g1 = m.predict(playerId)?.games; const w = top.has(playerId) ? weights.top : weights.rest;
+        const games = Number.isFinite(g0) && Number.isFinite(g1) ? w * g1 + (1 - w) * g0 : (Number.isFinite(g0) ? g0 : null);
+        return { ...x, games, fallback: x.fallback ?? null };
       } };
     },
   };
