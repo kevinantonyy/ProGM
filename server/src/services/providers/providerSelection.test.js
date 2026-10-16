@@ -14,6 +14,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as providers from './index.js';
 import { cache, health } from './index.js';
+import { buildProjectionContext } from '../fantasy/insights.js';
 
 const originalFetch = global.fetch;
 let hostCalls;
@@ -142,4 +143,32 @@ test('schedule comes from NBA CDN under free_nba primary', async () => {
   assert.equal(sched.meta.provider, 'free_nba');
   assert.equal(hostCalls.nba_cdn, 1);
   assert.equal(hostCalls.tank01 || 0, 0);
+});
+
+test('empty injury feed is available in projection context and cached without new requests', async () => {
+  const now = new Date();
+  const season = now.getUTCFullYear() - (now.getUTCMonth() < 7 ? 1 : 0);
+  const params = {
+    season,
+    players: [{ playerKey: '466.p.1', name: 'Player 111', teamAbbr: 'BOS' }],
+    statCategories: [{ statId: 12, enabled: true, pointValue: 1 }],
+  };
+  const first = await buildProjectionContext(params);
+  assert.equal(first.injuryReports.available, true);
+  assert.equal(first.injuryReports.count, 0);
+  assert.equal(first.diagnostic.sources.injuries, true);
+  const calls = { ...hostCalls };
+  const second = await buildProjectionContext(params);
+  assert.equal(second.injuryReports.fetchedAt, first.injuryReports.fetchedAt);
+  assert.deepEqual(hostCalls, calls);
+});
+
+test('malformed injury response is unavailable rather than a healthy empty feed', async () => {
+  delete process.env.RAPIDAPI_KEY;
+  const base = makeFetchStub();
+  global.fetch = async (url) => String(url).includes('/injuries')
+    ? { ok: true, status: 200, text: async () => '{}', json: async () => ({}) }
+    : base(url);
+  const injuries = await providers.getInjuries();
+  assert.equal(injuries, null);
 });

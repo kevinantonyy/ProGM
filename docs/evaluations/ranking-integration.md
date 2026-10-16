@@ -176,9 +176,16 @@ HAR, or any URL containing league or team keys.
   health) and `playerStatus` `{ code, state, label, note, source: 'yahoo', observedAt }`. `code` is Yahoo's raw code. `state` is
   `inactive` (NA), `out` (O, OUT, INJ, IL, IL+, IR, OFS), `doubtful`, `questionable` (Q, GTD, DTD, P), `suspended`, `none` (Yahoo shows no
   designation; not a confirmation of health) or `unknown` (a code ProGM does not recognise). No reason is inferred for NA.
-- `observedAt` is when the workspace build started its Yahoo requests. Yahoo gives no time for when a designation was set, so none is
-  shown. The client flags statuses older than 6 hours, or with no fetch time, as possibly out of date.
-- The board gains `statusData` with a warning when the external injury source is unavailable (`externalData.diagnostic.sources.injuries`
-  false), because projections and expected games then ignore current injuries.
-- Not covered: the live-draft board (`GET /api/basketball/draft`) keeps the existing OUT badge. The flag is not part of the workspace cache key, so for
-  up to 5 minutes after toggling, a cached workspace may be served in the other shape; the UI handles both.
+- Both the workspace and live-draft recommendation boards receive the same fields, including rows without projections. Annotations
+  run after valuation and drafted-player exclusion. Flag off preserves the original board shape and existing OUT badge.
+- `observedAt` preserves receipt time of the status-bearing Yahoo ownership page or roster response. Cached live pools retain those
+  per-player times; older entries without them use their existing cache fetch time, never the current poll time. Unknown times stay null.
+  The board shows its oldest known player time (null if any is unknown), and explicitly marks stale-cache fallback even within the six-hour window.
+  Yahoo gives no timestamp for when a designation was set, so this is fetch freshness only.
+- `statusData.injuryReports` distinguishes a successful empty feed (`available: true, count: 0`) from unavailable, malformed, stale or
+  historical-inapplicable data. Warnings explain the difference without claiming that an empty list confirms health. This metadata does
+  not change scoring, projections or expected games.
+- Flag-on workspaces use a `.status` cache-profile suffix; flag-off keys remain unchanged. The ranking diagnostic reads the matching
+  key. Ranking/baseline reference keys are unchanged because this feature never changes rank.
+- Badge and warning text use semantic light/dark colors; scoped badge backgrounds keep small text above 4.5:1 contrast. Endpoint,
+  provider, cache and client tests use synthetic data only. No extra Yahoo requests or polling are added.

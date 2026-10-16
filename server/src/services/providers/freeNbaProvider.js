@@ -457,6 +457,9 @@ export async function getScheduleWithIds(season) {
 
 export async function getInjuries() {
   const payload = await jsonFetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries', ESPN_HEADERS);
+  if (!Array.isArray(payload?.injuries) || payload.injuries.some((team) => !Array.isArray(team?.injuries))) {
+    throw new Error('Unrecognized ESPN injury feed; injury coverage is unavailable.');
+  }
   return mapEspnInjuries(payload);
 }
 

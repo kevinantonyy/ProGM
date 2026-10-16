@@ -1,13 +1,13 @@
 /**
  * Display helpers for the experimental draft-board status fields (server flag PROGM_DRAFT_STATUS=on).
- * Rows without `playerStatus` (flag off, or the live-draft board) keep the existing OUT badge.
+ * Rows without `playerStatus` (flag off) keep the existing OUT badge.
  */
 export const STATUS_STALE_AFTER_MS = 6 * 60 * 60 * 1000; // shortcut: one fixed window; tune per draft phase if game-day use needs it
 
 /** 'fresh' | 'stale' | 'unknown' (no or invalid fetch time; never assumed fresh). */
 export function statusFreshness(observedAt, now = Date.now()) {
   const t = Date.parse(observedAt ?? '');
-  if (!Number.isFinite(t)) return 'unknown';
+  if (!Number.isFinite(t) || t > now) return 'unknown';
   return now - t > STATUS_STALE_AFTER_MS ? 'stale' : 'fresh';
 }
 
@@ -51,5 +51,6 @@ export function statusNotices(statusData, now = Date.now()) {
   const freshness = statusFreshness(statusData.observedAt, now);
   if (freshness === 'stale') notices.push({ kind: 'stale', text: `Yahoo statuses were fetched about ${Math.floor((now - Date.parse(statusData.observedAt)) / 3600000)} hours ago and may be out of date. Refresh to update them.` });
   if (freshness === 'unknown') notices.push({ kind: 'stale', text: 'The time these Yahoo statuses were fetched is unknown, so they may be out of date.' });
+  if (statusData.stale && freshness === 'fresh') notices.push({ kind: 'stale', text: 'Yahoo could not refresh player statuses. Showing cached designations, which may be out of date.' });
   return notices;
 }

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement } from 'react';
 import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge.js';
@@ -52,4 +53,42 @@ test('league availability wording never implies health', () => {
   assert.equal(leagueAvailabilityLabel('available'), 'Not rostered in your league');
   assert.equal(leagueAvailabilityLabel('rostered'), 'Rostered in your league');
   assert.equal(leagueAvailabilityLabel(undefined), 'League availability unknown');
+});
+
+test('freshness respects stale-cache signals and treats future/unknown timestamps conservatively', () => {
+  assert.equal(statusFreshness(new Date(NOW + 1000).toISOString(), NOW), 'unknown');
+  const notices = statusNotices({ observedAt: AT, stale: true }, NOW);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].text, /cached designations/);
+});
+
+test('warning uses the adaptive semantic theme color', () => {
+  const out = renderToStaticMarkup(createElement(DraftStatusNotice, { statusData: { observedAt: AT, warning: 'Unavailable' } }));
+  assert.match(out, /text-accent-orange/);
+  assert.ok(!out.includes('text-orange-300'));
+});
+
+test('status badge and notice colors meet normal-text contrast in both themes', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+  assert.match(css, /\.player-status-badge\s*\{[^}]*background: rgb\(var\(--dark-800\)\)/);
+  assert.match(html(st('Q', 'questionable')), /player-status-badge/);
+  const roots = [...css.matchAll(/:root\s*\{([^}]+)\}/g)].map((match) => match[1]);
+  const color = (root, token) => new RegExp(`--${token}:\\s*([\\d ]+)`).exec(root)[1].trim().split(/\s+/).map(Number);
+  const luminance = (rgb) => rgb.map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }).reduce((sum, value, i) => sum + value * [0.2126, 0.7152, 0.0722][i], 0);
+  const contrast = (a, b) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
+  assert.equal(roots.length, 2);
+  for (const [index, root] of roots.entries()) {
+    const surface = color(root, 'dark-800');
+    for (const semantic of ['red', 'orange']) {
+      const foreground = color(root, `semantic-${semantic}`);
+      const badgeRatio = contrast(foreground, surface);
+      assert.ok(badgeRatio >= 4.5, `theme ${index} ${semantic} badge contrast: ${badgeRatio}`);
+      assert.ok(contrast(foreground, surface) >= 4.5, `theme ${index} ${semantic} notice contrast`);
+    }
+    assert.ok(contrast(color(root, 'dark-300'), surface) >= 4.5);
+    assert.ok(contrast(color(root, 'dark-400'), surface) >= 4.5);
+  }
 });

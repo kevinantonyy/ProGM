@@ -140,19 +140,17 @@ async function optionalPlayersRequest(yahooFantasy, accessToken, path) {
  * @param {string} params.teamKey     the user's team in this league
  */
 export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leagueKey, teamKey, userId = null, shadowSink = null }) {
-  // Player statuses below come from live Yahoo calls made at or after this moment (Yahoo gives no status timestamp).
-  const yahooRequestedAt = new Date().toISOString();
   // 1. League settings + standings (Yahoo facts).
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
     yahooFantasy(`/league/${leagueKey}/standings`, accessToken),
-    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken),
+    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken).then((value) => ({ value, fetchedAt: new Date().toISOString() })),
   ]);
 
   const league = normalizeLeagueSettings(settingsData);
   const settings = league?.settings || null;
   const standings = extractStandings(standingsData);
-  let myRoster = extractRosterPlayers(rosterData);
+  let myRoster = extractRosterPlayers(rosterData.value).map((player) => ({ ...player, yahooStatusFetchedAt: rosterData.fetchedAt }));
   const myStanding = standings.find((t) => t.teamKey === teamKey) || standings.find((t) => t.isOwnedByLogin) || null;
 
   // 2. Yahoo returns only the first appended player sub-resource. Fetch each
@@ -361,8 +359,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     // Experimental (PROGM_DRAFT_STATUS=on): display-only status fields added after ranking, shadow and Rankings tab are built.
     draftBoard: resolveDraftStatusDisplay()
       ? withPlayerStatus(draftBoard, new Map(draftPool.map((p) => [p.playerKey, p])), {
-          observedAt: yahooRequestedAt,
-          injuryReports: { available: Boolean(ctx.externalAvailable && ctx.diagnostic?.sources?.injuries), provider: ctx.diagnostic?.provider ?? null },
+          injuryReports: ctx.injuryReports,
         })
       : draftBoard,
     recommendedTrades,

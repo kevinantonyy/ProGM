@@ -31,6 +31,7 @@ import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
 import { cache } from '../services/providers/index.js';
 import { loadBaselineReference, referenceKey } from '../services/fantasy/baselineReference.js';
+import { resolveDraftStatusDisplay, withPlayerStatus } from '../services/fantasy/playerStatus.js';
 
 const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool };
 
@@ -62,7 +63,7 @@ async function fetchAvailableWithAdp(leagueKey, token) {
     { provider: 'yahoo', ttl: ADP_FETCH_TTL },
     () => fetchYahooDraftPool(yahooFantasy, token, leagueKey),
   );
-  return result.value;
+  return result;
 }
 
 async function fetchDraftSettings(leagueKey, token) {
@@ -148,7 +149,7 @@ router.get('/workspace', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    const cacheKey = `bball:workspace:${rankingProfileForUser(req.userId)}:${req.userId}:${leagueKey}:${teamKey}`;
+    const cacheKey = `bball:workspace:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}:${teamKey}`;
     if (req.query.refresh !== 'true') {
       const cached = cache.get(cacheKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
@@ -192,7 +193,7 @@ router.get('/diagnostics/ranking-compare', authenticate, (req, res) => {
   const scope = diagnosticScope(req, res);
   if (!scope) return;
   const { leagueKey, teamKey } = scope;
-  const cached = cache.get(`bball:workspace:${rankingProfileForUser(req.userId)}:${req.userId}:${leagueKey}:${teamKey}`);
+  const cached = cache.get(`bball:workspace:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}:${teamKey}`);
   if (!cached?.value?.draftBoard?.board?.length) return res.status(409).json({ error: 'No cached Draft Helper data for this league under the current ranking flags. Open the Draft Helper first; this diagnostic never fetches from Yahoo.' });
   const highlight = String(req.query.highlight || '').split(',').map((n) => n.trim()).filter(Boolean).slice(0, 10);
   res.json({ activeRankingModel: cached.value.draftBoard.rankingModel || 'legacy', rookieEstimates: resolveRookieEstimates(), cacheFetchedAt: cached.meta.fetchedAt, ...compareRankingModels(cached.value.draftBoard.board, { top: 50, highlight }) });
@@ -336,9 +337,12 @@ router.get('/draft', authenticate, async (req, res) => {
     // the taken+available player pool and subtract drafted keys for correctness
     // even mid-draft (Yahoo marks players taken as they are picked).
     let availablePlayers = [];
+    let playerMetadata = null;
     try {
       // Separate cached batches for ownership, ADP, and Yahoo Rank.
-      availablePlayers = await fetchAvailableWithAdp(leagueKey, token);
+      const result = await fetchAvailableWithAdp(leagueKey, token);
+      availablePlayers = result.value;
+      playerMetadata = result.meta;
     } catch {
       availablePlayers = [];
     }
@@ -356,6 +360,7 @@ router.get('/draft', authenticate, async (req, res) => {
     // uses the user's drafted-so-far roster.
     let board = { available: false, availabilityKnown: true, board: [], noData: [], note: 'Projections unavailable.' };
     let externalAvailable = false;
+    let injuryReports;
     if (settings && scoringIsSupported(settings)) {
       let myRosterPlayers = [];
       if (myPickKeys.size) {
@@ -380,6 +385,7 @@ router.get('/draft', authenticate, async (req, res) => {
         rookieEstimates,
       });
       externalAvailable = ctx.externalAvailable;
+      injuryReports = ctx.injuryReports;
       const analysis = analyzeRoster({ players: myRosterPlayers, settings });
       const projectionProvider = ctx.projectionProvider && {
         getProjection: (pl) => {
@@ -411,6 +417,13 @@ router.get('/draft', authenticate, async (req, res) => {
     }
 
     delete board.baselineReference; // internal normalization data, not sent to the client
+    if (resolveDraftStatusDisplay()) {
+      board = withPlayerStatus(board, new Map(availablePlayers.map((player) => [player.playerKey, player])), {
+        observedAt: playerMetadata?.fetchedAt ?? null,
+        stale: playerMetadata?.stale === true,
+        injuryReports,
+      });
+    }
     return res.json({
       leagueKey,
       teamKey,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchYahooPlayerDataset } from './yahooPlayerPool.js';
+import { fetchYahooDraftPool, fetchYahooPlayerDataset } from './yahooPlayerPool.js';
 
 function playerEntry(id) {
   return { player: [[{ player_key: `466.p.${id}` }, { player_id: String(id) }, { name: { full: `Player ${id}` } }, { editorial_team_abbr: 'BOS' }, { eligible_positions: [{ position: 'PG' }] }]] };
@@ -42,4 +42,15 @@ test('optional metadata preserves completed pages when a later page fails', asyn
     return response(Array.from({ length: 25 }, (_, i) => i + 1));
   }, 'token', '466.l.1', 'ranks', { bestEffort: true });
   assert.equal(players.length, 25);
+});
+
+test('status timestamps come from the ownership page, not later rank or ADP requests', async () => {
+  const before = Date.now();
+  let ownershipReceivedAt;
+  const pool = await fetchYahooDraftPool(async (path) => {
+    if (!path.endsWith('/percent_owned')) ownershipReceivedAt ??= Date.now();
+    return response([1]);
+  }, 'synthetic', '466.l.1');
+  const observed = Date.parse(pool[0].yahooStatusFetchedAt);
+  assert.ok(observed >= before && observed <= ownershipReceivedAt);
 });

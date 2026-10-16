@@ -3,7 +3,7 @@
  *
  * Display only: nothing here feeds projections, value, rank, waivers, lineups, trades or recommendations.
  * Yahoo returns a designation code (`status`), a label (`status_full`) and sometimes `injury_note`, but never when the
- * designation was set. `observedAt` is when ProGM requested the data from Yahoo, or null; it is never derived or invented.
+ * designation was set. `observedAt` preserves the status-bearing Yahoo fetch/cache time, or null when unknown.
  *
  * States keep "inactive" apart from "out", and "none" (Yahoo shows no designation) apart from "unknown" (a code this
  * table does not recognise). Neither "none" nor anything else here means the player is confirmed healthy.
@@ -29,7 +29,7 @@ const text = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 const isoOrNull = (v) => (v != null && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
 
 /** @param {{status?:string|null, statusFull?:string|null, injuryNote?:string|null}} player normalized Yahoo player */
-export function classifyYahooStatus(player, { observedAt = null } = {}) {
+export function classifyYahooStatus(player, { observedAt = null, stale = false } = {}) {
   const code = text(player?.status);
   const key = code?.toUpperCase() ?? null;
   const state = key == null ? 'none' : (STATE_BY_CODE[key] ?? 'unknown');
@@ -40,6 +40,7 @@ export function classifyYahooStatus(player, { observedAt = null } = {}) {
     note: text(player?.injuryNote),
     source: 'yahoo',
     observedAt: isoOrNull(observedAt),
+    ...(stale ? { stale: true } : {}),
   };
 }
 
@@ -48,25 +49,35 @@ export function classifyYahooStatus(player, { observedAt = null } = {}) {
  * board; existing fields, row order and every ranking value are copied unchanged.
  * @param {object} board              buildDraftBoard() result
  * @param {Map<string,object>} poolByKey  playerKey -> normalized Yahoo player the row was built from
- * @param {{observedAt?:string|null, injuryReports?:{available:boolean, provider:string|null}}} meta
+ * @param {{observedAt?:string|null, stale?:boolean, injuryReports?:object}} meta cached-source metadata
  */
-export function withPlayerStatus(board, poolByKey, { observedAt = null, injuryReports = { available: false, provider: null } } = {}) {
+export function withPlayerStatus(board, poolByKey, { observedAt = null, stale = false, injuryReports = { available: false, provider: null } } = {}) {
   const annotate = (row) => ({
     ...row,
     // Rostered in this Yahoo league or not. Says nothing about health; that is playerStatus.
     leagueAvailability: row.availability ?? 'unknown',
-    playerStatus: classifyYahooStatus(poolByKey.get(row.playerKey) ?? { status: row.status }, { observedAt }),
+    playerStatus: classifyYahooStatus(poolByKey.get(row.playerKey) ?? { status: row.status }, {
+      observedAt: Object.hasOwn(poolByKey.get(row.playerKey) || {}, 'yahooStatusFetchedAt')
+        ? poolByKey.get(row.playerKey).yahooStatusFetchedAt : observedAt,
+      stale,
+    }),
   });
+  const rows = (board.board || []).map(annotate);
+  const noData = (board.noData || []).map(annotate);
+  const times = [...rows, ...noData].map((row) => row.playerStatus.observedAt);
+  const oldest = times.length ? (times.every(Boolean) ? times.sort()[0] : null) : isoOrNull(observedAt);
   return {
     ...board,
-    board: (board.board || []).map(annotate),
-    noData: (board.noData || []).map(annotate),
+    board: rows,
+    noData,
     statusData: {
       source: 'yahoo',
-      observedAt: isoOrNull(observedAt),
-      injuryReports: { available: injuryReports.available === true, provider: injuryReports.provider ?? null },
-      warning: injuryReports.available === true ? null
-        : 'External injury reports are unavailable, so projections and expected games do not reflect current injuries. Designations shown are Yahoo\'s only; a player without one is not confirmed healthy.',
+      observedAt: oldest,
+      stale: stale === true,
+      injuryReports: { ...injuryReports, available: injuryReports.available === true, provider: injuryReports.provider ?? null },
+      warning: injuryReports.applicable === false ? 'Current injury reports are not applied to historical-season projections.'
+        : injuryReports.available !== true ? 'External injury reports are unavailable, so projections and expected games do not reflect current injuries. Designations shown are Yahoo\'s only; a player without one is not confirmed healthy.'
+          : injuryReports.stale ? 'External injury reports are cached and may be out of date; current injury coverage is not guaranteed.' : null,
     },
   };
 }

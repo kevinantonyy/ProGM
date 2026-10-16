@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDraftBoard } from './draftHelper.js';
 import { PLAYER_STATUS_STATES, classifyYahooStatus, resolveDraftStatusDisplay, withPlayerStatus } from './playerStatus.js';
+import { injuryReportStatus } from './insights.js';
 
 const AT = '2026-10-16T07:00:00.000Z';
 
@@ -93,4 +94,39 @@ test('ranking unchanged: annotation adds fields only, and the board ignores stat
   // No status-based multiplier exists: the same pool with every designation removed ranks identically.
   const noStatus = board(pool(false));
   assert.deepEqual(before.board.map((r) => [r.playerKey, r.overallRank, r.value, r.recommendation]), noStatus.board.map((r) => [r.playerKey, r.overallRank, r.value, r.recommendation]));
+});
+
+test('injury feed distinguishes available empty, unavailable, historical, and stale data', () => {
+  const empty = injuryReportStatus({ value: [], meta: { provider: 'free_nba', fetchedAt: AT } });
+  assert.equal(empty.available, true);
+  assert.equal(empty.count, 0);
+  assert.equal(empty.fetchedAt, AT);
+  const annotate = (injuryReports) => withPlayerStatus({ board: [], noData: [] }, new Map(), { injuryReports });
+  assert.equal(annotate(empty).statusData.warning, null);
+  for (const result of [null, {}, { value: null }, { value: {} }]) {
+    const unavailable = injuryReportStatus(result);
+    assert.equal(unavailable.available, false);
+    assert.equal(unavailable.count, null);
+    assert.match(annotate(unavailable).statusData.warning, /unavailable/);
+  }
+  const stale = injuryReportStatus({ value: [], meta: { provider: 'free_nba', fetchedAt: AT, stale: true } });
+  assert.equal(stale.available, true);
+  assert.match(annotate(stale).statusData.warning, /cached/);
+  assert.match(annotate(injuryReportStatus(null, false)).statusData.warning, /historical/);
+});
+
+test('status annotation keeps per-player fetch times, reports oldest/unknown time, and preserves no-data rows', () => {
+  const board = { board: [{ playerKey: 'a', availability: 'available' }], noData: [{ playerKey: 'b', availability: 'rostered' }] };
+  const refs = new Map([
+    ['a', { status: 'Q', yahooStatusFetchedAt: AT }],
+    ['b', { status: 'NA', yahooStatusFetchedAt: '2026-10-16T06:00:00.000Z' }],
+  ]);
+  const after = withPlayerStatus(board, refs, { observedAt: '2026-10-16T08:00:00.000Z' });
+  assert.equal(after.statusData.observedAt, '2026-10-16T06:00:00.000Z');
+  assert.equal(after.board[0].playerStatus.observedAt, AT);
+  assert.equal(after.noData[0].leagueAvailability, 'rostered');
+  refs.get('b').yahooStatusFetchedAt = null;
+  const unknown = withPlayerStatus(board, refs, { observedAt: AT });
+  assert.equal(unknown.noData[0].playerStatus.observedAt, null);
+  assert.equal(unknown.statusData.observedAt, null);
 });
