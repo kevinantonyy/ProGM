@@ -1,0 +1,76 @@
+{
+  "schema": "progm.prospective-manifest.v1",
+  "file": "snapshot-2026.json",
+  "sha256": "e509467a8aafe3fa5231c961d44aa5ff45b41e47e921044f9c58d51f0ada323e",
+  "generatedAt": "2026-10-16T06:24:47.927Z",
+  "codeCommit": "d8958fca7b9238de41891a93e08da37042be10c6",
+  "targetSeason": 2026,
+  "models": [
+    {
+      "id": "production",
+      "version": "progm.production-carry-forward+durability.v1",
+      "role": "reference",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    },
+    {
+      "id": "age_minutes",
+      "version": "progm.age-minutes.v1",
+      "role": "reference",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    },
+    {
+      "id": "ml_lgbm",
+      "version": "progm.ml-v1.lgbm.1",
+      "role": "secondary",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    },
+    {
+      "id": "ml_ridge",
+      "version": "progm.ml-v1.ridge.1",
+      "role": "secondary",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    },
+    {
+      "id": "ens_all(age_minutes,ml_ridge)",
+      "version": "blend(perGame:age_minutes+ml_ridge;games:production+ml_ridge)",
+      "role": "secondary",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    },
+    {
+      "id": "candidate_tier_shrink",
+      "version": "tier-shrink(top75:0;rest:0.6)(age_minutes|production|ml_lgbm)",
+      "role": "primary",
+      "predictions": 327,
+      "dataCutoffSeason": 2025,
+      "dataFingerprint": "0644f73c70281081"
+    }
+  ],
+  "inputs": {
+    "dataset": "eec05468e6ca6d774bd76fc842872187db4dde7f69604a9763cfdb3dd1767626",
+    "mlLgbm": "e16c311f5b3a48c6a00f3e928179474dbcf3013a31d3a39d28bea9b33d8c017b",
+    "mlRidge": "db0e0aabe314b9211d4d3e5f547397106c492604b5553bdbb03ce1f9a3c89051",
+    "params": {
+      "schema": "progm.prospective-params.v1",
+      "rule": "ML games weight per tier minimising games MAE over all historical folds 2017-2025 (top tier = top 75 by production season total)",
+      "topTierSize": 75,
+      "mlGamesWeight": {
+        "top": 0,
+        "rest": 0.6000000000000001
+      },
+      "selectedFromFolds": [
+        2017,
+        2025
+      ]
+    }
+  }
+}

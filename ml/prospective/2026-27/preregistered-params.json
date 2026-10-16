@@ -1,0 +1,13 @@
+{
+  "schema": "progm.prospective-params.v1",
+  "rule": "ML games weight per tier minimising games MAE over all historical folds 2017-2025 (top tier = top 75 by production season total)",
+  "topTierSize": 75,
+  "mlGamesWeight": {
+    "top": 0.0,
+    "rest": 0.6000000000000001
+  },
+  "selectedFromFolds": [
+    2017,
+    2025
+  ]
+}
