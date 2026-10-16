@@ -29,3 +29,8 @@ After the 2026-27 regular season ends, rebuild the dataset with the same code (`
 
 ## Known limitations of this test
 One season; one data source family; no injury or transaction information in any model; the universe excludes rookies and low-minute players; the production replica differs from shipped production in the ways listed in `ml-top-player-diagnostics.md` section 4.
+
+## Freeze record (verified 2026-10-16)
+- Snapshot `snapshot-2026.json` SHA-256: `e509467a8aafe3fa5231c961d44aa5ff45b41e47e921044f9c58d51f0ada323e` (matches `manifest-2026.json`).
+- Reproducibility check: the dataset was rebuilt from llimllib/nba_data commit `2b4de94ead7568e2aa312115ca7b77ec2ca053ca` (rows identical; only the acquisition timestamp differs), both ML models were retrained for 2026 (predictions identical), and the snapshot was regenerated from those inputs with the recorded code and generation time: byte-identical, same SHA-256.
+- Frozen files and their SHA-256 values are listed in `ml/prospective/2026-27/FROZEN.sha256`, which also covers this plan. A server test (`prospectiveFreeze.test.js`) fails if any of them changes. Frozen: the evaluation rules and decision rule (this document), the player pool (in the snapshot), the model weights (`preregistered-params.json`, also recorded in each model version), the league scoring (`league-scoring.json`), and the primary metric (Spearman of season fantasy points, `candidate_tier_shrink` vs `production`).
