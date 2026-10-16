@@ -7,3 +7,6 @@ dist/
 .DS_Store
 .neon
 .neon
+
+# Private local data (never commit): injury/suspension status logs
+.progm-private/
