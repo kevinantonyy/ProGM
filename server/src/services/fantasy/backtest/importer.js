@@ -26,6 +26,9 @@ export function normalizeProvenance(raw) {
     licenseUrl: raw?.licenseUrl == null ? null : String(raw.licenseUrl),
     sourceUrl: raw?.sourceUrl == null ? null : String(raw.sourceUrl),
     exportId: raw?.exportId == null ? null : String(raw.exportId),
+    // Optional, used by the chronological evaluation framework: license state and whether every league player-season is present.
+    licenseStatus: raw?.licenseStatus == null ? null : String(raw.licenseStatus),
+    coverage: raw?.coverage == null ? null : String(raw.coverage),
   };
 }
 

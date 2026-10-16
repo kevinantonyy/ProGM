@@ -9,7 +9,8 @@
     "seed": "node src/db/seed.js",
     "test": "node --test",
     "backtest:historical": "node src/services/fantasy/backtest/cli.js",
-    "shadow:local": "node scripts/shadowStart.mjs"
+    "shadow:local": "node scripts/shadowStart.mjs",
+    "evaluate:chronological": "node src/services/fantasy/backtest/chronoEval.cli.js"
   },
   "dependencies": {
     "bcryptjs": "2.4.3",
