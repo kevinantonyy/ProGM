@@ -41,6 +41,7 @@ import { loadBaselineReference, referenceKey, saveBaselineReference } from './ba
 import { buildDraftBoard } from './draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow } from './rankingModel.js';
 import { runWorkspaceShadow } from './rankingShadow.js';
+import { resolveDraftStatusDisplay, withPlayerStatus } from './playerStatus.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -139,6 +140,8 @@ async function optionalPlayersRequest(yahooFantasy, accessToken, path) {
  * @param {string} params.teamKey     the user's team in this league
  */
 export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leagueKey, teamKey, userId = null, shadowSink = null }) {
+  // Player statuses below come from live Yahoo calls made at or after this moment (Yahoo gives no status timestamp).
+  const yahooRequestedAt = new Date().toISOString();
   // 1. League settings + standings (Yahoo facts).
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
@@ -355,7 +358,13 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     startSit,
     leagueHub,
     rankings,
-    draftBoard,
+    // Experimental (PROGM_DRAFT_STATUS=on): display-only status fields added after ranking, shadow and Rankings tab are built.
+    draftBoard: resolveDraftStatusDisplay()
+      ? withPlayerStatus(draftBoard, new Map(draftPool.map((p) => [p.playerKey, p])), {
+          observedAt: yahooRequestedAt,
+          injuryReports: { available: Boolean(ctx.externalAvailable && ctx.diagnostic?.sources?.injuries), provider: ctx.diagnostic?.provider ?? null },
+        })
+      : draftBoard,
     recommendedTrades,
     rating,
     scheduleAware: Boolean(schedules && periodWindow),

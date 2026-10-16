@@ -9,6 +9,7 @@ environment variables set the app ranks exactly as production does today. Not me
 | `PROGM_RANKING_MODEL` | `v2` (anything else, unset or a typo = legacy) | v2 = draft value without the separate scarcity bonus (0.75 production, 0.20 replacement, 0 scarcity, 0.05 roster fit). Legacy = 0.70 / 0.20 / 0.05 / 0.05 |
 | `PROGM_ROOKIE_ESTIMATES` | `on`, `true` or `1` (anything else = off) | Adds flagged, low-confidence, Yahoo-ADP-implied estimates for players with no NBA stat line |
 | `PROGM_RANKING_DIAGNOSTIC` | `on` (else the route returns 404) | Enables the read-only comparison route in section 4 |
+| `PROGM_DRAFT_STATUS` | `on`, `true` or `1` (anything else = off) | Experimental, display only: Yahoo designations and league availability on Draft Helper rows (see "Draft-board status display" below). Never changes rank or value |
 
 **Cache identity:** `rankingProfile()` (`<model>.<est|noest>`, e.g. `v2.noest`) is part of the frozen
 baseline-reference key and of the workspace cache key, and a reference built under another model is ignored.
@@ -166,3 +167,18 @@ HAR, or any URL containing league or team keys.
   baseline reference key, and the diagnostics cache keys (`rankingProfileForUser`). Rookie estimates are unaffected (still off unless `PROGM_ROOKIE_ESTIMATES`).
 - Shadow mode only runs for accounts whose visible model is legacy.
 - Rollback: delete the variable and let Render restart. Nothing is persisted; caches are in memory.
+
+## Draft-board status display (`PROGM_DRAFT_STATUS`, experimental, default off)
+- Display only. `withPlayerStatus()` (`playerStatus.js`) runs after the draft board, shadow comparison and Rankings tab are built and
+  only adds fields; row order, ranks, values and recommendations are byte-identical (tested on a fixture and on a saved real board).
+  The draft board does not use Yahoo status at all today, and this change adds no status multiplier.
+- Each row gains `leagueAvailability` (`available` / `rostered` / `unknown`: rostered in this Yahoo league or not, nothing about
+  health) and `playerStatus` `{ code, state, label, note, source: 'yahoo', observedAt }`. `code` is Yahoo's raw code. `state` is
+  `inactive` (NA), `out` (O, OUT, INJ, IL, IL+, IR, OFS), `doubtful`, `questionable` (Q, GTD, DTD, P), `suspended`, `none` (Yahoo shows no
+  designation; not a confirmation of health) or `unknown` (a code ProGM does not recognise). No reason is inferred for NA.
+- `observedAt` is when the workspace build started its Yahoo requests. Yahoo gives no time for when a designation was set, so none is
+  shown. The client flags statuses older than 6 hours, or with no fetch time, as possibly out of date.
+- The board gains `statusData` with a warning when the external injury source is unavailable (`externalData.diagnostic.sources.injuries`
+  false), because projections and expected games then ignore current injuries.
+- Not covered: the live-draft board (`GET /api/basketball/draft`) keeps the existing OUT badge. The flag is not part of the workspace cache key, so for
+  up to 5 minutes after toggling, a cached workspace may be served in the other shape; the UI handles both.

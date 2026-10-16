@@ -7,6 +7,8 @@ import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../ut
 import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
 import { resolveDraftPhase } from '../utils/draftStatus';
 import EstimateBadge from '../components/EstimateBadge';
+import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge';
+import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
@@ -529,7 +531,8 @@ function DraftRecommendation({ player }) {
 function DraftPlayerRow({ player, availabilityKnown }) {
   const [expanded, setExpanded] = useState(false);
   const detailId = `draft-details-${String(player.playerKey || player.name).replace(/[^a-z0-9_-]/gi, '-')}`;
-  const availability = player.availability === 'available' ? 'Available' : player.availability === 'rostered' ? 'Rostered' : 'Availability unknown';
+  const hasStatus = player.playerStatus !== undefined; // experimental fields (server PROGM_DRAFT_STATUS=on)
+  const availability = hasStatus ? leagueAvailabilityLabel(player.leagueAvailability) : player.availability === 'available' ? 'Available' : player.availability === 'rostered' ? 'Rostered' : 'Availability unknown';
   const lastFantasySeason = seasonLabelFrom(player.lastSeasonFantasy?.season);
   const lastYahooSeason = seasonLabelFrom(player.lastSeasonYahooRankSeason);
 
@@ -537,7 +540,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
     <tr className="border-b border-dark-700">
       <td className="p-3 text-center text-lg font-black text-primary-400">{player.overallRank ?? '—'}</td>
       <td className="p-3">
-        <div className="flex items-center gap-2"><PlayerLink player={player}>{player.name}</PlayerLink><EstimateBadge player={player} />{player.out && <span className="badge-red">OUT</span>}</div>
+        <div className="flex items-center gap-2"><PlayerLink player={player}>{player.name}</PlayerLink><EstimateBadge player={player} />{hasStatus ? <PlayerStatusBadge status={player.playerStatus} /> : player.out && <span className="badge-red">OUT</span>}</div>
         <p className="pl-11 text-xs text-dark-400">{player.teamAbbr || 'FA'} · {player.eligiblePositions?.join('/') || 'Position unavailable'}{availabilityKnown ? ` · ${availability}` : ''}</p>
       </td>
       <td className="p-3 text-center font-semibold text-dark-300">{player.yahooOverallRank != null ? `#${player.yahooOverallRank}` : '—'}</td>
@@ -641,6 +644,7 @@ function DraftHelper({ data, leagueKey, active }) {
       <details className="card secondary-details p-3 sm:p-4"><summary>What do these rankings mean?</summary><div className="mt-3 grid gap-3 text-xs leading-5 sm:grid-cols-2 lg:grid-cols-4"><p><strong className="text-dark-200">{db.rankScope === 'available_players' ? 'Rank (avail.)' : 'ProGM Rank'}</strong><br />Shared with the Rankings tab: projected season fantasy points (points per game × expected games), positional replacement value and scarcity for this league. It ignores your roster.{db.rankScope === 'available_players' ? ' This copy is relative to the players currently available, so it can shift as players are drafted; it is not a stable league-wide rank.' : ' It stays fixed as other teams draft.'} Roster needs only adjust the recommendations, never the rank.</p><p><strong className="text-dark-200">Yahoo Rank</strong><br />Yahoo's overall player rank. It is comparison context and does not change ProGM Rank.</p><p><strong className="text-dark-200">Yahoo ADP</strong><br />The average pick where Yahoo drafts select the player. It helps with draft timing.</p><p><strong className="text-dark-200">Season Rank</strong><br />Yahoo's rank for this league's season. It appears in player details when Yahoo provides it.</p></div></details>
 
       {isLive && <LiveDraftRoster live={live} />}
+      <DraftStatusNotice statusData={db.statusData} />
 
       {/* Research vs available-to-acquire is made explicit. */}
       <div className="flex flex-wrap items-center gap-2">
