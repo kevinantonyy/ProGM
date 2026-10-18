@@ -15,6 +15,7 @@
  */
 import * as cache from './cache.js';
 import * as health from './health.js';
+import { takePlayerFallbackBudget, playerFallbackBudgetStatus } from './playerFallbackBudget.js';
 import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
 import freeNbaProvider, {
@@ -53,7 +54,7 @@ export function externalDataAvailable() {
 export function providerStatus() {
   return {
     free_nba: { primary: FREE_PRIMARY(), configured: freeNbaProvider.isConfigured(), requestCount: freeRequestCount(), requestBreakdown: freeRequestBreakdown(), lastError: freeLastError(), ...health.status('free_nba') },
-    tank01: { configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
+    tank01: { playerBudget: playerFallbackBudgetStatus(), configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
   };
 }
@@ -174,9 +175,22 @@ export async function getSeasonStats(season, externalIds) {
   // Fallback path: providers WITHOUT a bulk method (Tank01, nba.com) are fetched
   // per player, each cached individually and shared across users/leagues.
   const metas = [];
-  const results = await Promise.all(ids.map((externalId) =>
-    withProvider(
-      `seasonStats:${season}:${externalId}`,
+  // Only providers that DON'T have bulk (bulk was already tried above).
+  const perPlayerCapable = (p) => typeof p.getSeasonStatsBulk !== 'function' && (typeof p.getSeasonStatsForPlayer === 'function' || typeof p.getSeasonStats === 'function');
+  const statsKey = (externalId) => `seasonStats:${season}:${externalId}`;
+  // Each UNCACHED player costs one provider request, so spend a bounded budget (see playerFallbackBudget.js). Cached players
+  // are free. Players beyond the budget get their last cached value if any, otherwise no stats (never fabricated); later
+  // requests fill the rest in as the budget window resets, because every fetched player is cached.
+  const uncached = ids.filter((externalId) => !cache.isFresh(statsKey(externalId)));
+  const granted = candidateProviders().some(perPlayerCapable) ? takePlayerFallbackBudget(uncached.length) : uncached.length;
+  const allowed = new Set(uncached.slice(0, granted));
+  const skippedForBudget = uncached.length - allowed.size;
+  if (skippedForBudget > 0) logBudgetLimited(skippedForBudget, uncached.length);
+  // Bounded concurrency (not all at once) so the provider circuit breaker can stop a failing provider mid-flight.
+  const results = await mapWithConcurrency(ids, PER_PLAYER_CONCURRENCY, (externalId) => {
+    if (!cache.isFresh(statsKey(externalId)) && !allowed.has(externalId)) return cache.get(statsKey(externalId));
+    return withProvider(
+      statsKey(externalId),
       cache.TTL.seasonStats,
       async (p) => {
         if (typeof p.getSeasonStatsForPlayer === 'function') {
@@ -185,10 +199,9 @@ export async function getSeasonStats(season, externalIds) {
         const arr = await p.getSeasonStats(season, [externalId]);
         return Array.isArray(arr) ? (arr[0] || null) : null;
       },
-      // Only providers that DON'T have bulk (bulk was already tried above).
-      (p) => typeof p.getSeasonStatsBulk !== 'function' && (typeof p.getSeasonStatsForPlayer === 'function' || typeof p.getSeasonStats === 'function'),
-    ),
-  ));
+      perPlayerCapable,
+    );
+  });
 
   const value = [];
   for (const r of results) {
@@ -198,7 +211,15 @@ export async function getSeasonStats(season, externalIds) {
   }
 
   const merged = cache.freshnessFrom(...metas) || { provider: 'none', fetchedAt: new Date().toISOString(), expiresAt: new Date().toISOString(), stale: false, cacheHit: true };
-  return { value, meta: { ...merged, cacheHit: metas.length > 0 && metas.every((m) => m.cacheHit) } };
+  return { value, meta: { ...merged, cacheHit: metas.length > 0 && metas.every((m) => m.cacheHit), budgetLimited: skippedForBudget > 0, skippedForBudget } };
+}
+
+const PER_PLAYER_CONCURRENCY = 4;
+let lastBudgetLogAt = 0;
+function logBudgetLimited(skipped, total) {
+  if (Date.now() - lastBudgetLogAt < 60 * 1000) return; // one line a minute, no player data
+  lastBudgetLogAt = Date.now();
+  console.warn('[providers] Per-player stats fallback limited by request budget', { skipped, total, budget: playerFallbackBudgetStatus() });
 }
 
 /**

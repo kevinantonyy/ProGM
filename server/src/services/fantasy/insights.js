@@ -342,13 +342,16 @@ export async function buildProjectionContext({ season, players, statCategories, 
         injuries: injuryReports.available,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,
+        statsBudgetLimited: Boolean(statsResult?.meta?.budgetLimited), // per-player fallback hit its request budget
       },
     },
     injuryReports,
     reason: projectedCount > 0 ? null
       : bulkOnly && !statsResult?.value?.length
         ? 'The league-wide NBA stats feed was unavailable, and this view does not use slower per-player lookups, so no projections were built.'
-        : matched.length === 0
+        : statsResult?.meta?.budgetLimited
+          ? 'NBA stats are temporarily limited to protect the data-provider quota; projections fill in as the limit resets.'
+          : matched.length === 0
           ? 'No Yahoo players could be matched to the NBA player directory, so no projections were built.'
           : 'Provider returned no usable stats for these players yet.',
   };
