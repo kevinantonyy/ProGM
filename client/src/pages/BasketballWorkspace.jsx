@@ -7,6 +7,7 @@ import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../ut
 import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
 import { resolveDraftPhase } from '../utils/draftStatus';
 import EstimateBadge from '../components/EstimateBadge';
+import DraftPreviewBanner from '../components/DraftPreviewBanner';
 import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge';
 import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
@@ -566,7 +567,7 @@ function DraftPlayerRow({ player, availabilityKnown }) {
 }
 
 // --- Tab: Draft Helper (research tool + LIVE Yahoo draft sync) ---
-function DraftCompleted({ leagueName, onOpenRoster }) {
+function DraftCompleted({ leagueName, onOpenRoster, onOpenPreview }) {
   return (
     <section className="card mx-auto max-w-2xl py-10 text-center" aria-labelledby="draft-complete-title">
       <p className="text-5xl" aria-hidden="true">🏀</p>
@@ -575,23 +576,45 @@ function DraftCompleted({ leagueName, onOpenRoster }) {
         {leagueName ? `${leagueName} has completed its draft` : 'Your league has completed its draft'}, so the Draft Helper is retired for this season.
         Head to your team to set your lineup, then use Waivers, Trades and Start / Sit to improve your roster.
       </p>
-      <button type="button" onClick={onOpenRoster} className="btn-primary mt-6">View My Roster</button>
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        <button type="button" onClick={onOpenRoster} className="btn-primary">View My Roster</button>
+        {onOpenPreview && <button type="button" onClick={onOpenPreview} className="rounded-lg border border-dark-600 bg-dark-800 px-4 py-2 text-sm font-semibold text-dark-100 hover:border-primary-500">Draft Preview</button>}
+      </div>
+      {onOpenPreview && <p className="mx-auto mt-3 max-w-md text-xs text-dark-400">Preview ProGM's rankings for every player in your league. Read-only; not a live draft.</p>}
     </section>
   );
 }
 
-function DraftHelper({ data, leagueKey, active }) {
+// Read-only Draft Preview (server flag PROGM_DRAFT_PREVIEW): loads the full-pool board and renders it with the Draft Helper table.
+function DraftPreview({ data, leagueKey, onBack }) {
+  const [state, setState] = useState({ status: 'loading', body: null, error: null });
+  useEffect(() => {
+    let cancelled = false;
+    setState({ status: 'loading', body: null, error: null });
+    api.get('/basketball/draft-preview', { params: { leagueKey } })
+      .then((r) => { if (!cancelled) setState({ status: 'ready', body: r.data, error: null }); })
+      .catch((e) => { if (!cancelled) setState({ status: 'error', body: null, error: e.response?.data?.error || 'Could not load the Draft Preview.' }); });
+    return () => { cancelled = true; };
+  }, [leagueKey]);
+  const back = <button type="button" onClick={onBack} className="rounded-lg border border-dark-600 bg-dark-800 px-3 py-1.5 text-xs font-semibold text-dark-300 hover:text-dark-50">← Back</button>;
+  if (state.status === 'loading') return <div className="space-y-4">{back}<LoadingState label="Building Draft Preview…" /></div>;
+  if (state.status === 'error') return <div className="space-y-4">{back}<section className="card border-orange-500/30 text-sm text-dark-300" role="alert">{state.error}</section></div>;
+  return <div className="space-y-4">{back}<DraftHelper data={data} leagueKey={leagueKey} active={false} preview={state.body} /></div>;
+}
+
+function DraftHelper({ data, leagueKey, active, preview = null }) {
   const navigate = useNavigate();
+  const [showPreview, setShowPreview] = useState(false);
   // Official completion comes only from Yahoo's draft_status (see utils/draftStatus.js);
   // when it is already known to be complete we do not start the live sync at all.
   const workspacePhase = resolveDraftPhase({ yahooDraftStatus: data.connection?.draftStatus });
-  const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active: active && workspacePhase !== 'completed' });
-  const draftPhase = live.yahooDraftStatus ? resolveDraftPhase({ yahooDraftStatus: live.yahooDraftStatus }) : workspacePhase;
+  const live = useLiveDraft({ leagueKey, teamKey: data.connection?.teamKey, active: active && !preview && workspacePhase !== 'completed' });
+  const draftPhase = preview ? 'preview' : live.yahooDraftStatus ? resolveDraftPhase({ yahooDraftStatus: live.yahooDraftStatus }) : workspacePhase;
   const isLive = live.draftState === 'live' || live.draftState === 'complete';
   // When a live draft is active, the recommendations come from the live sync
   // (undrafted pool, recomputed after each pick). Otherwise fall back to the
   // existing offseason/static Draft Helper board — preserving current behavior.
-  const db = isLive && live.recommendations ? live.recommendations : data.draftBoard;
+  const db = preview ? preview.draftBoard : isLive && live.recommendations ? live.recommendations : data.draftBoard;
 
   const [q, setQ] = useState('');
   const [pos, setPos] = useState('ALL');
@@ -600,9 +623,12 @@ function DraftHelper({ data, leagueKey, active }) {
   const [visibleCount, setVisibleCount] = useState(50);
   useEffect(() => setVisibleCount(50), [leagueKey, q, pos, avail, sortBy, isLive]);
 
-  if (draftPhase === 'completed') return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} />;
+  if (draftPhase === 'completed') {
+    if (showPreview && data.draftPreview?.enabled) return <DraftPreview data={data} leagueKey={leagueKey} onBack={() => setShowPreview(false)} />;
+    return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} onOpenPreview={data.draftPreview?.enabled ? () => setShowPreview(true) : undefined} />;
+  }
 
-  const liveBanner = <LiveDraftBanner live={live} />;
+  const liveBanner = preview ? <DraftPreviewBanner completeness={preview.completeness} /> : <LiveDraftBanner live={live} />;
 
   if (!db) return <section className="space-y-4">{liveBanner}<section className="card text-dark-400">Draft Helper unavailable.</section></section>;
   if (!db.available) return (
@@ -629,7 +655,7 @@ function DraftHelper({ data, leagueKey, active }) {
   });
   const visibleRows = rows.slice(0, visibleCount);
 
-  const hasPeriod = data.scheduleAware;
+  const hasPeriod = !preview && data.scheduleAware;
   const sortBtns = [...draftSortButtons(db?.rankScope), ['yahooRank', 'Yahoo Rank', 'Yahoo overall rank'], ['adp', 'Yahoo ADP', 'Average Yahoo draft position'], ['name', 'Player Name', 'Alphabetical by player name']];
   const advancedSorts = [['seasonProjected', 'Projected Season Fantasy Points', 'Projected fantasy points/game multiplied by expected regular-season games'], ['projected', 'Projected Fantasy Points/Game', 'Projected per-game production under your league scoring'], hasPeriod && ['period', 'Projected Points This Period', 'Schedule-aware projection for the current period'], ['scarcity', 'Positional Scarcity', 'Relative scarcity at eligible positions'], ['owned', 'Yahoo Rostered %', 'Percentage rostered in Yahoo leagues']].filter(Boolean);
 
@@ -637,7 +663,7 @@ function DraftHelper({ data, leagueKey, active }) {
     <div className="space-y-4">
       {liveBanner}
       <div>
-        <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">Draft Helper</h2><span className="badge-blue">League-specific</span>{isLive && <span className="badge-green">Read-only live board</span>}</div>
+        <div className="flex flex-wrap items-center gap-2"><h2 className="mr-auto text-xl font-bold">{preview ? 'Draft Preview' : 'Draft Helper'}</h2>{preview ? <span className="badge-orange">Preview · not a live draft</span> : <span className="badge-blue">League-specific</span>}{isLive && <span className="badge-green">Read-only live board</span>}</div>
         {isLive ? <p className="mt-1 text-xs text-dark-400">Recomputed after every pick.</p> : <SecondaryDetails label="Board method" className="mt-2">{db.note}</SecondaryDetails>}
       </div>
 

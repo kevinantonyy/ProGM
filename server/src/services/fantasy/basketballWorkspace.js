@@ -42,6 +42,7 @@ import { buildDraftBoard } from './draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow } from './rankingModel.js';
 import { runWorkspaceShadow } from './rankingShadow.js';
 import { resolveDraftStatusDisplay, withPlayerStatus } from './playerStatus.js';
+import { resolveDraftPreview } from './draftPreview.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -317,6 +318,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
       identity: ctx.identityDiagnostics,
       providerStatus: ctx.providerStatus,
     },
+    ...(resolveDraftPreview() ? { draftPreview: { enabled: true } } : {}), // key absent when the flag is off
     connection: {
       leagueKey,
       teamKey,

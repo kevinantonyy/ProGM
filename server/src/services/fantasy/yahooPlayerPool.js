@@ -1,7 +1,8 @@
 import { extractPlayerList, mergeYahooPlayerMetadata, yahooDraftPlayersPath } from './normalize.js';
 
 export const YAHOO_PLAYER_PAGE_SIZE = 25;
-const MAX_PLAYERS = 1000;
+export const YAHOO_POOL_MAX_PLAYERS = 1000;
+const MAX_PLAYERS = YAHOO_POOL_MAX_PLAYERS;
 
 function extractLeaguePlayers(data) {
   const leagueNode = data?.fantasy_content?.league;
@@ -9,30 +10,39 @@ function extractLeaguePlayers(data) {
   return extractPlayerList(playersNode);
 }
 
-/** Fetch every Yahoo available-player page for one subresource. */
-export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false, captureStatusTime = false } = {}) {
+/**
+ * Fetch every Yahoo player page (status A by default) for one subresource.
+ * An optional `report` object is filled with completeness evidence for Draft Preview:
+ * { pages, noKey, duplicates, hitCap, failed }. Callers that omit it behave as before.
+ */
+export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false, captureStatusTime = false, status = 'A', report = null } = {}) {
   const players = [];
   const seen = new Set();
+  if (report) Object.assign(report, { pages: 0, noKey: 0, duplicates: 0, hitCap: false, failed: false });
   for (let start = 0; start < MAX_PLAYERS; start += YAHOO_PLAYER_PAGE_SIZE) {
     let page;
     let statusFetchedAt = null;
     try {
       page = extractLeaguePlayers(await yahooFantasy(
-        yahooDraftPlayersPath(leagueKey, subresource, start, YAHOO_PLAYER_PAGE_SIZE),
+        yahooDraftPlayersPath(leagueKey, subresource, start, YAHOO_PLAYER_PAGE_SIZE, status),
         accessToken,
       ));
       if (captureStatusTime) statusFetchedAt = new Date().toISOString();
+      if (report) report.pages += 1;
     } catch (error) {
+      if (report) report.failed = true;
       if (bestEffort) break;
       throw error;
     }
     for (const player of page) {
-      if (!player?.playerKey || seen.has(player.playerKey)) continue;
+      if (!player?.playerKey) { if (report) report.noKey += 1; continue; }
+      if (seen.has(player.playerKey)) { if (report) report.duplicates += 1; continue; }
       seen.add(player.playerKey);
       // This records receipt of the actual status-bearing page, never a cache read.
       players.push(captureStatusTime ? { ...player, yahooStatusFetchedAt: statusFetchedAt } : player);
     }
     if (page.length < YAHOO_PLAYER_PAGE_SIZE) break;
+    if (report && start + YAHOO_PLAYER_PAGE_SIZE >= MAX_PLAYERS) report.hitCap = true; // last allowed page was still full
   }
   return players;
 }
