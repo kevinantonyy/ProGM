@@ -218,3 +218,54 @@ test('a Yahoo HTTP 999 (shared circuit) from a required page aborts the preview 
   const failing = async (path, token) => { try { return await yahoo(path, token); } catch (error) { error.httpStatus = 999; throw error; } };
   await assert.rejects(fetchDraftPreviewPool(failing, 'tok', LEAGUE, { draftedKeys: picks([1]) }), (error) => error.httpStatus === 999);
 });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('a Yahoo request that never answers is abandoned after the per-request timeout, and nothing further is requested', async () => {
+  let calls = 0;
+  const hang = () => { calls += 1; return new Promise(() => {}); };
+  const started = Date.now();
+  await assert.rejects(fetchDraftPreviewPool(hang, 'tok', LEAGUE, { draftedKeys: picks([1]), requestTimeoutMs: 30 }), /did not respond in time/);
+  assert.ok(Date.now() - started < 1000, 'returned promptly instead of waiting on the hung request');
+  assert.equal(calls, 1, 'no second request is attempted after a timeout');
+});
+
+test('the overall deadline also interrupts an in-flight request (not only the start of the next one)', async () => {
+  const hang = () => new Promise(() => {});
+  const started = Date.now();
+  await assert.rejects(fetchDraftPreviewPool(hang, 'tok', LEAGUE, { draftedKeys: picks([1]), deadlineMs: 40, requestTimeoutMs: 5000 }), /took too long/);
+  assert.ok(Date.now() - started < 1000);
+});
+
+test('a slow but timely response still succeeds', async () => {
+  const base = mockYahoo({ A: [101], T: [1] });
+  const slow = async (path, token) => { await sleep(5); return base(path, token); };
+  const { completeness } = await fetchDraftPreviewPool(slow, 'tok', LEAGUE, { draftedKeys: picks([1]), requestTimeoutMs: 500 });
+  assert.equal(completeness.complete, true);
+});
+
+test('a timeout on an OPTIONAL page aborts the build instead of silently returning a partial pool', async () => {
+  const base = mockYahoo({ A: [101], T: [1] });
+  let afterHang = 0; let hung = false;
+  const yahoo = (path, token) => {
+    if (hung) afterHang += 1;
+    if (path.endsWith('/draft_analysis')) { hung = true; return new Promise(() => {}); }
+    return base(path, token);
+  };
+  await assert.rejects(fetchDraftPreviewPool(yahoo, 'tok', LEAGUE, { draftedKeys: picks([1]), requestTimeoutMs: 30 }), /did not respond in time/);
+  assert.equal(afterHang, 0, 'after the hung request, every later call is refused locally and never reaches Yahoo');
+});
+
+test('an abandoned request that fails later does not raise an unhandled rejection', async () => {
+  const seen = [];
+  const listener = (reason) => seen.push(reason);
+  process.on('unhandledRejection', listener);
+  try {
+    const lateFail = () => new Promise((_, reject) => setTimeout(() => reject(new Error('socket reset after we gave up')), 60));
+    await assert.rejects(fetchDraftPreviewPool(lateFail, 'tok', LEAGUE, { draftedKeys: picks([1]), requestTimeoutMs: 10 }), /did not respond in time/);
+    await sleep(150);
+    assert.deepEqual(seen, []);
+  } finally {
+    process.off('unhandledRejection', listener);
+  }
+});

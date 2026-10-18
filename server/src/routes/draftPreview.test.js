@@ -344,3 +344,21 @@ test('any other preview failure is a contained 502 for that request only', async
   assert.equal(res.statusCode, 502);
   assert.match(res.body.error, /exploded/);
 });
+
+test('a pool build that timed out is a contained 502 and does not wedge the next request (no stuck in-flight cache entry)', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  let attempts = 0;
+  const f = fixture({ deps: { fetchDraftPreviewPool: async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('Draft Preview stopped: Yahoo did not respond in time.');
+    return { players: structuredClone(POOL), completeness: structuredClone(COMPLETE) };
+  } } });
+  const failed = await call(f.router);
+  assert.equal(failed.statusCode, 502);
+  assert.match(failed.body.error, /did not respond in time/);
+  assert.equal(cache.inFlightCount(), 0);
+  assert.equal(cache.has(`bball:preview:v1:pool:${LEAGUE}`), false, 'a failed build is never cached');
+  const retry = await call(f.router);
+  assert.equal(retry.statusCode, 200);
+  assert.equal(attempts, 2);
+});

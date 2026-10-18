@@ -10,6 +10,15 @@ const KEY_BATCH = 25; // Yahoo accepts up to 25 player_keys per request
 // Hard ceilings so one preview can never turn into a runaway Yahoo burst (a full build is roughly 3 requests per 25 players).
 export const PREVIEW_MAX_REQUESTS = 300;
 export const PREVIEW_DEADLINE_MS = 120_000;
+export const PREVIEW_REQUEST_TIMEOUT_MS = 20_000;
+
+/** Reject after `ms` even if `promise` never settles. The late settlement is swallowed (no unhandled rejection). */
+function raceTimeout(promise, ms, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
 export const PREVIEW_CACHE_PREFIX = 'bball:preview:v1';
 
 function leaguePlayers(data) {
@@ -39,15 +48,27 @@ async function poolForStatus(yahooFantasy, token, leagueKey, status) {
  *
  * @param {Set<string>|null} draftedKeys player keys from the Yahoo draft results, or null when those were unavailable
  */
-export async function fetchDraftPreviewPool(rawYahooFantasy, token, leagueKey, { draftedKeys = null, now = () => new Date(), maxRequests = PREVIEW_MAX_REQUESTS, deadlineMs = PREVIEW_DEADLINE_MS } = {}) {
-  // Every Yahoo call still goes through the caller's helper (shared HTTP 999 guard); this only adds a budget and a deadline.
+export async function fetchDraftPreviewPool(rawYahooFantasy, token, leagueKey, { draftedKeys = null, now = () => new Date(), maxRequests = PREVIEW_MAX_REQUESTS, deadlineMs = PREVIEW_DEADLINE_MS, requestTimeoutMs = PREVIEW_REQUEST_TIMEOUT_MS } = {}) {
+  // Every Yahoo call still goes through the caller's helper (shared HTTP 999 guard); this only adds a budget, a deadline and a
+  // per-request timeout. The helper has no abort signal, so a timed-out request is abandoned (it finishes or fails on its own,
+  // bounded by the runtime's socket timeouts) but the preview stops waiting and issues no further requests.
   const startedAt = Date.now();
   let requests = 0;
+  let stopped = null;
   const yahooFantasy = async (path, accessToken) => {
+    if (stopped) throw stopped;
     if (requests >= maxRequests) throw new Error('Draft Preview stopped: it needed more Yahoo requests than allowed.');
-    if (Date.now() - startedAt > deadlineMs) throw new Error('Draft Preview stopped: Yahoo took too long to return the full player pool.');
+    const remaining = deadlineMs - (Date.now() - startedAt);
+    if (remaining <= 0) throw (stopped = new Error('Draft Preview stopped: Yahoo took too long to return the full player pool.'));
     requests += 1;
-    return rawYahooFantasy(path, accessToken);
+    const deadlineFirst = remaining < requestTimeoutMs;
+    try {
+      return await raceTimeout(Promise.resolve().then(() => rawYahooFantasy(path, accessToken)), Math.min(remaining, requestTimeoutMs),
+        deadlineFirst ? 'Draft Preview stopped: Yahoo took too long to return the full player pool.' : 'Draft Preview stopped: Yahoo did not respond in time.');
+    } catch (error) {
+      if (/^Draft Preview stopped:/.test(error?.message || '')) stopped = error; // timeout: abort the whole build, don't keep waiting
+      throw error;
+    }
   };
   const available = await poolForStatus(yahooFantasy, token, leagueKey, 'A');
   const taken = await poolForStatus(yahooFantasy, token, leagueKey, 'T');
