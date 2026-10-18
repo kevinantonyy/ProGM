@@ -135,8 +135,9 @@ function yahooNumOrNull(value) {
 }
 
 /** One available-player batch for a single Yahoo player sub-resource. */
-export function yahooDraftPlayersPath(leagueKey, subresource = 'percent_owned', start = 0, count = 25) {
-  return `/league/${leagueKey}/players;status=A;sort=OR;start=${start};count=${count}/${subresource}`;
+export function yahooDraftPlayersPath(leagueKey, subresource = 'percent_owned', start = 0, count = 25, status = 'A') {
+  const filter = status === 'T' ? 'T' : 'A'; // A = available (default, live draft), T = taken (Draft Preview only)
+  return `/league/${leagueKey}/players;status=${filter};sort=OR;start=${start};count=${count}/${subresource}`;
 }
 
 /** Fetch one Yahoo sub-resource for an exact, identity-safe player-key batch. */

@@ -10,6 +10,7 @@ environment variables set the app ranks exactly as production does today. Not me
 | `PROGM_ROOKIE_ESTIMATES` | `on`, `true` or `1` (anything else = off) | Adds flagged, low-confidence, Yahoo-ADP-implied estimates for players with no NBA stat line |
 | `PROGM_RANKING_DIAGNOSTIC` | `on` (else the route returns 404) | Enables the read-only comparison route in section 4 |
 | `PROGM_DRAFT_STATUS` | `on`, `true` or `1` (anything else = off) | Experimental, display only: Yahoo designations and league availability on Draft Helper rows (see "Draft-board status display" below). Never changes rank or value |
+| `PROGM_DRAFT_PREVIEW` | `on`, `true` or `1` (anything else = off, endpoint returns 404) | Read-only Draft Preview of a completed Yahoo draft: `GET /api/basketball/draft-preview` ranks the whole league pool (Yahoo status A + T, cross-checked against the draft results) with the existing Draft Helper engine. Uses its own `bball:preview:` cache namespace. If the pool cannot be verified as complete the page says so and does not claim full-pool ranks |
 
 **Cache identity:** `rankingProfile()` (`<model>.<est|noest>`, e.g. `v2.noest`) is part of the frozen
 baseline-reference key and of the workspace cache key, and a reference built under another model is ignored.

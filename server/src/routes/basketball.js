@@ -26,18 +26,19 @@ import { analyzeRoster } from '../services/fantasy/rosterAnalysis.js';
 import { buildDraftBoard } from '../services/fantasy/draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow, rankingDiagnosticsEnabled } from '../services/fantasy/rankingModel.js';
 import { compareRankingModels } from '../services/fantasy/rankingCompare.js';
-import { buildProjectionContext, canonicalIdOf } from '../services/fantasy/insights.js';
+import { buildProjectionContext, canonicalIdOf, withEstimates } from '../services/fantasy/insights.js';
 import { scoringIsSupported } from '../services/fantasy/scoring.js';
 import { fetchYahooDraftResults, peekYahooDraftResults } from '../services/fantasy/yahooDraftPolling.js';
 import { cache } from '../services/providers/index.js';
 import { loadBaselineReference, referenceKey } from '../services/fantasy/baselineReference.js';
 import { resolveDraftStatusDisplay, withPlayerStatus } from '../services/fantasy/playerStatus.js';
+import { resolveDraftPreview, fetchDraftPreviewPool, PREVIEW_CACHE_PREFIX } from '../services/fantasy/draftPreview.js';
 
-const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool };
+const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool, fetchDraftPreviewPool };
 
 // Injectable I/O keeps endpoint regressions testable without Yahoo or a database.
 export function createBasketballRouter(overrides = {}) {
-const { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool } = { ...routeDependencies, ...overrides };
+const { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool, fetchDraftPreviewPool } = { ...routeDependencies, ...overrides };
 const router = Router();
 const LEAGUE_KEY_RE = /^\d+\.l\.\d+$/;
 const TEAM_KEY_RE = /^\d+\.l\.\d+\.t\.\d+$/;
@@ -473,6 +474,108 @@ router.get('/draft', authenticate, async (req, res) => {
       });
     }
     sendError(res, error, 'Could not sync your Fantasy Basketball draft');
+  }
+});
+
+/**
+ * GET /api/basketball/draft-preview?leagueKey=&refresh=true
+ * Read-only Draft Preview for a COMPLETED Yahoo draft (PROGM_DRAFT_PREVIEW, default off -> 404).
+ * Ranks the whole league pool (drafted + undrafted) with the same engines as the Draft Helper. Yahoo GETs only;
+ * everything is cached under its own `bball:preview:` namespace, never the workspace or live-draft keys.
+ */
+const PREVIEW_TTL = 10 * 60 * 1000;
+const PREVIEW_DEGRADED_TTL = 60 * 1000; // unverified/partial results are retried soon rather than cached for the full window
+const PREVIEW_MIN_REFRESH_MS = 60 * 1000; // refresh=true cannot trigger a new ~100-request Yahoo burst more than once a minute
+router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next() : res.status(404).json({ error: 'Not found' })), authenticate, async (req, res) => {
+  const leagueKey = String(req.query.leagueKey || '');
+  if (!LEAGUE_KEY_RE.test(leagueKey)) return res.status(400).json({ error: 'A valid league must be selected.' });
+  try {
+    const token = await requireToken(req, res);
+    if (!token) return;
+
+    const settingsResult = await cache.remember(`${PREVIEW_CACHE_PREFIX}:settings:${leagueKey}`, { provider: 'yahoo', ttl: DRAFT_SETTINGS_TTL }, () => yahooFantasy(`/league/${leagueKey}/settings`, token));
+    const league = normalizeLeagueSettings(settingsResult.value);
+    const settings = league?.settings || null;
+    if (league?.draftStatus !== 'postdraft') {
+      return res.status(409).json({ error: 'Draft Preview is only available once the league draft has been completed.', yahooDraftStatus: league?.draftStatus || null });
+    }
+
+    const resultKey = `${PREVIEW_CACHE_PREFIX}:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}`;
+    const poolKey = `${PREVIEW_CACHE_PREFIX}:pool:${leagueKey}`;
+    if (req.query.refresh === 'true') {
+      const cachedPool = cache.get(poolKey);
+      if (!cachedPool || Date.now() - Date.parse(cachedPool.meta.fetchedAt) >= PREVIEW_MIN_REFRESH_MS) cache.del(poolKey);
+    } else {
+      const cached = cache.get(resultKey);
+      if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
+    }
+
+    if (!settings || !scoringIsSupported(settings)) {
+      return res.json({
+        preview: true, leagueKey, season: league?.season || null, yahooDraftStatus: league.draftStatus,
+        draftBoard: { available: false, availabilityKnown: true, board: [], noData: [], note: 'This league\'s scoring settings are not supported for ProGM rankings.' },
+        completeness: { complete: false, reasons: ['Scoring settings are not supported, so no rankings were produced.'], counts: null },
+        externalData: { available: false }, cache: { hit: false, fetchedAt: null },
+      });
+    }
+
+    // Pool + draft-result cross-check, cached separately from every live-draft/workspace key.
+    const poolResult = await cache.remember(poolKey, { provider: 'yahoo', ttl: PREVIEW_TTL }, async () => {
+      const cachedDraft = peekYahooDraftResults(leagueKey);
+      const draftData = cachedDraft
+        ? { value: cachedDraft.value }
+        : await fetchYahooDraftResults({ leagueKey, loader: () => yahooFantasy(`/league/${leagueKey}/draftresults`, token) });
+      const draftedKeys = draftData?.value ? draftedPlayerKeys(extractDraftResults(draftData.value)) : null;
+      return fetchDraftPreviewPool(yahooFantasy, token, leagueKey, { draftedKeys });
+    });
+    const { players: pool, completeness } = poolResult.value;
+    const degraded = !completeness.complete || completeness.warnings?.length > 0;
+    if (degraded && !poolResult.meta?.cacheHit) cache.set(poolKey, poolResult.value, { provider: 'yahoo', ttl: PREVIEW_DEGRADED_TTL });
+
+    const rookieEstimates = resolveRookieEstimates();
+    const ctx = await buildProjectionContext({
+      season: league.season,
+      players: pool,
+      statCategories: settings.statCategories || [],
+      scoringSupported: true,
+      rookieEstimates,
+    });
+    const projectionProvider = ctx.projectionProvider && withEstimates({
+      getProjection: (pl) => ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null,
+      getProjectedValue: (pl) => (ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || {}).projectedPoints ?? null,
+    }, ctx.estimateByCanonicalId);
+    const freeAgentKeys = new Set(pool.filter((p) => p.poolSource === 'A').map((p) => p.playerKey));
+    let draftBoard = buildDraftBoard({
+      players: pool,
+      settings,
+      projectionProvider,
+      poolComplete: completeness.complete, // only a verified pool may produce full-pool ranks
+      baselineReference: null, // never reuse or write the live-draft frozen baseline
+      rosterAnalysis: null,
+      availabilityOf: (p) => freeAgentKeys.has(p.playerKey),
+      currentSeason: league.season || null,
+      rankingModel: resolveRankingModelForUser(req.userId),
+      rookieEstimates,
+    });
+    delete draftBoard.baselineReference;
+    if (resolveDraftStatusDisplay()) {
+      draftBoard = withPlayerStatus(draftBoard, new Map(pool.map((p) => [p.playerKey, p])), {
+        observedAt: poolResult.meta?.fetchedAt ?? null,
+        stale: poolResult.meta?.stale === true,
+        injuryReports: ctx.injuryReports,
+      });
+    }
+    const body = {
+      preview: true, leagueKey, season: league.season || null, yahooDraftStatus: league.draftStatus,
+      draftBoard, completeness, externalData: { available: ctx.externalAvailable },
+    };
+    cache.set(resultKey, body, { provider: 'progm', ttl: degraded ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
+    return res.json({ ...body, cache: { hit: false, fetchedAt: new Date().toISOString() } });
+  } catch (error) {
+    if (Number(error?.httpStatus) === 999) {
+      return res.status(503).json({ error: 'Yahoo is temporarily limiting requests. Please try the Draft Preview again in a minute.', retryAfterMs: error.retryAfterMs || null });
+    }
+    sendError(res, error, 'Could not build the Draft Preview');
   }
 });
 
