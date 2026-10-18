@@ -104,6 +104,10 @@
   .badge-blue {
     @apply badge border-dark-600 bg-dark-900 text-dark-300;
   }
+  .player-status-badge {
+    /* Keep small status text above 4.5:1 contrast, including light-mode orange. */
+    background: rgb(var(--dark-800));
+  }
   .stat-value {
     @apply text-2xl font-extrabold tabular-nums text-dark-50;
   }

@@ -10,16 +10,18 @@ function extractLeaguePlayers(data) {
 }
 
 /** Fetch every Yahoo available-player page for one subresource. */
-export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false } = {}) {
+export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false, captureStatusTime = false } = {}) {
   const players = [];
   const seen = new Set();
   for (let start = 0; start < MAX_PLAYERS; start += YAHOO_PLAYER_PAGE_SIZE) {
     let page;
+    let statusFetchedAt = null;
     try {
       page = extractLeaguePlayers(await yahooFantasy(
         yahooDraftPlayersPath(leagueKey, subresource, start, YAHOO_PLAYER_PAGE_SIZE),
         accessToken,
       ));
+      if (captureStatusTime) statusFetchedAt = new Date().toISOString();
     } catch (error) {
       if (bestEffort) break;
       throw error;
@@ -27,7 +29,8 @@ export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueK
     for (const player of page) {
       if (!player?.playerKey || seen.has(player.playerKey)) continue;
       seen.add(player.playerKey);
-      players.push(player);
+      // This records receipt of the actual status-bearing page, never a cache read.
+      players.push(captureStatusTime ? { ...player, yahooStatusFetchedAt: statusFetchedAt } : player);
     }
     if (page.length < YAHOO_PLAYER_PAGE_SIZE) break;
   }
@@ -36,7 +39,7 @@ export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueK
 
 /** Complete available pool with independently paged Yahoo metadata. */
 export async function fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey) {
-  const ownership = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'percent_owned');
+  const ownership = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'percent_owned', { captureStatusTime: true });
   // Keep optional metadata sequential to avoid a large concurrent burst against
   // Yahoo. A late optional-page failure preserves already fetched real values.
   const draftAnalysis = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'draft_analysis', { bestEffort: true });

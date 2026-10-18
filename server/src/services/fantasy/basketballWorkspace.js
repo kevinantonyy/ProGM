@@ -41,6 +41,7 @@ import { loadBaselineReference, referenceKey, saveBaselineReference } from './ba
 import { buildDraftBoard } from './draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow } from './rankingModel.js';
 import { runWorkspaceShadow } from './rankingShadow.js';
+import { resolveDraftStatusDisplay, withPlayerStatus } from './playerStatus.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -143,13 +144,13 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   const [settingsData, standingsData, rosterData] = await Promise.all([
     yahooFantasy(`/league/${leagueKey}/settings`, accessToken),
     yahooFantasy(`/league/${leagueKey}/standings`, accessToken),
-    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken),
+    yahooFantasy(`/team/${teamKey}/roster/players`, accessToken).then((value) => ({ value, fetchedAt: new Date().toISOString() })),
   ]);
 
   const league = normalizeLeagueSettings(settingsData);
   const settings = league?.settings || null;
   const standings = extractStandings(standingsData);
-  let myRoster = extractRosterPlayers(rosterData);
+  let myRoster = extractRosterPlayers(rosterData.value).map((player) => ({ ...player, yahooStatusFetchedAt: rosterData.fetchedAt }));
   const myStanding = standings.find((t) => t.teamKey === teamKey) || standings.find((t) => t.isOwnedByLogin) || null;
 
   // 2. Yahoo returns only the first appended player sub-resource. Fetch each
@@ -355,7 +356,12 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
     startSit,
     leagueHub,
     rankings,
-    draftBoard,
+    // Experimental (PROGM_DRAFT_STATUS=on): display-only status fields added after ranking, shadow and Rankings tab are built.
+    draftBoard: resolveDraftStatusDisplay()
+      ? withPlayerStatus(draftBoard, new Map(draftPool.map((p) => [p.playerKey, p])), {
+          injuryReports: ctx.injuryReports,
+        })
+      : draftBoard,
     recommendedTrades,
     rating,
     scheduleAware: Boolean(schedules && periodWindow),

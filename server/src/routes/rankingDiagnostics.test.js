@@ -14,7 +14,7 @@ import { rankingProfile } from '../services/fantasy/rankingModel.js';
 const SECRET = 'test-secret-ranking-diag';
 const LEAGUE = '428.l.111111'; const TEAM = '428.l.111111.t.3';
 let server; let baseUrl; const saved = {};
-const ENV = ['PROGM_RANKING_V2_USER_IDS', 'PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW'];
+const ENV = ['PROGM_RANKING_V2_USER_IDS', 'PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW', 'PROGM_DRAFT_STATUS'];
 
 before(async () => {
   for (const k of ENV) saved[k] = process.env[k];
@@ -31,6 +31,7 @@ after(async () => {
 });
 beforeEach(() => {
   process.env.PROGM_RANKING_DIAGNOSTIC = 'on'; delete process.env.NODE_ENV; delete process.env.PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION; delete process.env.PROGM_RANKING_V2_USER_IDS;
+  process.env.PROGM_DRAFT_STATUS = 'off'; // seeded keys below are the flag-off keys; the flag-on key is covered by its own test
 });
 
 const tok = (userId) => jwt.sign({ userId }, SECRET, { expiresIn: '5m' });
@@ -106,4 +107,12 @@ test('account-scoped v2: workspace cache entries are separated per account and p
   process.env.PROGM_RANKING_V2_USER_IDS = '73';
   assert.equal((await get('ranking-compare', { token: tok(73) })).status, 409);
   assert.equal((await get('ranking-compare', { token: tok(74) })).status, 409);
+});
+
+test('draft-status flag on: ranking-compare reads the separate .status workspace entry, never the flag-off one', async () => {
+  seed(1); // flag-off key only
+  process.env.PROGM_DRAFT_STATUS = 'on';
+  assert.equal((await get('ranking-compare', { token: tok(1) })).status, 409);
+  cache.set(`bball:workspace:${rankingProfile()}.status:1:${LEAGUE}:${TEAM}`, { draftBoard: { rankingModel: 'legacy', board: [row('A', 1), row('B', 2)] } }, { provider: 'yahoo', ttl: 60000 });
+  assert.equal((await get('ranking-compare', { token: tok(1) })).status, 200);
 });

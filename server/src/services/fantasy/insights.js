@@ -26,6 +26,19 @@ export function canonicalIdOf(player) {
   return player?.playerKey || player?.playerId || null;
 }
 
+/** Feed transport/completeness metadata is independent of how many injuries it lists. */
+export function injuryReportStatus(result, applicable = true) {
+  const available = applicable && Array.isArray(result?.value);
+  return {
+    applicable,
+    available,
+    count: available ? result.value.length : null,
+    provider: result?.meta?.provider ?? null,
+    fetchedAt: result?.meta?.fetchedAt ?? null,
+    stale: result?.meta?.stale === true,
+  };
+}
+
 /** Map a normalized Yahoo player into the identity layer's source shape. */
 function toSource(player) {
   return {
@@ -66,6 +79,9 @@ export function supplementReboundSplits(stats, split) {
  * @returns {Promise<Object>} projection context
  */
 export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false }) {
+  const seasonYear = Number(season);
+  const now = new Date();
+  const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
   const base = {
     externalAvailable: false,
     projectionProvider: null,
@@ -75,6 +91,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     freshness: null,
     providerStatus: providers.providerStatus(),
     reason: null,
+    injuryReports: injuryReportStatus(null, seasonYear === currentNbaSeason),
   };
 
   if (!scoringSupported) {
@@ -84,9 +101,6 @@ export async function buildProjectionContext({ season, players, statCategories, 
     return { ...base, reason: 'No players to project.' };
   }
 
-  const seasonYear = Number(season);
-  const now = new Date();
-  const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
   const lastCompletedSeason = Number.isInteger(seasonYear) ? seasonYear - 1 : null;
   // Draft projections are anchored to the latest completed season. Current
   // in-season form is blended separately below when real games are available.
@@ -239,6 +253,7 @@ export async function buildProjectionContext({ season, players, statCategories, 
     }
   }
   const injuryByExternalId = new Map((injuryResult?.value || []).map((injury) => [String(injury.externalId), injury]));
+  const injuryReports = injuryReportStatus(injuryResult, seasonYear === currentNbaSeason);
 
   // 4. Project each canonical player using the league's actual scoring. Merge
   //    recent form into the season stats so the EXISTING projection model
@@ -312,11 +327,12 @@ export async function buildProjectionContext({ season, players, statCategories, 
         lastSeasonStats: Boolean(statsResult?.value?.length),
         reboundSplits: reboundByCanonicalId.size > 0,
         recentForm: recentCount > 0,
-        injuries: injuryByExternalId.size > 0,
+        injuries: injuryReports.available,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,
       },
     },
+    injuryReports,
     reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',
   };
 }
