@@ -7,6 +7,9 @@ export function resolveDraftPreview(env = process.env) {
 }
 
 const KEY_BATCH = 25; // Yahoo accepts up to 25 player_keys per request
+// Hard ceilings so one preview can never turn into a runaway Yahoo burst (a full build is roughly 3 requests per 25 players).
+export const PREVIEW_MAX_REQUESTS = 300;
+export const PREVIEW_DEADLINE_MS = 120_000;
 export const PREVIEW_CACHE_PREFIX = 'bball:preview:v1';
 
 function leaguePlayers(data) {
@@ -17,11 +20,14 @@ function leaguePlayers(data) {
 
 async function poolForStatus(yahooFantasy, token, leagueKey, status) {
   const report = {};
-  const base = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'percent_owned', { status, captureStatusTime: true, report });
-  // Optional metadata is best-effort, exactly like the live Draft Helper pool.
-  const draftAnalysis = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'draft_analysis', { status, bestEffort: true });
-  const ranks = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'ranks', { status, bestEffort: true });
-  return { players: mergeYahooPlayerMetadata(base, draftAnalysis, ranks), report };
+  // untilEmpty: a short page in the middle of the list must never end the pool early.
+  const base = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'percent_owned', { status, captureStatusTime: true, report, untilEmpty: true });
+  // Optional metadata is best-effort, exactly like the live Draft Helper pool, but a failure is reported (ADP feeds rookie estimates).
+  const optionalReport = {};
+  const draftAnalysis = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'draft_analysis', { status, bestEffort: true, report: optionalReport });
+  const analysisFailed = optionalReport.failed;
+  const ranks = await fetchYahooPlayerDataset(yahooFantasy, token, leagueKey, 'ranks', { status, bestEffort: true, report: optionalReport });
+  return { players: mergeYahooPlayerMetadata(base, draftAnalysis, ranks), report, optionalFailed: analysisFailed || optionalReport.failed };
 }
 
 /**
@@ -33,7 +39,16 @@ async function poolForStatus(yahooFantasy, token, leagueKey, status) {
  *
  * @param {Set<string>|null} draftedKeys player keys from the Yahoo draft results, or null when those were unavailable
  */
-export async function fetchDraftPreviewPool(yahooFantasy, token, leagueKey, { draftedKeys = null, now = () => new Date() } = {}) {
+export async function fetchDraftPreviewPool(rawYahooFantasy, token, leagueKey, { draftedKeys = null, now = () => new Date(), maxRequests = PREVIEW_MAX_REQUESTS, deadlineMs = PREVIEW_DEADLINE_MS } = {}) {
+  // Every Yahoo call still goes through the caller's helper (shared HTTP 999 guard); this only adds a budget and a deadline.
+  const startedAt = Date.now();
+  let requests = 0;
+  const yahooFantasy = async (path, accessToken) => {
+    if (requests >= maxRequests) throw new Error('Draft Preview stopped: it needed more Yahoo requests than allowed.');
+    if (Date.now() - startedAt > deadlineMs) throw new Error('Draft Preview stopped: Yahoo took too long to return the full player pool.');
+    requests += 1;
+    return rawYahooFantasy(path, accessToken);
+  };
   const available = await poolForStatus(yahooFantasy, token, leagueKey, 'A');
   const taken = await poolForStatus(yahooFantasy, token, leagueKey, 'T');
 
@@ -75,12 +90,19 @@ export async function fetchDraftPreviewPool(yahooFantasy, token, leagueKey, { dr
   else if (draftedKeys.size === 0) reasons.push('Yahoo draft results contained no picks, so the pool could not be checked against the players who were drafted.');
   else if (stillMissing > 0) reasons.push(`${stillMissing} drafted ${stillMissing === 1 ? 'player is' : 'players are'} missing from the player pool even after fetching them by player key.`);
 
+  // Not a pool-completeness problem, but disclosed: missing ADP/rank pages weaken rookie estimates and Yahoo comparisons.
+  const warnings = [];
+  if (available.optionalFailed || taken.optionalFailed) warnings.push('Some Yahoo ADP or rank pages could not be loaded, so rookie estimates and Yahoo comparisons may be missing for some players.');
+
   return {
     players: [...byKey.values()],
     completeness: {
       complete: reasons.length === 0,
       reasons,
+      warnings,
       counts: {
+        requests,
+        irregularPages: available.report.gapPages + taken.report.gapPages,
         total: byKey.size,
         available: available.players.length,
         taken: taken.players.length,

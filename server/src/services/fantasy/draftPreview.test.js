@@ -71,7 +71,8 @@ test('complete pool: pages A and T fully, labels the source, and verifies every 
     { available: 30, taken: 60, fallback: 0, missing: 0 },
   );
   const tStarts = yahoo.calls.filter((c) => c.includes('status=T') && c.endsWith('/percent_owned')).map((c) => Number(/start=(\d+)/.exec(c)[1]));
-  assert.deepEqual(tStarts, [0, 25, 50]);
+  assert.deepEqual(tStarts, [0, 25, 50, 75], 'paging stops only at an empty page (the last one is a probe)');
+  assert.deepEqual(completeness.warnings, []);
   assert.ok(yahoo.calls.every((c) => !c.includes('/draftresults')), 'pool fetch itself only reads player resources');
 });
 
@@ -180,4 +181,40 @@ test('only read-only GET resource paths are requested', async () => {
   const yahoo = mockYahoo({ A: [101], T: [1, 2], byKey: [3] });
   await fetchDraftPreviewPool(yahoo, 'tok', LEAGUE, { draftedKeys: picks([1, 2, 3]) });
   for (const path of yahoo.calls) assert.match(path, new RegExp(`^/league/${LEAGUE.replaceAll('.', '\\.')}/players;`));
+});
+
+test('a short page in the MIDDLE of a list does not end the pool: later pages are still read and counted', async () => {
+  const T = range(1, 70);
+  const pages = new Map([[0, T.slice(0, 25)], [25, T.slice(25, 35)], [50, T.slice(35, 60)], [75, T.slice(60)]]); // page 25 is irregularly short
+  const yahoo = async (path) => {
+    if (path.includes('status=A') || !path.endsWith('/percent_owned')) return response(path.includes('status=A') && path.endsWith('/percent_owned') && /start=0;/.test(path) ? [101] : []);
+    return response(pages.get(Number(/start=(\d+)/.exec(path)[1])) || []);
+  };
+  const { players, completeness } = await fetchDraftPreviewPool(yahoo, 'tok', LEAGUE, { draftedKeys: picks(range(1, 70)) });
+  assert.equal(players.filter((p) => p.poolSource === 'T').length, 70);
+  assert.ok(completeness.counts.irregularPages >= 1);
+  assert.equal(completeness.complete, true);
+});
+
+test('failed optional ADP/rank pages are disclosed as a warning without faking an incomplete pool', async () => {
+  const yahoo = mockYahoo({ A: [101], T: [1], failFor: (p) => p.endsWith('/draft_analysis') });
+  const { completeness } = await fetchDraftPreviewPool(yahoo, 'tok', LEAGUE, { draftedKeys: picks([1]) });
+  assert.equal(completeness.complete, true);
+  assert.equal(completeness.warnings.length, 1);
+  assert.match(completeness.warnings[0], /ADP or rank pages/);
+});
+
+test('request budget and deadline stop a runaway build before it reaches Yahoo again', async () => {
+  const yahoo = mockYahoo({ A: range(101, 300), T: range(1, 200) });
+  await assert.rejects(fetchDraftPreviewPool(yahoo, 'tok', LEAGUE, { draftedKeys: picks([1]), maxRequests: 5 }), /more Yahoo requests than allowed/);
+  assert.equal(yahoo.calls.length, 5, 'exactly the budget was spent');
+  const late = mockYahoo({ A: [101], T: [1] });
+  await assert.rejects(fetchDraftPreviewPool(late, 'tok', LEAGUE, { draftedKeys: picks([1]), deadlineMs: -1 }), /took too long/);
+  assert.equal(late.calls.length, 0);
+});
+
+test('a Yahoo HTTP 999 (shared circuit) from a required page aborts the preview instead of returning a partial pool', async () => {
+  const yahoo = mockYahoo({ A: [101], T: [1], failFor: (p) => p.includes('status=T') && p.endsWith('/percent_owned') });
+  const failing = async (path, token) => { try { return await yahoo(path, token); } catch (error) { error.httpStatus = 999; throw error; } };
+  await assert.rejects(fetchDraftPreviewPool(failing, 'tok', LEAGUE, { draftedKeys: picks([1]) }), (error) => error.httpStatus === 999);
 });

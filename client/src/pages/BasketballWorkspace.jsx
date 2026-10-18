@@ -8,6 +8,7 @@ import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../u
 import { resolveDraftPhase } from '../utils/draftStatus';
 import EstimateBadge from '../components/EstimateBadge';
 import DraftPreviewBanner from '../components/DraftPreviewBanner';
+import DraftCompleted, { previewOpener } from '../components/DraftCompleted';
 import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge';
 import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
@@ -567,24 +568,6 @@ function DraftPlayerRow({ player, availabilityKnown }) {
 }
 
 // --- Tab: Draft Helper (research tool + LIVE Yahoo draft sync) ---
-function DraftCompleted({ leagueName, onOpenRoster, onOpenPreview }) {
-  return (
-    <section className="card mx-auto max-w-2xl py-10 text-center" aria-labelledby="draft-complete-title">
-      <p className="text-5xl" aria-hidden="true">🏀</p>
-      <h2 id="draft-complete-title" className="mt-4 font-display text-3xl font-black">Your League Has Finished Drafting!</h2>
-      <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-dark-300">
-        {leagueName ? `${leagueName} has completed its draft` : 'Your league has completed its draft'}, so the Draft Helper is retired for this season.
-        Head to your team to set your lineup, then use Waivers, Trades and Start / Sit to improve your roster.
-      </p>
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-        <button type="button" onClick={onOpenRoster} className="btn-primary">View My Roster</button>
-        {onOpenPreview && <button type="button" onClick={onOpenPreview} className="rounded-lg border border-dark-600 bg-dark-800 px-4 py-2 text-sm font-semibold text-dark-100 hover:border-primary-500">Draft Preview</button>}
-      </div>
-      {onOpenPreview && <p className="mx-auto mt-3 max-w-md text-xs text-dark-400">Preview ProGM's rankings for every player in your league. Read-only; not a live draft.</p>}
-    </section>
-  );
-}
-
 // Read-only Draft Preview (server flag PROGM_DRAFT_PREVIEW): loads the full-pool board and renders it with the Draft Helper table.
 function DraftPreview({ data, leagueKey, onBack }) {
   const [state, setState] = useState({ status: 'loading', body: null, error: null });
@@ -624,8 +607,8 @@ function DraftHelper({ data, leagueKey, active, preview = null }) {
   useEffect(() => setVisibleCount(50), [leagueKey, q, pos, avail, sortBy, isLive]);
 
   if (draftPhase === 'completed') {
-    if (showPreview && data.draftPreview?.enabled) return <DraftPreview data={data} leagueKey={leagueKey} onBack={() => setShowPreview(false)} />;
-    return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} onOpenPreview={data.draftPreview?.enabled ? () => setShowPreview(true) : undefined} />;
+    if (showPreview && previewOpener(data, true)) return <DraftPreview data={data} leagueKey={leagueKey} onBack={() => setShowPreview(false)} />;
+    return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} onOpenPreview={previewOpener(data, () => setShowPreview(true))} />;
   }
 
   const liveBanner = preview ? <DraftPreviewBanner completeness={preview.completeness} /> : <LiveDraftBanner live={live} />;

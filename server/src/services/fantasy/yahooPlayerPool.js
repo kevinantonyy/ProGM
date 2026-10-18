@@ -13,12 +13,16 @@ function extractLeaguePlayers(data) {
 /**
  * Fetch every Yahoo player page (status A by default) for one subresource.
  * An optional `report` object is filled with completeness evidence for Draft Preview:
- * { pages, noKey, duplicates, hitCap, failed }. Callers that omit it behave as before.
+ * { pages, noKey, duplicates, gapPages, hitCap, failed }. `untilEmpty` keeps paging past a short page and stops
+ * only at an empty one (so an irregular short page can never silently truncate the list). Callers that omit
+ * both options behave exactly as before.
  */
-export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false, captureStatusTime = false, status = 'A', report = null } = {}) {
+export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, subresource, { bestEffort = false, captureStatusTime = false, status = 'A', report = null, untilEmpty = false } = {}) {
   const players = [];
   const seen = new Set();
-  if (report) Object.assign(report, { pages: 0, noKey: 0, duplicates: 0, hitCap: false, failed: false });
+  let sawShortPage = false;
+  let ended = false;
+  if (report) Object.assign(report, { pages: 0, noKey: 0, duplicates: 0, gapPages: 0, hitCap: false, failed: false });
   for (let start = 0; start < MAX_PLAYERS; start += YAHOO_PLAYER_PAGE_SIZE) {
     let page;
     let statusFetchedAt = null;
@@ -34,6 +38,7 @@ export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueK
       if (bestEffort) break;
       throw error;
     }
+    if (untilEmpty && sawShortPage && page.length > 0 && report) report.gapPages += 1; // data after a short page
     for (const player of page) {
       if (!player?.playerKey) { if (report) report.noKey += 1; continue; }
       if (seen.has(player.playerKey)) { if (report) report.duplicates += 1; continue; }
@@ -41,9 +46,12 @@ export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueK
       // This records receipt of the actual status-bearing page, never a cache read.
       players.push(captureStatusTime ? { ...player, yahooStatusFetchedAt: statusFetchedAt } : player);
     }
-    if (page.length < YAHOO_PLAYER_PAGE_SIZE) break;
-    if (report && start + YAHOO_PLAYER_PAGE_SIZE >= MAX_PLAYERS) report.hitCap = true; // last allowed page was still full
+    if (untilEmpty) {
+      if (page.length === 0) { ended = true; break; }
+      sawShortPage = page.length < YAHOO_PLAYER_PAGE_SIZE;
+    } else if (page.length < YAHOO_PLAYER_PAGE_SIZE) { ended = true; break; }
   }
+  if (report && !ended && !report.failed) report.hitCap = true; // ran out of allowed pages without seeing the end of the list
   return players;
 }
 

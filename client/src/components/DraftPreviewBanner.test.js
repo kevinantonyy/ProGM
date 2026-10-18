@@ -32,3 +32,11 @@ test('missing or malformed completeness data is treated as unverified', () => {
     assert.doesNotMatch(out, /Full player pool verified/);
   }
 });
+
+test('non-blocking warnings (e.g. missing ADP pages) are shown even when the pool is verified', () => {
+  const out = html({ complete: true, reasons: [], warnings: ['Some Yahoo ADP or rank pages could not be loaded.'], counts: { total: 3, taken: 2, available: 1 } });
+  assert.match(out, /Full player pool verified/);
+  assert.match(out, /data-testid="preview-warnings"/);
+  assert.match(out, /ADP or rank pages/);
+  assert.doesNotMatch(html({ complete: true, reasons: [], warnings: [], counts: null }), /preview-warnings/);
+});

@@ -484,6 +484,8 @@ router.get('/draft', authenticate, async (req, res) => {
  * everything is cached under its own `bball:preview:` namespace, never the workspace or live-draft keys.
  */
 const PREVIEW_TTL = 10 * 60 * 1000;
+const PREVIEW_DEGRADED_TTL = 60 * 1000; // unverified/partial results are retried soon rather than cached for the full window
+const PREVIEW_MIN_REFRESH_MS = 60 * 1000; // refresh=true cannot trigger a new ~100-request Yahoo burst more than once a minute
 router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next() : res.status(404).json({ error: 'Not found' })), authenticate, async (req, res) => {
   const leagueKey = String(req.query.leagueKey || '');
   if (!LEAGUE_KEY_RE.test(leagueKey)) return res.status(400).json({ error: 'A valid league must be selected.' });
@@ -499,8 +501,11 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
     }
 
     const resultKey = `${PREVIEW_CACHE_PREFIX}:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}`;
-    if (req.query.refresh === 'true') cache.del(`${PREVIEW_CACHE_PREFIX}:pool:${leagueKey}`);
-    else {
+    const poolKey = `${PREVIEW_CACHE_PREFIX}:pool:${leagueKey}`;
+    if (req.query.refresh === 'true') {
+      const cachedPool = cache.get(poolKey);
+      if (!cachedPool || Date.now() - Date.parse(cachedPool.meta.fetchedAt) >= PREVIEW_MIN_REFRESH_MS) cache.del(poolKey);
+    } else {
       const cached = cache.get(resultKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
     }
@@ -515,7 +520,7 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
     }
 
     // Pool + draft-result cross-check, cached separately from every live-draft/workspace key.
-    const poolResult = await cache.remember(`${PREVIEW_CACHE_PREFIX}:pool:${leagueKey}`, { provider: 'yahoo', ttl: PREVIEW_TTL }, async () => {
+    const poolResult = await cache.remember(poolKey, { provider: 'yahoo', ttl: PREVIEW_TTL }, async () => {
       const cachedDraft = peekYahooDraftResults(leagueKey);
       const draftData = cachedDraft
         ? { value: cachedDraft.value }
@@ -524,6 +529,8 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
       return fetchDraftPreviewPool(yahooFantasy, token, leagueKey, { draftedKeys });
     });
     const { players: pool, completeness } = poolResult.value;
+    const degraded = !completeness.complete || completeness.warnings?.length > 0;
+    if (degraded && !poolResult.meta?.cacheHit) cache.set(poolKey, poolResult.value, { provider: 'yahoo', ttl: PREVIEW_DEGRADED_TTL });
 
     const rookieEstimates = resolveRookieEstimates();
     const ctx = await buildProjectionContext({
@@ -562,9 +569,12 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
       preview: true, leagueKey, season: league.season || null, yahooDraftStatus: league.draftStatus,
       draftBoard, completeness, externalData: { available: ctx.externalAvailable },
     };
-    cache.set(resultKey, body, { provider: 'progm', ttl: PREVIEW_TTL });
+    cache.set(resultKey, body, { provider: 'progm', ttl: degraded ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
     return res.json({ ...body, cache: { hit: false, fetchedAt: new Date().toISOString() } });
   } catch (error) {
+    if (Number(error?.httpStatus) === 999) {
+      return res.status(503).json({ error: 'Yahoo is temporarily limiting requests. Please try the Draft Preview again in a minute.', retryAfterMs: error.retryAfterMs || null });
+    }
     sendError(res, error, 'Could not build the Draft Preview');
   }
 });

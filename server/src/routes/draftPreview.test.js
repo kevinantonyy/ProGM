@@ -77,6 +77,7 @@ function fixture(overrides = {}) {
         injuryReports: { applicable: true, available: true, count: 0, provider: 'free_nba', fetchedAt: AT, stale: false },
       };
     },
+    ...(overrides.deps || {}),
   });
   return { router, seen };
 }
@@ -241,8 +242,8 @@ test('cache: second request is served from the preview cache; refresh=true rebui
   assert.equal(f.seen.projectionArgs.length, 1);
   assert.deepEqual(second.body.draftBoard, first.body.draftBoard);
   const refreshed = await call(f.router, { refresh: 'true' });
-  assert.equal(refreshed.body.cache.hit, false);
-  assert.equal(f.seen.pool, 2, 'refresh also drops the cached pool');
+  assert.equal(refreshed.body.cache.hit, false, 'refresh rebuilds the ranked board');
+  assert.equal(f.seen.pool, 1, 'but a refresh within a minute of the last Yahoo pool fetch is served from the pool cache (no new Yahoo burst)');
   const other = await call(f.router, {}, 2);
   assert.equal(other.body.cache.hit, false, 'another account never reads this account\'s cached preview');
 });
@@ -276,4 +277,70 @@ test('unsupported scoring returns an unavailable board without fetching the pool
 test('the endpoint is GET-only: no write verbs are registered for it', () => {
   const route = fixture().router.stack.find((layer) => layer.route?.path === '/draft-preview').route;
   assert.deepEqual(Object.keys(route.methods), ['get']);
+});
+
+function clock(t) {
+  const start = Date.now(); let offset = 0;
+  t.mock.method(Date, 'now', () => start + offset);
+  return (ms) => { offset += ms; };
+}
+
+test('refresh=true re-reads Yahoo at most once a minute', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const advance = clock(t);
+  const f = fixture();
+  await call(f.router);
+  for (let i = 0; i < 5; i += 1) await call(f.router, { refresh: 'true' });
+  assert.equal(f.seen.pool, 1, 'spamming refresh never multiplies Yahoo pool fetches');
+  advance(61 * 1000);
+  await call(f.router, { refresh: 'true' });
+  assert.equal(f.seen.pool, 2);
+});
+
+test('a verified pool is cached for the full window; an unverified one is retried after a minute', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const advance = clock(t);
+  const ok = fixture();
+  await call(ok.router);
+  advance(5 * 60 * 1000);
+  assert.equal((await call(ok.router)).body.cache.hit, true);
+  const bad = fixture({ completeness: INCOMPLETE });
+  await call(bad.router);
+  advance(30 * 1000);
+  assert.equal((await call(bad.router)).body.cache.hit, true);
+  advance(31 * 1000);
+  const after = await call(bad.router);
+  assert.equal(after.body.cache.hit, false, 'degraded result expired after ~60s');
+  assert.equal(bad.seen.pool, 2);
+});
+
+test('optional-metadata warnings reach the client and also shorten the cache', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const advance = clock(t);
+  const f = fixture({ completeness: { ...COMPLETE, warnings: ['Some Yahoo ADP or rank pages could not be loaded.'] } });
+  const res = await call(f.router);
+  assert.equal(res.body.completeness.complete, true);
+  assert.deepEqual(res.body.completeness.warnings, ['Some Yahoo ADP or rank pages could not be loaded.']);
+  advance(61 * 1000);
+  assert.equal((await call(f.router)).body.cache.hit, false);
+});
+
+test('the shared Yahoo HTTP 999 pause becomes a retryable 503 and leaves no cached preview behind', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const error = Object.assign(new Error('Yahoo requests are temporarily paused'), { httpStatus: 999, yahooCode: 'CIRCUIT_OPEN', retryAfterMs: 42000 });
+  const f = fixture({ deps: { fetchDraftPreviewPool: async () => { throw error; } } });
+  const res = await call(f.router);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.retryAfterMs, 42000);
+  assert.match(res.body.error, /try the Draft Preview again/);
+  assert.equal(cache.has(`bball:preview:v1:pool:${LEAGUE}`), false);
+  assert.equal(cache.has(`bball:preview:v1:${rankingProfileForUser(1)}:1:${LEAGUE}`), false);
+});
+
+test('any other preview failure is a contained 502 for that request only', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const f = fixture({ deps: { buildProjectionContext: async () => { throw new Error('projection provider exploded'); } } });
+  const res = await call(f.router);
+  assert.equal(res.statusCode, 502);
+  assert.match(res.body.error, /exploded/);
 });
