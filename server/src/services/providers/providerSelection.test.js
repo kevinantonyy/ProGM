@@ -172,3 +172,22 @@ test('malformed injury response is unavailable rather than a healthy empty feed'
   const injuries = await providers.getInjuries();
   assert.equal(injuries, null);
 });
+
+test('malformed injury feed leaves the projection context usable and caches nothing', async () => {
+  delete process.env.RAPIDAPI_KEY;
+  const base = makeFetchStub();
+  global.fetch = async (url) => String(url).includes('/injuries')
+    ? { ok: true, status: 200, text: async () => '{"injuries":[{"team":"x"}]}', json: async () => ({}) }
+    : base(url);
+  const now = new Date();
+  const season = now.getUTCFullYear() - (now.getUTCMonth() < 7 ? 1 : 0);
+  const ctx = await buildProjectionContext({
+    season,
+    players: [{ playerKey: '466.p.1', name: 'Player 111', teamAbbr: 'BOS' }],
+    statCategories: [{ statId: 12, enabled: true, pointValue: 1 }],
+  });
+  assert.equal(ctx.injuryReports.available, false);
+  assert.equal(ctx.injuryReports.count, null);
+  assert.equal(ctx.diagnostic.sources.injuries, false);
+  assert.equal(cache.get('injuries:nba'), null, 'a malformed response must not be cached as an empty feed');
+});
