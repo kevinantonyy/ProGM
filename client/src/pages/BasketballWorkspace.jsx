@@ -611,7 +611,7 @@ function DraftHelper({ data, leagueKey, active, preview = null }) {
     return <DraftCompleted leagueName={data.connection?.leagueName} onOpenRoster={() => navigate('/basketball/roster')} onOpenPreview={previewOpener(data, () => setShowPreview(true))} />;
   }
 
-  const liveBanner = preview ? <DraftPreviewBanner completeness={preview.completeness} /> : <LiveDraftBanner live={live} />;
+  const liveBanner = preview ? <DraftPreviewBanner completeness={preview.completeness} projection={preview.projection} /> : <LiveDraftBanner live={live} />;
 
   if (!db) return <section className="space-y-4">{liveBanner}<section className="card text-dark-400">Draft Helper unavailable.</section></section>;
   if (!db.available) return (

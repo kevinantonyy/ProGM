@@ -40,3 +40,22 @@ test('non-blocking warnings (e.g. missing ADP pages) are shown even when the poo
   assert.match(out, /ADP or rank pages/);
   assert.doesNotMatch(html({ complete: true, reasons: [], warnings: [], counts: null }), /preview-warnings/);
 });
+
+test('zero projections: a clear alert with the reason, shown even when the Yahoo pool is verified', () => {
+  const out = renderToStaticMarkup(createElement(DraftPreviewBanner, {
+    completeness: { complete: true, reasons: [], counts: { total: 743, taken: 150, available: 593 } },
+    projection: { externalAvailable: true, projectedCount: 0, totalPlayers: 743, reason: 'NBA stats from ESPN are unavailable: Unrecognized or empty ESPN player directory feed' },
+  }));
+  assert.match(out, /data-testid="preview-no-projections"/);
+  assert.match(out, /none of the 743 players received a projection/);
+  assert.match(out, /Unrecognized or empty ESPN player directory feed/);
+  assert.match(out, /not a problem with Yahoo or your league settings/);
+  assert.match(out, /Full player pool verified/, 'the pool verdict is independent of the projection verdict');
+});
+
+test('projections present, or no projection info at all: no zero-projection alert', () => {
+  const completeness = { complete: true, reasons: [], counts: { total: 3, taken: 2, available: 1 } };
+  for (const projection of [{ externalAvailable: true, projectedCount: 120, totalPlayers: 743, reason: null }, undefined, null]) {
+    assert.doesNotMatch(renderToStaticMarkup(createElement(DraftPreviewBanner, { completeness, projection })), /preview-no-projections/);
+  }
+});

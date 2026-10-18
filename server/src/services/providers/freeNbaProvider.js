@@ -367,10 +367,26 @@ const BYATHLETE_URL = (seasonStartYear) => {
   return `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?region=us&lang=en&contentorigin=espn&isqualified=false&limit=1000&season=${endYear}&seasontype=2`;
 };
 
+/**
+ * jsonFetch turns an HTTP 200 with non-JSON (e.g. a bot-wall page) into null, and the mappers turn null/{} into [].
+ * Callers cache whatever we return, so an unusable feed MUST throw here: a thrown error is a provider failure, is never
+ * cached, and lets the cache serve the last good value instead of a poisoned empty one.
+ */
+export function assertUsableByathlete(payload, what) {
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.athletes) || payload.athletes.length === 0) {
+    throw new Error(`Unrecognized or empty ESPN ${what} feed; NBA data is unavailable.`);
+  }
+}
+
+const hasUsableLine = (line) => ['gamesPlayed', 'minutes', 'points'].some((key) => Number.isFinite(line?.[key]));
+
 export async function getPlayerIndex(season) {
   const yr = Number(season) || new Date().getFullYear();
   const payload = await jsonFetch(BYATHLETE_URL(yr), ESPN_HEADERS);
-  return mapEspnDirectory(payload);
+  assertUsableByathlete(payload, 'player directory');
+  const directory = mapEspnDirectory(payload);
+  if (!directory.length) throw new Error('ESPN player directory contained no usable players; NBA data is unavailable.');
+  return directory;
 }
 
 /**
@@ -381,7 +397,10 @@ export async function getPlayerIndex(season) {
 export async function getSeasonStatsBulk(season) {
   const yr = Number(season) || new Date().getFullYear();
   const payload = await jsonFetch(BYATHLETE_URL(yr), ESPN_HEADERS);
-  return mapEspnSeasonStats(payload);
+  assertUsableByathlete(payload, 'season stats');
+  const stats = mapEspnSeasonStats(payload);
+  if (!stats.some((row) => hasUsableLine(row.season))) throw new Error('ESPN season stats contained no usable stat lines; NBA data is unavailable.');
+  return stats;
 }
 
 // Regular-season game total used as the availability denominator.
@@ -430,7 +449,10 @@ export async function getSeasonGamesPlayed(season) {
   const yr = Number(season);
   if (!Number.isFinite(yr)) return {};
   const payload = await jsonFetch(BYATHLETE_URL(yr), ESPN_HEADERS);
-  return mapEspnGamesPlayed(payload);
+  assertUsableByathlete(payload, 'games-played');
+  const gamesPlayed = mapEspnGamesPlayed(payload);
+  if (!Object.keys(gamesPlayed).length) throw new Error('ESPN games-played feed contained no usable rows; history is unavailable.');
+  return gamesPlayed;
 }
 
 /**

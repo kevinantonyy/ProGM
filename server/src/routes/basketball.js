@@ -539,6 +539,7 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
       statCategories: settings.statCategories || [],
       scoringSupported: true,
       rookieEstimates,
+      bulkOnly: true, // a ~700-player pool must never fan out into per-player provider calls
     });
     const projectionProvider = ctx.projectionProvider && withEstimates({
       getProjection: (pl) => ctx.projectionByCanonicalId.get(canonicalIdOf(pl)) || null,
@@ -565,11 +566,15 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
         injuryReports: ctx.injuryReports,
       });
     }
+    // Tell the page whether projections exist at all, and why not: zero projections is a data-provider problem, not a Yahoo one.
+    const projectedCount = draftBoard.board?.length ?? 0;
+    const projection = { externalAvailable: ctx.externalAvailable, projectedCount, totalPlayers: pool.length, reason: projectedCount > 0 ? null : (ctx.reason || draftBoard.note || null) };
     const body = {
       preview: true, leagueKey, season: league.season || null, yahooDraftStatus: league.draftStatus,
-      draftBoard, completeness, externalData: { available: ctx.externalAvailable },
+      draftBoard, completeness, projection, externalData: { available: ctx.externalAvailable },
     };
-    cache.set(resultKey, body, { provider: 'progm', ttl: degraded ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
+    // An all-unprojected board is retried soon (the data provider may recover); the verified Yahoo pool stays cached.
+    cache.set(resultKey, body, { provider: 'progm', ttl: degraded || projectedCount === 0 ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
     return res.json({ ...body, cache: { hit: false, fetchedAt: new Date().toISOString() } });
   } catch (error) {
     if (Number(error?.httpStatus) === 999) {

@@ -72,14 +72,28 @@ export { freeRequestCount as freeNbaRequestCount, resetFreeRequestCount as reset
  * @param {(provider) => Promise<any>} op   receives the chosen provider
  * @param {(provider) => boolean} [supports] capability check per provider
  */
-async function withProvider(cacheKey, ttl, op, supports = () => true) {
-  // Serve fresh cache immediately without touching any provider.
-  if (cache.isFresh(cacheKey)) return cache.get(cacheKey);
+/** Empty array/object = "provider said nothing", never a value worth keeping for hours or days. */
+const isEmptyValue = (value) => value == null || (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0);
+
+/** Drop a cached empty result (e.g. one stored before payload validation existed) so a healthy provider response can replace it. */
+function dropEmptyCacheEntry(key) {
+  const hit = cache.get(key);
+  if (hit && isEmptyValue(hit.value)) cache.del(key);
+}
+
+async function withProvider(cacheKey, ttl, op, supports = () => true, usable = () => true) {
+  // Serve fresh cache immediately without touching any provider, unless it is a value the caller considers unusable.
+  if (cache.isFresh(cacheKey)) {
+    const hit = cache.get(cacheKey);
+    if (usable(hit.value)) return hit;
+    cache.del(cacheKey);
+  }
 
   const candidates = candidateProviders().filter(supports);
   for (const provider of candidates) {
     try {
       const result = await cache.remember(cacheKey, { provider: provider.name, ttl }, () => op(provider));
+      if (!usable(result.value)) { cache.del(cacheKey); throw new Error(`Unusable ${cacheKey} value from ${provider.name}`); }
       // remember() may have served stale cache from a prior provider on failure;
       // only count a genuine fresh fetch as success.
       if (!result.meta.cacheHit) health.recordSuccess(provider.name);
@@ -92,7 +106,7 @@ async function withProvider(cacheKey, ttl, op, supports = () => true) {
 
   // Last resort: any stale cached value beats nothing.
   const stale = cache.get(cacheKey);
-  return stale || null;
+  return stale && usable(stale.value) ? stale : null;
 }
 
 /** Player cross-reference index (bulk, cached daily). */
@@ -101,7 +115,8 @@ export function getPlayerIndex(season) {
     `playerIndex:${season}`,
     cache.TTL.playerIndex,
     (p) => p.getPlayerIndex(season),
-    (p) => typeof p.getPlayerIndex === 'function'
+    (p) => typeof p.getPlayerIndex === 'function',
+    (value) => Array.isArray(value) && value.length > 0, // an empty directory is a failed fetch, not a day-long answer
   );
 }
 
@@ -136,6 +151,7 @@ export async function getSeasonStats(season, externalIds) {
   const bulkCandidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
   for (const provider of bulkCandidates) {
     try {
+      dropEmptyCacheEntry(`seasonStatsAll:${season}:${provider.name}`);
       const result = await cache.remember(
         `seasonStatsAll:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.seasonStats },
@@ -199,6 +215,7 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
   const candidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
   for (const provider of candidates) {
     try {
+      dropEmptyCacheEntry(`seasonStatsAll:${season}:${provider.name}`);
       const result = await cache.remember(
         `seasonStatsAll:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.seasonStats },
@@ -352,6 +369,7 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
   const seasonResults = await mapWithConcurrency(seasons, 4, async (season) => {
     try {
       // One cached, league-wide request per completed season (immutable TTL).
+      dropEmptyCacheEntry(`gamesPlayed:${season}:${provider.name}`);
       const result = await cache.remember(
         `gamesPlayed:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.history },
