@@ -33,6 +33,7 @@ import { cache } from '../services/providers/index.js';
 import { loadBaselineReference, referenceKey } from '../services/fantasy/baselineReference.js';
 import { resolveDraftStatusDisplay, withPlayerStatus } from '../services/fantasy/playerStatus.js';
 import { resolveDraftPreview, fetchDraftPreviewPool, PREVIEW_CACHE_PREFIX } from '../services/fantasy/draftPreview.js';
+import { resolveRankingsFullPool } from '../services/fantasy/leaguePool.js';
 
 const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool, fetchDraftPreviewPool };
 
@@ -40,6 +41,15 @@ const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildPro
 export function createBasketballRouter(overrides = {}) {
 const { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool, fetchDraftPreviewPool } = { ...routeDependencies, ...overrides };
 const router = Router();
+
+// Identical simultaneous workspace builds share ONE build (one Yahoo burst). The key is the per-user workspace cache key: it contains
+// the authenticated user id, Yahoo league key (whose game key identifies the season), team key and every flag that changes the
+// payload, so two users, leagues or flag sets can never share a build. Entries are removed when the build settles, success or failure.
+const inFlightWorkspaces = new Map();
+function workspaceCacheKey(profile, userId, leagueKey, teamKey) {
+  const flags = `${resolveDraftStatusDisplay() ? '.status' : ''}${resolveRankingsFullPool() ? '.pool' : ''}${resolveDraftPreview() ? '.preview' : ''}`;
+  return `bball:workspace:${profile}${flags}:${userId}:${leagueKey}:${teamKey}`;
+}
 const LEAGUE_KEY_RE = /^\d+\.l\.\d+$/;
 const TEAM_KEY_RE = /^\d+\.l\.\d+\.t\.\d+$/;
 
@@ -150,15 +160,29 @@ router.get('/workspace', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'Your team was not found in this league.' });
     }
 
-    const cacheKey = `bball:workspace:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}:${teamKey}`;
+    const cacheKey = workspaceCacheKey(rankingProfileForUser(req.userId), req.userId, leagueKey, teamKey);
     if (req.query.refresh !== 'true') {
       const cached = cache.get(cacheKey);
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
     }
 
     const shadowSink = resolveRankingShadow(process.env, req.userId) && rankingDiagnosticsEnabled() ? (result) => cache.set(`bball:ranking-shadow:${req.userId}:${leagueKey}:${teamKey}`, result, { provider: 'progm', ttl: WORKSPACE_TTL }) : null;
-    const workspace = await buildBasketballWorkspace({ yahooFantasy, accessToken: token, leagueKey, teamKey, userId: req.userId, shadowSink });
-    cache.set(cacheKey, workspace, { provider: 'yahoo', ttl: WORKSPACE_TTL });
+    const joined = inFlightWorkspaces.get(cacheKey);
+    if (joined) {
+      // Same user, league, team and flags are already building: wait for that build instead of repeating ~100 Yahoo requests.
+      // A failed build rejects for every waiter (same error), is not cached, and the next request starts a fresh one.
+      const workspace = await joined;
+      return res.json({ ...workspace, cache: { hit: false, fetchedAt: new Date().toISOString(), coalesced: true } });
+    }
+    const building = buildBasketballWorkspace({ yahooFantasy, accessToken: token, leagueKey, teamKey, userId: req.userId, shadowSink })
+      .then((built) => { cache.set(cacheKey, built, { provider: 'yahoo', ttl: WORKSPACE_TTL }); return built; });
+    inFlightWorkspaces.set(cacheKey, building);
+    let workspace;
+    try {
+      workspace = await building;
+    } finally {
+      if (inFlightWorkspaces.get(cacheKey) === building) inFlightWorkspaces.delete(cacheKey);
+    }
     res.json({ ...workspace, cache: { hit: false, fetchedAt: new Date().toISOString() } });
   } catch (error) {
     sendError(res, error, 'Could not load your Fantasy Basketball workspace');
@@ -194,7 +218,7 @@ router.get('/diagnostics/ranking-compare', authenticate, (req, res) => {
   const scope = diagnosticScope(req, res);
   if (!scope) return;
   const { leagueKey, teamKey } = scope;
-  const cached = cache.get(`bball:workspace:${rankingProfileForUser(req.userId)}${resolveDraftStatusDisplay() ? '.status' : ''}:${req.userId}:${leagueKey}:${teamKey}`);
+  const cached = cache.get(workspaceCacheKey(rankingProfileForUser(req.userId), req.userId, leagueKey, teamKey));
   if (!cached?.value?.draftBoard?.board?.length) return res.status(409).json({ error: 'No cached Draft Helper data for this league under the current ranking flags. Open the Draft Helper first; this diagnostic never fetches from Yahoo.' });
   const highlight = String(req.query.highlight || '').split(',').map((n) => n.trim()).filter(Boolean).slice(0, 10);
   res.json({ activeRankingModel: cached.value.draftBoard.rankingModel || 'legacy', rookieEstimates: resolveRookieEstimates(), cacheFetchedAt: cached.meta.fetchedAt, ...compareRankingModels(cached.value.draftBoard.board, { top: 50, highlight }) });

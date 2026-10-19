@@ -38,11 +38,12 @@ import { analyzeStartSit } from './startSit.js';
 import { buildLeagueHub } from './leagueHub.js';
 import { buildRankings } from './rankings.js';
 import { loadBaselineReference, referenceKey, saveBaselineReference } from './baselineReference.js';
-import { buildDraftBoard } from './draftHelper.js';
+import { buildDraftBoard, explainNoData } from './draftHelper.js';
 import { resolveRankingModelForUser, resolveRookieEstimates, rankingProfileForUser, resolveRankingShadow } from './rankingModel.js';
 import { runWorkspaceShadow } from './rankingShadow.js';
-import { resolveDraftStatusDisplay, withPlayerStatus } from './playerStatus.js';
+import { resolveDraftStatusDisplay, withPlayerStatus, classifyYahooStatus } from './playerStatus.js';
 import { resolveDraftPreview } from './draftPreview.js';
+import { resolveRankingsFullPool, assembleLeaguePool } from './leaguePool.js';
 import { recommendTrades } from './tradeRecommender.js';
 import { resolvePeriodWindow, playerPeriodValue } from './scheduleValue.js';
 import * as providers from '../providers/index.js';
@@ -112,9 +113,9 @@ function withPeriodValues(projectionProvider, { schedules, periodWindow }) {
 async function fetchOpponentRoster(yahooFantasy, accessToken, teamKey) {
   try {
     const data = await yahooFantasy(`/team/${teamKey}/roster/players`, accessToken);
-    return extractRosterPlayers(data);
+    return { ok: true, players: extractRosterPlayers(data), fetchedAt: new Date().toISOString() };
   } catch {
-    return [];
+    return { ok: false, players: [], fetchedAt: null }; // callers must not mistake a failed request for an empty roster
   }
 }
 
@@ -157,11 +158,16 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   // 2. Yahoo returns only the first appended player sub-resource. Fetch each
   //    dataset in its own league-wide batch, then merge strictly by player_key.
   //    These fields remain Draft Helper context and never affect ProGM ranking.
+  // Full-pool Rankings (PROGM_RANKINGS_FULL_POOL, completed drafts only). Everything else behaves exactly as before.
+  const fullPoolMode = resolveRankingsFullPool() && league?.draftStatus === 'postdraft' && Boolean(settings);
+  const availableReport = {};
   let availablePlayers = [];
+  let availableOk = true;
   try {
-    availablePlayers = await fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey);
+    availablePlayers = await fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey, fullPoolMode ? { report: availableReport } : undefined);
   } catch {
     availablePlayers = [];
+    availableOk = false;
   }
 
   // The status=A collection excludes rostered players. Request their metadata
@@ -180,7 +186,7 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   //     upstream. Each is a single Yahoo call; failures degrade to [].
   const opponentStandings = standings.filter((t) => !(t.teamKey === teamKey || t.isOwnedByLogin));
   const opponentRosterResults = await Promise.all(
-    opponentStandings.map(async (t) => ({ teamKey: t.teamKey, name: t.name, players: await fetchOpponentRoster(yahooFantasy, accessToken, t.teamKey) })),
+    opponentStandings.map(async (t) => ({ teamKey: t.teamKey, name: t.name, ...(await fetchOpponentRoster(yahooFantasy, accessToken, t.teamKey)) })),
   );
   const opponentPlayersFlat = opponentRosterResults.flatMap((o) => o.players);
 
@@ -243,7 +249,18 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
   // (marked "rostered"). availabilityOf distinguishes the two honestly so the UI
   // never implies a rostered player is draftable.
   const availableKeys = new Set(availablePlayers.map((p) => p.playerKey));
-  const draftPool = [...availablePlayers, ...myRoster];
+  // Rankings pool: available + my roster + every other roster in full-pool mode, otherwise exactly as before. Waivers below
+  // keep using `availablePlayers` only, so owned players can never become waiver recommendations.
+  const leaguePool = fullPoolMode
+    ? assembleLeaguePool({
+      available: { players: availablePlayers, ok: availableOk, report: availableReport },
+      myTeam: { teamKey, name: myStanding?.name || 'My Team' },
+      myRoster: { players: myRoster, ok: true, fetchedAt: rosterData.fetchedAt },
+      opponents: opponentRosterResults,
+      expectedTeams: league?.numTeams ?? null,
+    })
+    : null;
+  const draftPool = leaguePool ? leaguePool.players : [...availablePlayers, ...myRoster];
   // Frozen overall-rank reference: captured pre-draft, reused while others draft.
   const rankingModel = resolveRankingModelForUser(userId);
   const rookieEstimates = resolveRookieEstimates();
@@ -254,8 +271,8 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
         players: draftPool,
         settings,
         projectionProvider: draftProvider,
-        poolComplete: league?.draftStatus === 'predraft',
-        baselineReference: loadBaselineReference(providers.cache, refKey),
+        poolComplete: leaguePool ? leaguePool.completeness.complete : league?.draftStatus === 'predraft',
+        baselineReference: leaguePool ? null : loadBaselineReference(providers.cache, refKey), // the pool itself is the reference in full-pool mode
         rosterAnalysis: analysis,
         availabilityOf: (p) => availableKeys.has(p.playerKey),
         currentSeason: league?.season || null, // for current-season Yahoo rank
@@ -263,22 +280,42 @@ export async function buildBasketballWorkspace({ yahooFantasy, accessToken, leag
         rookieEstimates,
       })
     : { available: false, availabilityKnown: true, board: [], noData: [], note: 'League settings unavailable.' };
-  if (draftBoard.baselineReference) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
+  if (draftBoard.baselineReference && !leaguePool) saveBaselineReference(providers.cache, refKey, draftBoard.baselineReference);
   delete draftBoard.baselineReference; // internal; not sent to the client
+  // Never label a rank computed from an incomplete pool as complete.
+  if (leaguePool && draftBoard.available !== false) draftBoard.rankScope = leaguePool.completeness.complete ? 'full_pool' : 'partial_pool';
   // Shadow mode (PROGM_RANKING_SHADOW, default off): v2 over the SAME objects that produced the legacy board above.
   if (settings && typeof shadowSink === 'function' && resolveRankingShadow(process.env, userId)) {
     runWorkspaceShadow({ legacyBoard: draftBoard, draftPool, settings, projectionProvider: draftProvider, rosterAnalysis: analysis, availableKeys, league, leagueKey, cache: providers.cache, shadowSink });
   }
   // Rankings tab shares the Draft Helper's baseline: same Overall Rank per player.
   const overallRanks = new Map((draftBoard.board || []).map((row) => [row.playerKey, row.overallRank]));
+  const showStatus = leaguePool ? resolveDraftStatusDisplay() : false;
   const rankings = buildRankings({
-    players: availablePlayers,
+    players: leaguePool ? leaguePool.players : availablePlayers,
     projectionProvider: draftProvider,
     overallRanks,
     rankScope: draftBoard.rankScope || null,
     rankingModel: draftBoard.rankingModel || null,
     sortBy: overallRanks.size ? 'overall' : (periodWindow ? 'period' : 'projected'),
+    ...(leaguePool ? {
+      includeOut: true, // injured players stay visible; their Yahoo status is shown separately from ownership
+      limit: Math.max(leaguePool.players.length, 1), // no silent top-N cap
+      rowExtras: (p, proj) => {
+        const ranked = overallRanks.get(p.playerKey) != null;
+        return {
+          availability: p.availability, // available | rostered | mine: metadata only, never an input to the rank
+          ownerTeam: p.ownerTeam ?? null,
+          ownerTeamKey: p.ownerTeamKey ?? null,
+          ownedByMe: p.ownedByMe === true,
+          rankStatus: ranked ? 'ranked' : 'unranked',
+          unrankedReason: ranked ? null : explainNoData(proj, p, { rookieEstimates }),
+          ...(showStatus ? { playerStatus: classifyYahooStatus(p, { observedAt: p.yahooStatusFetchedAt ?? null }) } : {}),
+        };
+      },
+    } : {}),
   });
+  if (leaguePool) rankings.pool = leaguePool.completeness;
 
   // 4b. AI trade recommender (ProGM-generated + scored). Uses uiPlayer shapes so
   //     it can read weeklyProjectedPoints. Opponent rosters mapped to uiPlayers.

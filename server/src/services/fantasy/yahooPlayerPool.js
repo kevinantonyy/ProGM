@@ -55,9 +55,13 @@ export async function fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueK
   return players;
 }
 
-/** Complete available pool with independently paged Yahoo metadata. */
-export async function fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey) {
-  const ownership = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'percent_owned', { captureStatusTime: true });
+/**
+ * Complete available pool with independently paged Yahoo metadata.
+ * Pass `{ report }` (an object) to read paging evidence for the available list: it then also keeps paging past a short page and
+ * stops only at an empty one (one extra request), so a truncated list can be detected. Without it behaviour is unchanged.
+ */
+export async function fetchYahooDraftPool(yahooFantasy, accessToken, leagueKey, { report = null } = {}) {
+  const ownership = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'percent_owned', report ? { captureStatusTime: true, report, untilEmpty: true } : { captureStatusTime: true });
   // Keep optional metadata sequential to avoid a large concurrent burst against
   // Yahoo. A late optional-page failure preserves already fetched real values.
   const draftAnalysis = await fetchYahooPlayerDataset(yahooFantasy, accessToken, leagueKey, 'draft_analysis', { bestEffort: true });

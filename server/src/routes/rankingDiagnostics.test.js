@@ -14,7 +14,7 @@ import { rankingProfile } from '../services/fantasy/rankingModel.js';
 const SECRET = 'test-secret-ranking-diag';
 const LEAGUE = '428.l.111111'; const TEAM = '428.l.111111.t.3';
 let server; let baseUrl; const saved = {};
-const ENV = ['PROGM_RANKING_V2_USER_IDS', 'PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW', 'PROGM_DRAFT_STATUS'];
+const ENV = ['PROGM_RANKING_V2_USER_IDS', 'PROGM_RANKING_DIAGNOSTIC', 'PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION', 'NODE_ENV', 'PROGM_RANKING_SHADOW', 'PROGM_DRAFT_STATUS', 'PROGM_DRAFT_PREVIEW', 'PROGM_RANKINGS_FULL_POOL'];
 
 before(async () => {
   for (const k of ENV) saved[k] = process.env[k];
@@ -32,6 +32,7 @@ after(async () => {
 beforeEach(() => {
   process.env.PROGM_RANKING_DIAGNOSTIC = 'on'; delete process.env.NODE_ENV; delete process.env.PROGM_RANKING_DIAGNOSTIC_ALLOW_PRODUCTION; delete process.env.PROGM_RANKING_V2_USER_IDS;
   process.env.PROGM_DRAFT_STATUS = 'off'; // seeded keys below are the flag-off keys; the flag-on key is covered by its own test
+  process.env.PROGM_DRAFT_PREVIEW = 'off'; process.env.PROGM_RANKINGS_FULL_POOL = 'off'; // every payload-changing flag is part of the workspace cache key
 });
 
 const tok = (userId) => jwt.sign({ userId }, SECRET, { expiresIn: '5m' });
