@@ -29,3 +29,11 @@ test('Rankings column is named ProGM Rank (not ProGM Overall) and only shown wit
   assert.equal(rankingsRankColumn('full_pool', false), null);
   assert.ok(!JSON.stringify(rankingsRankColumn('full_pool', true)).includes('Overall'.concat(' ')));
 });
+
+test('a partial (unverified) full-pool rank never reads as the stable ProGM Rank', () => {
+  assert.equal(rankLabel('partial_pool'), 'Rank (partial)');
+  assert.doesNotMatch(rankLabel('partial_pool'), /ProGM Rank/);
+  assert.match(rankTitle('partial_pool'), /not a full-league ProGM Rank/);
+  assert.deepEqual(rankingsRankColumn('partial_pool', true), ['overall', 'Rank (partial)']);
+  assert.equal(rankLabel('full_pool'), 'ProGM Rank');
+});

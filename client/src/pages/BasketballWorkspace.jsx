@@ -10,6 +10,8 @@ import EstimateBadge from '../components/EstimateBadge';
 import DraftPreviewBanner from '../components/DraftPreviewBanner';
 import DraftCompleted, { previewOpener } from '../components/DraftCompleted';
 import RankingsNotice from '../components/RankingsNotice';
+import RankingsPoolNotice from '../components/RankingsPoolNotice';
+import { filterRankings, availabilityLabel, AVAILABILITY_FILTERS } from '../utils/rankingsPool';
 import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge';
 import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
@@ -340,37 +342,58 @@ const overallTitle = rankTitle;
 function Rankings({ data }) {
   const r = data.rankings;
   const [sortBy, setSortBy] = useState(r?.sortBy === 'overall' ? 'overall' : (data.scheduleAware ? 'period' : 'projected'));
+  // Full-pool mode (server flag PROGM_RANKINGS_FULL_POOL): the server sends `pool` and every player with ownership metadata.
+  // Filters, search and paging below only choose which existing rows to show; they never touch a rank.
+  const pool = r?.pool || null;
+  const [availability, setAvailability] = useState('ALL');
+  const [query, setQuery] = useState('');
+  const [visibleCount, setVisibleCount] = useState(50);
+  useEffect(() => setVisibleCount(50), [sortBy, availability, query]);
   if (!r) return <section className="card text-dark-400">Rankings unavailable.</section>;
   if (!r.projectionsAvailable) return <section className="card border-orange-500/30"><h2 className="text-xl font-bold">Player rankings</h2><p className="mt-2 text-dark-300">{r.note}</p></section>;
   const players = [...(r.players || [])].sort((a, b) => {
-    if (sortBy === 'overall') return (a.overallRank ?? Infinity) - (b.overallRank ?? Infinity);
+    if (sortBy === 'overall') return (a.overallRank ?? 1e9) - (b.overallRank ?? 1e9); // unranked players last (finite sentinel: Infinity - Infinity is NaN)
     if (sortBy === 'owned') return (b.percentOwned ?? -1) - (a.percentOwned ?? -1);
     if (sortBy === 'period') return (b.periodProjected ?? -1) - (a.periodProjected ?? -1);
     if (sortBy === 'name') return a.name.localeCompare(b.name);
     return (b.projected ?? -1) - (a.projected ?? -1);
   });
   const cols = [rankingsRankColumn(r.rankScope, r.players?.some((p) => p.overallRank != null)), ['projected', 'Proj/gm'], data.scheduleAware && ['period', 'This period'], ['owned', 'Owned'], ['name', 'Name']].filter(Boolean);
+  const matching = pool ? filterRankings(players, { availability, query }) : players;
+  const rows = pool ? matching.slice(0, visibleCount) : matching;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-dark-400">Sort by</span>
         {cols.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
       </div>
+      {pool && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search player, team or owner…" aria-label="Search rankings" className="input-field max-w-xs" />
+          <div className="flex gap-1" role="group" aria-label="Filter by availability">
+            {AVAILABILITY_FILTERS.map(([k, l, tip]) => <button key={k} onClick={() => setAvailability(k)} title={tip} aria-pressed={availability === k} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${availability === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
+          </div>
+        </div>
+      )}
+      <RankingsPoolNotice pool={pool} total={r.players?.length} />
       <RankingsNotice players={r.players} reason={data.externalData?.reason} />
       <section className="card overflow-x-auto p-0">
         <table className="w-full min-w-[620px] text-sm">
-          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3 text-center" title={overallTitle(r.rankScope)}>{overallLabel(r.rankScope)}</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
-          <tbody>{players.map((p, i) => (
+          <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3" title={pool ? 'Position in the list as currently sorted and filtered. It is not the ProGM rank.' : undefined}>#</th><th className="p-3 text-center" title={overallTitle(r.rankScope)}>{overallLabel(r.rankScope)}</th><th className="p-3">Player</th>{pool && <th className="p-3">Availability</th>}<th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>
+          <tbody>{rows.map((p, i) => (
             <tr key={p.playerKey} className="border-b border-dark-700 hover:bg-dark-900">
               <td className="p-3 text-dark-400">{i + 1}</td>
-              <td className="p-3 text-center font-bold text-primary-400">{p.overallRank ?? '—'}</td>
-              <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><EstimateBadge player={p} /><p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              <td className="p-3 text-center font-bold text-primary-400">{p.overallRank ?? (pool ? <span className="text-xs font-semibold text-dark-400" title={p.unrankedReason || 'No ProGM rank: not enough statistics to project this player.'}>Unranked</span> : '—')}</td>
+              <td className="p-3"><PlayerLink player={p}>{p.name}</PlayerLink><EstimateBadge player={p} />{pool && (p.playerStatus ? <PlayerStatusBadge status={p.playerStatus} /> : p.status ? <span className="badge-orange ml-1" title="Yahoo status designation (separate from ownership)">{p.status}</span> : null)}<p className="text-xs text-dark-400">{p.teamAbbr || 'FA'} · {p.eligiblePositions?.join('/')}</p></td>
+              {pool && <td className="p-3 text-xs"><span className={p.availability === 'available' ? 'badge-green' : p.availability === 'mine' ? 'rounded-full border border-primary-500/50 bg-primary-600/20 px-2 py-0.5 font-semibold text-primary-300' : 'badge-blue'}>{availabilityLabel(p)}</span></td>}
               <td className="p-3 text-right"><Proj value={p.projected} /></td>
               {data.scheduleAware && <td className="p-3 text-right">{p.periodProjected != null ? <span className="font-bold text-primary-400">{p.periodProjected.toFixed(1)}</span> : <span className="text-dark-500">—</span>}{p.expectedGames != null && <span className="ml-1 text-xs text-dark-500">({p.expectedGames}g)</span>}</td>}
               <td className="p-3 text-right text-dark-300">{p.percentOwned != null ? `${p.percentOwned}%` : '—'}</td>
             </tr>))}
           </tbody>
         </table>
+        {pool && !rows.length && <p className="p-8 text-center text-dark-400">No players match your filters.</p>}
+        {pool && matching.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dark-700 p-3 text-xs text-dark-400"><span>Showing {Math.min(visibleCount, matching.length)} of {matching.length} {matching.length === r.players.length ? 'players' : `matching players (${r.players.length} in the pool)`}</span>{visibleCount < matching.length && <button type="button" onClick={() => setVisibleCount((n) => n + 50)} className="rounded-lg bg-dark-800 px-3 py-1.5 font-semibold text-dark-200 hover:text-dark-50">Show more</button>}</div>}
       </section>
       {r.rankScope === 'available_players' && <p className="text-xs text-dark-400">These ranks are relative to the players currently available, not a stable league-wide ProGM Rank.</p>}
       <SecondaryDetails label="Ranking method">{r.note}</SecondaryDetails>

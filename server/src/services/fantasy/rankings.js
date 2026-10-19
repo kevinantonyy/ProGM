@@ -24,8 +24,9 @@ const SORT_KEYS = new Set(['overall', 'projected', 'period', 'owned', 'name']);
  * @param {string} [params.position]        filter to players eligible at this position
  * @param {boolean}[params.includeOut]      include OUT players (default false)
  * @param {number} [params.limit]
+ * @param {(player, projection) => object} [params.rowExtras]  optional per-row metadata (ownership, status). Never affects ranking; omitted = output unchanged
  */
-export function buildRankings({ players, projectionProvider, overallRanks = null, rankScope = null, rankingModel = null, sortBy = 'projected', position = null, includeOut = false, limit = 200 }) {
+export function buildRankings({ players, projectionProvider, overallRanks = null, rankScope = null, rankingModel = null, sortBy = 'projected', position = null, includeOut = false, limit = 200, rowExtras = null }) {
   const hasProjections = Boolean(projectionProvider?.getProjection);
   const key = SORT_KEYS.has(sortBy) ? sortBy : 'projected';
 
@@ -54,6 +55,7 @@ export function buildRankings({ players, projectionProvider, overallRanks = null
       expectedGames: period?.scheduleAware ? (period.expectedGames ?? null) : null,
       projectionKnown: proj?.projectedPoints != null,
       estimate: proj?.estimate === true, // no NBA stat line: Yahoo-ADP-implied, low confidence
+      ...(rowExtras ? rowExtras(p, proj) : {}),
     };
   });
 
