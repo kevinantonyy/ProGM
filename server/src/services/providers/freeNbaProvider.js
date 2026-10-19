@@ -21,7 +21,7 @@
 import { num, emptyStatLine } from './types.js';
 
 const ESPN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
-const ESPN_HEADERS = { 'User-Agent': ESPN_UA, Accept: 'application/json' };
+export const ESPN_HEADERS = { 'User-Agent': ESPN_UA, Accept: 'application/json' };
 // NBA CDN edge returns 403 without a browser-like Origin/Referer.
 const NBA_CDN_HEADERS = { 'User-Agent': ESPN_UA, Accept: '*/*', Referer: 'https://www.nba.com/', Origin: 'https://www.nba.com' };
 const DEFAULT_TIMEOUT_MS = 12000;
@@ -362,7 +362,7 @@ export function espnSeasonEndYear(seasonStartYear) {
   return Number.isInteger(start) ? start + 1 : null;
 }
 
-const BYATHLETE_URL = (seasonStartYear) => {
+export const BYATHLETE_URL = (seasonStartYear) => {
   const endYear = espnSeasonEndYear(seasonStartYear) ?? new Date().getFullYear() + 1;
   return `https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/statistics/byathlete?region=us&lang=en&contentorigin=espn&isqualified=false&limit=1000&season=${endYear}&seasontype=2`;
 };
@@ -378,7 +378,7 @@ export function assertUsableByathlete(payload, what) {
   }
 }
 
-const hasUsableLine = (line) => ['gamesPlayed', 'minutes', 'points'].some((key) => Number.isFinite(line?.[key]));
+export const hasUsableLine = (line) => ['gamesPlayed', 'minutes', 'points'].some((key) => Number.isFinite(line?.[key]));
 
 export async function getPlayerIndex(season) {
   const yr = Number(season) || new Date().getFullYear();
