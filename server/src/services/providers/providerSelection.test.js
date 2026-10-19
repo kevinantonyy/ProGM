@@ -64,6 +64,7 @@ beforeEach(() => {
   hostCalls = {};
   process.env.FREE_NBA_PRIMARY = 'true';
   process.env.RAPIDAPI_KEY = 'test-key'; // make tank01 "configured" so fallback is reachable
+  process.env.PROGM_TANK01_ENABLED = 'true'; // Tank01 is OFF by default; enable it for these tests
   global.fetch = makeFetchStub();
 });
 

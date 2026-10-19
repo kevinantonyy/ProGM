@@ -41,6 +41,7 @@ beforeEach(() => {
   process.env.PROGM_TANK01_PLAYER_BUDGET = '500'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '500'; // the per-player fallback is OFF by default; these tests exercise it enabled
   resetCalls();
   process.env.RAPIDAPI_KEY = 'test-key'; // make tank01 "configured"
+  process.env.PROGM_TANK01_ENABLED = 'true'; // Tank01 is OFF by default; these tests exercise it enabled
   global.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/getNBAPlayerList')) {

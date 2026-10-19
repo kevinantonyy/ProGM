@@ -63,8 +63,9 @@ beforeEach(() => {
   calls = {};
   process.env.FREE_NBA_PRIMARY = 'true';
   delete process.env.RAPIDAPI_KEY;
+  process.env.PROGM_TANK01_ENABLED = 'true'; // Tank01 is OFF by default; the fallback-limit tests below exercise it enabled
 });
-afterEach(() => { global.fetch = originalFetch; delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET; });
+afterEach(() => { global.fetch = originalFetch; delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET; delete process.env.PROGM_TANK01_ENABLED; });
 
 test('player index: every malformed/empty shape is a failure (throws), never an empty directory', async () => {
   for (const [label, answer] of Object.entries(MALFORMED)) {

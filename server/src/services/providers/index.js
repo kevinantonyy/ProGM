@@ -16,7 +16,7 @@
 import * as cache from './cache.js';
 import * as health from './health.js';
 import { takePlayerFallbackBudget, playerFallbackBudgetStatus } from './playerFallbackBudget.js';
-import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
+import tank01Provider, { isEnabled as tank01Enabled, getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
 import freeNbaProvider, {
   getRequestCount as freeRequestCount,
@@ -54,7 +54,7 @@ export function externalDataAvailable() {
 export function providerStatus() {
   return {
     free_nba: { primary: FREE_PRIMARY(), configured: freeNbaProvider.isConfigured(), requestCount: freeRequestCount(), requestBreakdown: freeRequestBreakdown(), lastError: freeLastError(), ...health.status('free_nba') },
-    tank01: { playerBudget: playerFallbackBudgetStatus(), configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
+    tank01: { enabled: tank01Enabled(), playerBudget: playerFallbackBudgetStatus(), configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
   };
 }

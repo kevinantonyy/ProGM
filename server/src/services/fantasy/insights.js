@@ -124,7 +124,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
     const diag = tank.lastError || null;
     let reason = 'External NBA data provider is not available; running in Yahoo-only mode.';
     if (!tank.configured) {
-      reason = 'NBA stats provider is not configured on the server (RAPIDAPI_KEY missing).';
+      reason = tank.enabled === false
+        ? 'Tank01 is disabled (PROGM_TANK01_ENABLED is not true), so only the free ESPN/NBA data sources are used, and they are unavailable.'
+        : 'NBA stats provider is not configured on the server (RAPIDAPI_KEY missing).';
     } else if (diag?.kind === 'quota_exceeded') {
       reason = 'NBA stats provider quota/rate limit reached; projections will return when it resets.';
     } else if (diag?.kind === 'invalid_key') {

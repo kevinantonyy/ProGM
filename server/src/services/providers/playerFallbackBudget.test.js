@@ -11,7 +11,7 @@ import { buildProjectionContext } from '../fantasy/insights.js';
 
 const originalFetch = global.fetch;
 const SAVED = {};
-const ENV = ['PROGM_TANK01_PLAYER_BUDGET', 'PROGM_TANK01_PLAYER_DAILY_BUDGET', 'RAPIDAPI_KEY', 'FREE_NBA_PRIMARY'];
+const ENV = ['PROGM_TANK01_PLAYER_BUDGET', 'PROGM_TANK01_PLAYER_DAILY_BUDGET', 'RAPIDAPI_KEY', 'FREE_NBA_PRIMARY', 'PROGM_TANK01_ENABLED'];
 let tankIds; let tankCalls;
 
 const reply = (body, status = 200) => ({ ok: status < 400, status, headers: { get: () => '' }, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)), json: async () => ({ statusCode: status, body }) });
@@ -46,6 +46,7 @@ beforeEach(() => {
   tankIds = []; tankCalls = 0;
   process.env.FREE_NBA_PRIMARY = 'true';
   process.env.RAPIDAPI_KEY = 'test-key';
+  process.env.PROGM_TANK01_ENABLED = 'true'; // these tests are about the budget, so Tank01 itself is switched on
   process.env.PROGM_TANK01_PLAYER_BUDGET = '50'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '200'; // explicitly enabled; the default is covered by the DEFAULT tests below
   stub();
 });
