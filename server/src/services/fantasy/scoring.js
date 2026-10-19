@@ -20,11 +20,16 @@
  * Yahoo NBA stat_id -> StatLine key (or a special handler tag).
  * Confirmed from live league settings. Extendable without touching callers.
  */
+// Ids 3, 4, 6, 7, 10, 12 and 15-19 are confirmed by a real Yahoo H2H points league's own settings (stat ids with their
+// labels): FGA=3, FGM=4, FTA=6, FTM=7, 3PTM=10, PTS=12, REB=15, AST=16, ST=17, BLK=18, TO=19. Ids 5 and 8 were previously
+// (wrongly) mapped to FGA/FTA. They are deliberately left UNMAPPED: nothing is known about them beyond "not FGA/FTA", so a
+// league that weights them gets an explicit incomplete projection rather than a guess. Ids 13, 14, 21, 27 and 28 are not
+// confirmed by that league; verify them against a real league's stat categories before relying on them.
 export const YAHOO_STAT_TO_STATLINE = {
+  3: 'fgAtt',         // FGA
   4: 'fgMade',        // FGM
-  5: 'fgAtt',         // FGA
+  6: 'ftAtt',         // FTA
   7: 'ftMade',        // FTM
-  8: 'ftAtt',         // FTA
   10: 'threesMade',   // 3PTM
   12: 'points',       // PTS
   13: 'offRebounds',  // OREB

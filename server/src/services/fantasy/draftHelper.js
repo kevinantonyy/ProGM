@@ -274,7 +274,10 @@ export function explainNoData(proj, player, { rookieEstimates = false } = {}) {
     if (player?.yahooAdp == null) return `${base} No Yahoo ADP is available to base a clearly labelled estimate on.`;
     return `${base} The Yahoo ADP is outside the range that can be estimated reliably.`;
   }
-  if (proj.method === 'incomplete_scoring_data') return 'League scoring uses a stat the data provider does not supply, so points cannot be projected.';
+  if (proj.method === 'incomplete_scoring_data') {
+    const names = (proj.unsupportedStats || []).map((s) => (/^\d+$/.test(String(s)) ? `stat #${s}` : String(s)));
+    return `League scoring uses a stat the data provider does not supply${names.length ? ` (${names.join(', ')})` : ''}, so points cannot be projected.`;
+  }
   return 'Insufficient data to project this player.';
 }
 

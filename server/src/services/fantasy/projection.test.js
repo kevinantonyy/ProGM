@@ -91,7 +91,7 @@ test('same historical stat line scores differently under two league configuratio
 
 test('negative league categories reduce historical and projected fantasy PPG', () => {
   const stats = { externalId: 'x', season: line({ points: 20, turnovers: 4, personalFouls: 3, fgAtt: 10, gamesPlayed: 64 }), recent: null };
-  const cats = [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }, { statId: 5, abbr: 'FGA', pointValue: -0.25, enabled: true }, { statId: 19, abbr: 'TO', pointValue: -1, enabled: true }, { statId: 21, abbr: 'PF', pointValue: -0.5, enabled: true }];
+  const cats = [{ statId: 12, abbr: 'PTS', pointValue: 1, enabled: true }, { statId: 3, abbr: 'FGA', pointValue: -0.25, enabled: true }, { statId: 19, abbr: 'TO', pointValue: -1, enabled: true }, { statId: 21, abbr: 'PF', pointValue: -0.5, enabled: true }];
   const result = projectPlayer({ stats, statCategories: cats });
   assert.equal(result.projectedPoints, 12);
   assert.equal(result.lastSeasonFantasy.points, 12);

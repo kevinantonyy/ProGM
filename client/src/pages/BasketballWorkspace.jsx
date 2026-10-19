@@ -9,6 +9,7 @@ import { resolveDraftPhase } from '../utils/draftStatus';
 import EstimateBadge from '../components/EstimateBadge';
 import DraftPreviewBanner from '../components/DraftPreviewBanner';
 import DraftCompleted, { previewOpener } from '../components/DraftCompleted';
+import RankingsNotice from '../components/RankingsNotice';
 import PlayerStatusBadge, { DraftStatusNotice } from '../components/PlayerStatusBadge';
 import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
@@ -355,6 +356,7 @@ function Rankings({ data }) {
         <span className="text-sm text-dark-400">Sort by</span>
         {cols.map(([k, l]) => <button key={k} onClick={() => setSortBy(k)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${sortBy === k ? 'bg-primary-600 text-white' : 'bg-dark-800 text-dark-300 hover:text-dark-50'}`}>{l}</button>)}
       </div>
+      <RankingsNotice players={r.players} reason={data.externalData?.reason} />
       <section className="card overflow-x-auto p-0">
         <table className="w-full min-w-[620px] text-sm">
           <thead className="border-b border-dark-700 text-left text-xs uppercase text-dark-400"><tr><th className="p-3">#</th><th className="p-3 text-center" title={overallTitle(r.rankScope)}>{overallLabel(r.rankScope)}</th><th className="p-3">Player</th><th className="p-3 text-right">Proj/gm</th>{data.scheduleAware && <th className="p-3 text-right">Period</th>}<th className="p-3 text-right">Owned</th></tr></thead>

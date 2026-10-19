@@ -320,6 +320,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
   const projectionProvider = makeProjectionProvider({ projectionByCanonicalId, imageByCanonicalId, canonicalIdOf });
   const freshness = providers.cache.freshnessFrom(indexResult.meta, statsResult?.meta, recentResult?.meta);
   const projectedCount = [...projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length;
+  // Weighted league stats that blocked projections (a missing stat nulls the whole player: nothing is estimated or zeroed).
+  const unsupportedScoringStats = [...new Set([...projectionByCanonicalId.values()].flatMap((p) => p.unsupportedStats || []))];
+  const statLabel = (stat) => (/^\d+$/.test(String(stat)) ? `stat #${stat}` : String(stat));
   const recentCount = Object.keys(recentByExternalId).length;
   const historyCount = Object.keys(historyByExternalId).length;
 
@@ -346,9 +349,12 @@ export async function buildProjectionContext({ season, players, statCategories, 
         history: historyCount > 0,
         statsBudgetLimited: Boolean(statsResult?.meta?.budgetLimited), // per-player fallback hit its request budget
       },
+      unsupportedScoringStats, // weighted league stats the data can't supply (empty when scoring is fully supported)
     },
     injuryReports,
     reason: projectedCount > 0 ? null
+      : unsupportedScoringStats.length
+        ? `Your league scores ${unsupportedScoringStats.map(statLabel).join(', ')}, which ProGM cannot get from its free NBA data, so no player could be projected. Nothing was estimated or set to zero.`
       : bulkOnly && !statsResult?.value?.length
         ? 'The league-wide NBA stats feed was unavailable, and this view does not use slower per-player lookups, so no projections were built.'
         : statsResult?.meta?.budgetLimited

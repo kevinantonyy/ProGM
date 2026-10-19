@@ -16,9 +16,9 @@ const PROVENANCE = {
 
 const FULL_SCORING = [
   { statId: 4, abbr: 'FGM', pointValue: 2, enabled: true },
-  { statId: 5, abbr: 'FGA', pointValue: -0.5, enabled: true },
+  { statId: 3, abbr: 'FGA', pointValue: -0.5, enabled: true },
   { statId: 7, abbr: 'FTM', pointValue: 1, enabled: true },
-  { statId: 8, abbr: 'FTA', pointValue: -0.25, enabled: true },
+  { statId: 6, abbr: 'FTA', pointValue: -0.25, enabled: true },
   { statId: 10, abbr: '3PM', pointValue: 2, enabled: true },
   { statId: 12, abbr: 'PTS', pointValue: 1, enabled: true },
   { statId: 13, abbr: 'OREB', pointValue: 1.5, enabled: true },
