@@ -78,7 +78,7 @@ export function supplementReboundSplits(stats, split) {
  * @param {boolean} [params.rookieEstimates]     add flagged, low-confidence Yahoo-ADP-implied estimates for players with no stat line (default off)
  * @returns {Promise<Object>} projection context
  */
-export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false }) {
+export async function buildProjectionContext({ season, players, statCategories, scoringSupported = true, rookieEstimates = false, bulkOnly = false }) {
   const seasonYear = Number(season);
   const now = new Date();
   const currentNbaSeason = now.getUTCMonth() >= 7 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
@@ -113,7 +113,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
   } catch {
     indexResult = null;
   }
-  if (!indexResult?.value) {
+  // An empty directory is as unusable as a missing one: matching against it would "succeed" with zero projections.
+  if (!indexResult?.value?.length) {
     // Distinguish WHY the provider is unavailable so production can report a
     // precise, sanitized diagnostic instead of a generic message. This reads
     // the provider's recorded last error (status + classified kind) — it does
@@ -123,7 +124,9 @@ export async function buildProjectionContext({ season, players, statCategories, 
     const diag = tank.lastError || null;
     let reason = 'External NBA data provider is not available; running in Yahoo-only mode.';
     if (!tank.configured) {
-      reason = 'NBA stats provider is not configured on the server (RAPIDAPI_KEY missing).';
+      reason = tank.enabled === false
+        ? 'Tank01 is disabled (PROGM_TANK01_ENABLED is not true), so only the free ESPN/NBA data sources are used, and they are unavailable.'
+        : 'NBA stats provider is not configured on the server (RAPIDAPI_KEY missing).';
     } else if (diag?.kind === 'quota_exceeded') {
       reason = 'NBA stats provider quota/rate limit reached; projections will return when it resets.';
     } else if (diag?.kind === 'invalid_key') {
@@ -135,11 +138,19 @@ export async function buildProjectionContext({ season, players, statCategories, 
     } else if (diag?.kind === 'network_error') {
       reason = 'Could not reach the NBA stats provider from the server (network).';
     }
+    // ESPN (free_nba) is the primary source; say what it last reported (a sanitized, truncated health message), not only Tank01's state.
+    const free = status?.free_nba || {};
+    if (free.configured && free.lastErrorType) {
+      reason = `NBA stats from ESPN are unavailable: ${free.lastErrorType}${free.state === 'open' ? ' (retries are paused for a few minutes)' : ''}`;
+    } else if (indexResult?.value && !indexResult.value.length) {
+      reason = 'The NBA player directory came back empty, so no projections can be built.';
+    }
     return {
       ...base,
       reason,
       // Structured, sanitized diagnostic for the UI/report (no keys/bodies).
       diagnostic: {
+        freeNba: { state: free.state ?? null, failures: free.failures ?? null, lastErrorType: free.lastErrorType ?? null },
         provider: 'tank01',
         available: false,
         configured: Boolean(tank.configured),
@@ -166,7 +177,10 @@ export async function buildProjectionContext({ season, players, statCategories, 
   let statsResult = null;
   if (externalIds.length) {
     try {
-      statsResult = await providers.getSeasonStats(projectionSeason, externalIds);
+      // Draft Preview passes bulkOnly: one league-wide request or nothing, never hundreds of per-player Tank01 calls.
+      statsResult = bulkOnly
+        ? await providers.getSeasonStatsBulkOnly(projectionSeason, externalIds)
+        : await providers.getSeasonStats(projectionSeason, externalIds);
     } catch {
       statsResult = null;
     }
@@ -330,10 +344,23 @@ export async function buildProjectionContext({ season, players, statCategories, 
         injuries: injuryReports.available,
         playerIndex: Boolean(indexResult?.value?.length),
         history: historyCount > 0,
+        statsBudgetLimited: Boolean(statsResult?.meta?.budgetLimited), // per-player fallback hit its request budget
       },
     },
     injuryReports,
-    reason: projectedCount > 0 ? null : 'Provider returned no usable stats for these players yet.',
+    reason: projectedCount > 0 ? null
+      : bulkOnly && !statsResult?.value?.length
+        ? 'The league-wide NBA stats feed was unavailable, and this view does not use slower per-player lookups, so no projections were built.'
+        : statsResult?.meta?.budgetLimited
+          ? (() => {
+            const budget = providers.providerStatus()?.tank01?.playerBudget;
+            return budget && (budget.hourly.limit === 0 || budget.daily.limit === 0)
+              ? 'The ESPN stats feed was unavailable and the per-player paid-API fallback is disabled (its budget is 0), so no projections were built.'
+              : 'NBA stats are temporarily limited to protect the data-provider quota; projections fill in as the limit resets.';
+          })()
+          : matched.length === 0
+          ? 'No Yahoo players could be matched to the NBA player directory, so no projections were built.'
+          : 'Provider returned no usable stats for these players yet.',
   };
 }
 

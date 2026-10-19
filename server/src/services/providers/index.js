@@ -15,7 +15,8 @@
  */
 import * as cache from './cache.js';
 import * as health from './health.js';
-import tank01Provider, { getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
+import { takePlayerFallbackBudget, playerFallbackBudgetStatus } from './playerFallbackBudget.js';
+import tank01Provider, { isEnabled as tank01Enabled, getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
 import freeNbaProvider, {
   getRequestCount as freeRequestCount,
@@ -53,7 +54,7 @@ export function externalDataAvailable() {
 export function providerStatus() {
   return {
     free_nba: { primary: FREE_PRIMARY(), configured: freeNbaProvider.isConfigured(), requestCount: freeRequestCount(), requestBreakdown: freeRequestBreakdown(), lastError: freeLastError(), ...health.status('free_nba') },
-    tank01: { configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
+    tank01: { enabled: tank01Enabled(), playerBudget: playerFallbackBudgetStatus(), configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
   };
 }
@@ -72,14 +73,28 @@ export { freeRequestCount as freeNbaRequestCount, resetFreeRequestCount as reset
  * @param {(provider) => Promise<any>} op   receives the chosen provider
  * @param {(provider) => boolean} [supports] capability check per provider
  */
-async function withProvider(cacheKey, ttl, op, supports = () => true) {
-  // Serve fresh cache immediately without touching any provider.
-  if (cache.isFresh(cacheKey)) return cache.get(cacheKey);
+/** Empty array/object = "provider said nothing", never a value worth keeping for hours or days. */
+const isEmptyValue = (value) => value == null || (Array.isArray(value) ? value.length === 0 : typeof value === 'object' && Object.keys(value).length === 0);
+
+/** Drop a cached empty result (e.g. one stored before payload validation existed) so a healthy provider response can replace it. */
+function dropEmptyCacheEntry(key) {
+  const hit = cache.get(key);
+  if (hit && isEmptyValue(hit.value)) cache.del(key);
+}
+
+async function withProvider(cacheKey, ttl, op, supports = () => true, usable = () => true) {
+  // Serve fresh cache immediately without touching any provider, unless it is a value the caller considers unusable.
+  if (cache.isFresh(cacheKey)) {
+    const hit = cache.get(cacheKey);
+    if (usable(hit.value)) return hit;
+    cache.del(cacheKey);
+  }
 
   const candidates = candidateProviders().filter(supports);
   for (const provider of candidates) {
     try {
       const result = await cache.remember(cacheKey, { provider: provider.name, ttl }, () => op(provider));
+      if (!usable(result.value)) { cache.del(cacheKey); throw new Error(`Unusable ${cacheKey} value from ${provider.name}`); }
       // remember() may have served stale cache from a prior provider on failure;
       // only count a genuine fresh fetch as success.
       if (!result.meta.cacheHit) health.recordSuccess(provider.name);
@@ -92,7 +107,7 @@ async function withProvider(cacheKey, ttl, op, supports = () => true) {
 
   // Last resort: any stale cached value beats nothing.
   const stale = cache.get(cacheKey);
-  return stale || null;
+  return stale && usable(stale.value) ? stale : null;
 }
 
 /** Player cross-reference index (bulk, cached daily). */
@@ -101,7 +116,8 @@ export function getPlayerIndex(season) {
     `playerIndex:${season}`,
     cache.TTL.playerIndex,
     (p) => p.getPlayerIndex(season),
-    (p) => typeof p.getPlayerIndex === 'function'
+    (p) => typeof p.getPlayerIndex === 'function',
+    (value) => Array.isArray(value) && value.length > 0, // an empty directory is a failed fetch, not a day-long answer
   );
 }
 
@@ -136,6 +152,7 @@ export async function getSeasonStats(season, externalIds) {
   const bulkCandidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
   for (const provider of bulkCandidates) {
     try {
+      dropEmptyCacheEntry(`seasonStatsAll:${season}:${provider.name}`);
       const result = await cache.remember(
         `seasonStatsAll:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.seasonStats },
@@ -158,9 +175,23 @@ export async function getSeasonStats(season, externalIds) {
   // Fallback path: providers WITHOUT a bulk method (Tank01, nba.com) are fetched
   // per player, each cached individually and shared across users/leagues.
   const metas = [];
-  const results = await Promise.all(ids.map((externalId) =>
-    withProvider(
-      `seasonStats:${season}:${externalId}`,
+  // Only providers that DON'T have bulk (bulk was already tried above).
+  const perPlayerCapable = (p) => typeof p.getSeasonStatsBulk !== 'function' && (typeof p.getSeasonStatsForPlayer === 'function' || typeof p.getSeasonStats === 'function');
+  const statsKey = (externalId) => `seasonStats:${season}:${externalId}`;
+  // Each UNCACHED player costs one provider request, so spend a bounded budget (see playerFallbackBudget.js). Cached players
+  // are free. Players beyond the budget get their last cached value if any, otherwise no stats (never fabricated); later
+  // requests fill the rest in as the budget window resets, because every fetched player is cached.
+  const uncached = ids.filter((externalId) => !cache.isFresh(statsKey(externalId)));
+  // Only Tank01 (paid) is budgeted; a free per-player provider such as nba.com is never blocked by it.
+  const tankReachable = candidateProviders().some((p) => p.name === 'tank01' && perPlayerCapable(p));
+  const granted = tankReachable ? takePlayerFallbackBudget(uncached.length) : uncached.length;
+  const allowed = new Set(uncached.slice(0, granted));
+  const skippedForBudget = tankReachable ? uncached.length - allowed.size : 0;
+  if (skippedForBudget > 0) logBudgetLimited(skippedForBudget, uncached.length);
+  // Bounded concurrency (not all at once) so the provider circuit breaker can stop a failing provider mid-flight.
+  const results = await mapWithConcurrency(ids, PER_PLAYER_CONCURRENCY, (externalId) => {
+    return withProvider(
+      statsKey(externalId),
       cache.TTL.seasonStats,
       async (p) => {
         if (typeof p.getSeasonStatsForPlayer === 'function') {
@@ -169,10 +200,10 @@ export async function getSeasonStats(season, externalIds) {
         const arr = await p.getSeasonStats(season, [externalId]);
         return Array.isArray(arr) ? (arr[0] || null) : null;
       },
-      // Only providers that DON'T have bulk (bulk was already tried above).
-      (p) => typeof p.getSeasonStatsBulk !== 'function' && (typeof p.getSeasonStatsForPlayer === 'function' || typeof p.getSeasonStats === 'function'),
-    ),
-  ));
+      // Over budget: Tank01 is excluded, so the player gets a free provider, else the last cached value, else nothing.
+      (p) => perPlayerCapable(p) && (p.name !== 'tank01' || allowed.has(externalId)),
+    );
+  });
 
   const value = [];
   for (const r of results) {
@@ -182,7 +213,15 @@ export async function getSeasonStats(season, externalIds) {
   }
 
   const merged = cache.freshnessFrom(...metas) || { provider: 'none', fetchedAt: new Date().toISOString(), expiresAt: new Date().toISOString(), stale: false, cacheHit: true };
-  return { value, meta: { ...merged, cacheHit: metas.length > 0 && metas.every((m) => m.cacheHit) } };
+  return { value, meta: { ...merged, cacheHit: metas.length > 0 && metas.every((m) => m.cacheHit), budgetLimited: skippedForBudget > 0, skippedForBudget } };
+}
+
+const PER_PLAYER_CONCURRENCY = 4;
+let lastBudgetLogAt = 0;
+function logBudgetLimited(skipped, total) {
+  if (Date.now() - lastBudgetLogAt < 60 * 1000) return; // one line a minute, no player data
+  lastBudgetLogAt = Date.now();
+  console.warn('[providers] Per-player stats fallback limited by request budget', { skipped, total, budget: playerFallbackBudgetStatus() });
 }
 
 /**
@@ -199,6 +238,7 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
   const candidates = candidateProviders().filter((p) => typeof p.getSeasonStatsBulk === 'function');
   for (const provider of candidates) {
     try {
+      dropEmptyCacheEntry(`seasonStatsAll:${season}:${provider.name}`);
       const result = await cache.remember(
         `seasonStatsAll:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.seasonStats },
@@ -352,6 +392,7 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
   const seasonResults = await mapWithConcurrency(seasons, 4, async (season) => {
     try {
       // One cached, league-wide request per completed season (immutable TTL).
+      dropEmptyCacheEntry(`gamesPlayed:${season}:${provider.name}`);
       const result = await cache.remember(
         `gamesPlayed:${season}:${provider.name}`,
         { provider: provider.name, ttl: cache.TTL.history },

@@ -14,6 +14,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as providers from './index.js';
 import { cache, health } from './index.js';
+import { resetPlayerFallbackBudget } from './playerFallbackBudget.js';
 
 // --- fetch stub ---------------------------------------------------------------
 const calls = { playerList: 0, gamesForPlayer: 0, injuryList: 0, teamSchedule: 0, other: 0 };
@@ -36,8 +37,11 @@ const originalFetch = global.fetch;
 beforeEach(() => {
   cache.clearAll();
   health.reset('tank01');
+  resetPlayerFallbackBudget();
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '500'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '500'; // the per-player fallback is OFF by default; these tests exercise it enabled
   resetCalls();
   process.env.RAPIDAPI_KEY = 'test-key'; // make tank01 "configured"
+  process.env.PROGM_TANK01_ENABLED = 'true'; // Tank01 is OFF by default; these tests exercise it enabled
   global.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/getNBAPlayerList')) {

@@ -72,7 +72,8 @@ function fixture(overrides = {}) {
       return {
         externalAvailable: true,
         projectionProvider: {},
-        projectionByCanonicalId: new Map(POOL.filter((p) => !overrides.noProjection?.includes(p.playerKey)).map((p, i) => [p.playerKey, projection(60 - i * 5)])),
+        projectionByCanonicalId: new Map(overrides.emptyProjections ? [] : POOL.filter((p) => !overrides.noProjection?.includes(p.playerKey)).map((p, i) => [p.playerKey, projection(60 - i * 5)])),
+        reason: overrides.ctxReason ?? null,
         estimateByCanonicalId: overrides.estimates || new Map(),
         injuryReports: { applicable: true, available: true, count: 0, provider: 'free_nba', fetchedAt: AT, stale: false },
       };
@@ -361,4 +362,46 @@ test('a pool build that timed out is a contained 502 and does not wedge the next
   const retry = await call(f.router);
   assert.equal(retry.statusCode, 200);
   assert.equal(attempts, 2);
+});
+
+test('Draft Preview asks for bulk-only projections (no per-player provider fan-out for a ~700-player pool)', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const f = fixture();
+  await call(f.router);
+  assert.equal(f.seen.projectionArgs[0].bulkOnly, true);
+});
+
+test('normal case reports projections present and no reason', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const res = await call(fixture().router);
+  assert.deepEqual(res.body.projection, { externalAvailable: true, projectedCount: POOL.length, totalPlayers: POOL.length, reason: null });
+});
+
+test('zero projections: 200 with projection.projectedCount 0 and the provider reason, pool verdict untouched, retried after a minute', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const advance = clock(t);
+  const reason = 'NBA stats from ESPN are unavailable: Unrecognized or empty ESPN player directory feed';
+  const f = fixture({ emptyProjections: true, ctxReason: reason });
+  const res = await call(f.router);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.projection, { externalAvailable: true, projectedCount: 0, totalPlayers: POOL.length, reason });
+  assert.equal(res.body.completeness.complete, true, 'Yahoo pool completeness is independent of projection availability');
+  assert.equal(res.body.draftBoard.board.length, 0);
+  assert.equal(res.body.draftBoard.noData.length, POOL.length);
+  assert.ok(res.body.draftBoard.noData.every((row) => row.overallRank === undefined));
+  assert.equal((await call(f.router)).body.cache.hit, true);
+  advance(61 * 1000);
+  assert.equal((await call(f.router)).body.cache.hit, false, 'an all-unprojected result is not held for the full 10 minutes');
+  assert.equal(f.seen.pool, 1, 'but the verified Yahoo pool is not re-fetched');
+});
+
+test('projection provider entirely unavailable: the board is unavailable and the reason is passed through', async (t) => {
+  withEnv(t, { PROGM_DRAFT_PREVIEW: 'on' });
+  const f = fixture({ deps: { buildProjectionContext: async () => ({ externalAvailable: false, projectionProvider: null, projectionByCanonicalId: new Map(), estimateByCanonicalId: new Map(), reason: 'NBA stats from ESPN are unavailable: Unrecognized or empty ESPN player directory feed' }) } });
+  const res = await call(f.router);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.draftBoard.available, false);
+  assert.equal(res.body.projection.projectedCount, 0);
+  assert.equal(res.body.projection.externalAvailable, false);
+  assert.match(res.body.projection.reason, /ESPN are unavailable/);
 });

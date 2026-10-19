@@ -58,11 +58,13 @@ function makeFetchStub({ failHosts = [], } = {}) {
 
 beforeEach(() => {
   cache.clearAll();
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '500'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '500'; // fallback is OFF by default; enable it for the tests that exercise it
   health.reset('free_nba');
   health.reset('tank01');
   hostCalls = {};
   process.env.FREE_NBA_PRIMARY = 'true';
   process.env.RAPIDAPI_KEY = 'test-key'; // make tank01 "configured" so fallback is reachable
+  process.env.PROGM_TANK01_ENABLED = 'true'; // Tank01 is OFF by default; enable it for these tests
   global.fetch = makeFetchStub();
 });
 
