@@ -192,3 +192,9 @@ HAR, or any URL containing league or team keys.
   key. Ranking/baseline reference keys are unchanged because this feature never changes rank.
 - Badge and warning text use semantic light/dark colors; scoped badge backgrounds keep small text above 4.5:1 contrast. Endpoint,
   provider, cache and client tests use synthetic data only. No extra Yahoo requests or polling are added.
+
+## Diagnosing missing projections: ESPN season-stats probe
+
+`GET /api/diagnostics/free-nba?probe=espn-stats[&season=2026]` (authenticated, and only when `ENABLE_FREE_NBA_DIAG=true`) makes exactly one request to the same ESPN season-stats endpoint the projection provider uses and returns aggregates only: HTTP status, content type, bytes, elapsed ms, whether the JSON is valid, athlete count, usable-stat count, process memory, and an error category (`timeout`, `network_error`, `forbidden`, `rate_limited`, `server_error`, `http_error`, `response_too_large`, `not_json`, `unrecognized_shape`, `no_athletes`, `no_usable_stats`). `season` is the Yahoo league season (default: the current one); the probe requests the previous season's stats, exactly as the projection pipeline does.
+
+It never calls Yahoo or Tank01, does not touch provider caches, breakers or counters, has a 12 s timeout and a 12 MB response cap (the real response is about 7.7 MB), is single-flight, and refuses a repeat within 15 s. Without `probe=` the route behaves as before (three lightweight reachability checks).
