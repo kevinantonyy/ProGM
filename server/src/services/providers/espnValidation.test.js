@@ -64,7 +64,7 @@ beforeEach(() => {
   process.env.FREE_NBA_PRIMARY = 'true';
   delete process.env.RAPIDAPI_KEY;
 });
-afterEach(() => { global.fetch = originalFetch; });
+afterEach(() => { global.fetch = originalFetch; delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET; });
 
 test('player index: every malformed/empty shape is a failure (throws), never an empty directory', async () => {
   for (const [label, answer] of Object.entries(MALFORMED)) {
@@ -183,8 +183,9 @@ test('fallback limits: bulkOnly (Draft Preview) never makes per-player Tank01 re
   assert.match(ctx.reason, /does not use slower per-player lookups/);
 });
 
-test('fallback limits: the normal workspace path keeps its existing Tank01 per-player fallback', async () => {
+test('fallback limits: with limits explicitly configured, the normal workspace path still uses the Tank01 per-player fallback', async () => {
   process.env.RAPIDAPI_KEY = 'test-key';
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '50'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '200';
   stub(indexOkStatsBad(5));
   await buildProjectionContext({ season: '2026', players: pool(5), statCategories: cats, scoringSupported: true });
   assert.ok((calls.tank01 || 0) >= 5, `expected per-player Tank01 requests, saw ${calls.tank01 || 0}`);
@@ -198,4 +199,13 @@ test('bulkOnly still projects normally when the bulk feed is healthy', async () 
   assert.equal([...ctx.projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length, 10);
   assert.equal(calls.tank01 || 0, 0, 'a healthy bulk feed needs no Tank01 at all');
   assert.equal(ctx.reason, null);
+});
+
+test('fallback limits: by DEFAULT (no budget configured) the normal path makes no per-player Tank01 requests either', async () => {
+  process.env.RAPIDAPI_KEY = 'test-key';
+  delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET;
+  stub(indexOkStatsBad(20));
+  const ctx = await buildProjectionContext({ season: '2026', players: pool(20), statCategories: cats, scoringSupported: true });
+  assert.ok((calls.tankPaths || []).every((path) => /InjuryList$/.test(path)), `unexpected Tank01 endpoints: ${calls.tankPaths}`);
+  assert.match(ctx.reason, /fallback is disabled \(its budget is 0\)/);
 });

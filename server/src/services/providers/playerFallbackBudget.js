@@ -1,16 +1,18 @@
 /**
- * Request budget for the per-player stats fallback (Tank01 / nba.com have no league-wide stats endpoint, so each uncached
- * player costs one provider request). During an ESPN outage a 700-player pool could otherwise burn a month of quota in
- * one page load. Cached players are free and never counted; only uncached lookups spend budget.
+ * Request budget for the per-player Tank01 stats fallback (Tank01 has no league-wide stats endpoint, so each uncached
+ * player costs one paid-API request). Cached players are free and never counted; only uncached lookups spend budget.
  *
- *   PROGM_TANK01_PLAYER_BUDGET        max uncached per-player lookups per rolling hour  (default 50; 0 disables the fallback)
- *   PROGM_TANK01_PLAYER_DAILY_BUDGET  max per 24 hours                                  (default 200; 0 disables)
+ * DEFAULT IS 0 = DISABLED. Tank01 may bill per request, so nothing is spent until you set BOTH limits to numbers you have
+ * verified against your RapidAPI plan and its overage settings:
  *
- * Windows are fixed-length and start at first use; they reset on their own, so the fallback recovers without a restart.
+ *   PROGM_TANK01_PLAYER_BUDGET        max uncached per-player lookups per hour  (default 0)
+ *   PROGM_TANK01_PLAYER_DAILY_BUDGET  max per 24 hours                          (default 0)
+ *
+ * Unset, blank or invalid values mean 0 (fail closed). Windows are fixed-length and start at first use.
  */
 const WINDOWS = [
-  { name: 'hourly', ms: 60 * 60 * 1000, envKey: 'PROGM_TANK01_PLAYER_BUDGET', fallback: 50 },
-  { name: 'daily', ms: 24 * 60 * 60 * 1000, envKey: 'PROGM_TANK01_PLAYER_DAILY_BUDGET', fallback: 200 },
+  { name: 'hourly', ms: 60 * 60 * 1000, envKey: 'PROGM_TANK01_PLAYER_BUDGET', fallback: 0 },
+  { name: 'daily', ms: 24 * 60 * 60 * 1000, envKey: 'PROGM_TANK01_PLAYER_DAILY_BUDGET', fallback: 0 },
 ];
 
 const state = new Map(); // window name -> { start, used }

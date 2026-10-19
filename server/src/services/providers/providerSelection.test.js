@@ -58,6 +58,7 @@ function makeFetchStub({ failHosts = [], } = {}) {
 
 beforeEach(() => {
   cache.clearAll();
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '500'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '500'; // fallback is OFF by default; enable it for the tests that exercise it
   health.reset('free_nba');
   health.reset('tank01');
   hostCalls = {};

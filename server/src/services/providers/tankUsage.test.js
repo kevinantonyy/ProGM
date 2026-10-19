@@ -38,7 +38,7 @@ beforeEach(() => {
   cache.clearAll();
   health.reset('tank01');
   resetPlayerFallbackBudget();
-  delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET; // these tests assume the default budget
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '500'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '500'; // the per-player fallback is OFF by default; these tests exercise it enabled
   resetCalls();
   process.env.RAPIDAPI_KEY = 'test-key'; // make tank01 "configured"
   global.fetch = async (url) => {

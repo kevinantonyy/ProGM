@@ -46,7 +46,7 @@ beforeEach(() => {
   tankIds = []; tankCalls = 0;
   process.env.FREE_NBA_PRIMARY = 'true';
   process.env.RAPIDAPI_KEY = 'test-key';
-  delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET;
+  process.env.PROGM_TANK01_PLAYER_BUDGET = '50'; process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET = '200'; // explicitly enabled; the default is covered by the DEFAULT tests below
   stub();
 });
 afterEach(() => {
@@ -55,24 +55,25 @@ afterEach(() => {
   resetPlayerFallbackBudget();
 });
 
-test('budget: defaults are conservative, grants are partial, and windows reset on their own', () => {
+test('budget: with explicit limits, grants are partial and windows reset on their own', () => {
   const t0 = 1_000_000_000_000;
-  assert.equal(takePlayerFallbackBudget(30, { now: t0, env: {} }), 30);
-  assert.equal(takePlayerFallbackBudget(30, { now: t0 + 1000, env: {} }), 20, 'only 20 of the hourly 50 remain');
-  assert.equal(takePlayerFallbackBudget(5, { now: t0 + 2000, env: {} }), 0, 'hourly window exhausted');
-  const status = playerFallbackBudgetStatus({ now: t0 + 3000, env: {} });
+  const env = { PROGM_TANK01_PLAYER_BUDGET: '50', PROGM_TANK01_PLAYER_DAILY_BUDGET: '200' };
+  assert.equal(takePlayerFallbackBudget(30, { now: t0, env }), 30);
+  assert.equal(takePlayerFallbackBudget(30, { now: t0 + 1000, env }), 20, 'only 20 of the hourly 50 remain');
+  assert.equal(takePlayerFallbackBudget(5, { now: t0 + 2000, env }), 0, 'hourly window exhausted');
+  const status = playerFallbackBudgetStatus({ now: t0 + 3000, env });
   assert.deepEqual([status.hourly.limit, status.hourly.used, status.daily.limit, status.daily.used, status.exhausted], [50, 50, 200, 50, true]);
-  assert.equal(takePlayerFallbackBudget(10, { now: t0 + 61 * 60 * 1000, env: {} }), 10, 'new hour, new budget');
-  assert.equal(playerFallbackBudgetStatus({ now: t0 + 61 * 60 * 1000, env: {} }).daily.used, 60, 'the daily cap keeps counting across hours');
+  assert.equal(takePlayerFallbackBudget(10, { now: t0 + 61 * 60 * 1000, env }), 10, 'new hour, new budget');
+  assert.equal(playerFallbackBudgetStatus({ now: t0 + 61 * 60 * 1000, env }).daily.used, 60, 'the daily cap keeps counting across hours');
 });
 
-test('budget: the daily cap binds even when the hourly window has room; env is configurable and junk falls back', () => {
+test('budget: the daily cap binds even when the hourly window has room; env is configurable and junk fails CLOSED (0)', () => {
   const t0 = 2_000_000_000_000; const env = { PROGM_TANK01_PLAYER_BUDGET: '100', PROGM_TANK01_PLAYER_DAILY_BUDGET: '120' };
   assert.equal(takePlayerFallbackBudget(100, { now: t0, env }), 100);
   assert.equal(takePlayerFallbackBudget(100, { now: t0 + 61 * 60 * 1000, env }), 20, 'only 20 left of the daily 120');
   for (const bad of ['', ' ', 'abc', '-5', '1.5', 'Infinity']) {
     resetPlayerFallbackBudget();
-    assert.equal(takePlayerFallbackBudget(500, { now: t0, env: { PROGM_TANK01_PLAYER_BUDGET: bad } }), 50, `"${bad}" falls back to the default`);
+    assert.equal(takePlayerFallbackBudget(500, { now: t0, env: { PROGM_TANK01_PLAYER_BUDGET: bad, PROGM_TANK01_PLAYER_DAILY_BUDGET: '1000' } }), 0, `"${bad}" disables the fallback`);
   }
   resetPlayerFallbackBudget();
   assert.equal(takePlayerFallbackBudget(10, { now: t0, env: { PROGM_TANK01_PLAYER_BUDGET: '0' } }), 0, '0 disables the fallback');
@@ -198,6 +199,84 @@ test('the normal path reports when the budget limited it, so the UI/diagnostics 
 test('provider status exposes the budget (limits and usage only, no keys)', () => {
   const status = providers.providerStatus();
   assert.deepEqual(Object.keys(status.tank01.playerBudget).sort(), ['daily', 'exhausted', 'hourly']);
-  assert.equal(status.tank01.playerBudget.hourly.limit, 50);
+  assert.equal(status.tank01.playerBudget.hourly.limit, 50, 'reflects the explicitly configured limit');
   assert.ok(!JSON.stringify(status).includes('test-key'));
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// DEFAULTS: nothing configured = the paid per-player fallback is OFF (0/hour, 0/day). Cache and ESPN bulk keep working.
+// ---------------------------------------------------------------------------------------------------------------------
+function unconfigure() { delete process.env.PROGM_TANK01_PLAYER_BUDGET; delete process.env.PROGM_TANK01_PLAYER_DAILY_BUDGET; resetPlayerFallbackBudget(); }
+
+test('DEFAULT: with no budget configured both limits are 0 and nothing can be granted', () => {
+  assert.equal(takePlayerFallbackBudget(1000, { env: {} }), 0);
+  const status = playerFallbackBudgetStatus({ env: {} });
+  assert.deepEqual([status.hourly.limit, status.daily.limit, status.exhausted], [0, 0, true]);
+});
+
+test('DEFAULT: only one of the two limits configured is still disabled (both must be set deliberately)', () => {
+  assert.equal(takePlayerFallbackBudget(10, { env: { PROGM_TANK01_PLAYER_BUDGET: '50' } }), 0);
+  resetPlayerFallbackBudget();
+  assert.equal(takePlayerFallbackBudget(10, { env: { PROGM_TANK01_PLAYER_DAILY_BUDGET: '200' } }), 0);
+});
+
+test('DEFAULT: a large uncached request makes ZERO Tank01 requests and says the fallback is disabled', async () => {
+  unconfigure();
+  const result = await providers.getSeasonStats('2025', ids(200));
+  assert.equal(tankCalls, 0);
+  assert.deepEqual(result.value, []);
+  assert.equal(result.meta.budgetLimited, true);
+  assert.equal(result.meta.skippedForBudget, 200);
+});
+
+test('DEFAULT: cached player data keeps working (fresh and expired), still without any Tank01 request', async () => {
+  unconfigure();
+  const line = { externalId: '1', season: { points: 20, gamesPlayed: 70, minutes: 30 }, recent: null, recentGameCount: null };
+  cache.set('seasonStats:2025:1', line, { provider: 'tank01', ttl: 60_000 });
+  cache.set('seasonStats:2025:2', { ...line, externalId: '2' }, { provider: 'tank01', ttl: -1 }); // expired
+  const result = await providers.getSeasonStats('2025', ids(5));
+  assert.deepEqual(result.value.map((v) => v.externalId).sort(), ['1', '2']);
+  assert.equal(tankCalls, 0);
+});
+
+test('DEFAULT: ESPN bulk data is unaffected and serves everyone with no Tank01 requests', async () => {
+  unconfigure();
+  stub({ espn: () => espnHealthy(60) });
+  const result = await providers.getSeasonStats('2025', ids(60));
+  assert.equal(result.value.length, 60);
+  assert.equal(tankCalls, 0);
+});
+
+test('DEFAULT: the full projection pipeline still works from ESPN alone', async () => {
+  unconfigure();
+  stub({ espn: () => espnHealthy(30) });
+  const pool = Array.from({ length: 30 }, (_, i) => ({ playerKey: `466.p.${i}`, name: `Player ${i + 1}`, teamAbbr: 'BOS' }));
+  const ctx = await buildProjectionContext({ season: '2026', players: pool, statCategories: [{ statId: 12, enabled: true, pointValue: 1 }], scoringSupported: true });
+  assert.equal([...ctx.projectionByCanonicalId.values()].filter((p) => p.projectedPoints != null).length, 30);
+  assert.equal(tankCalls, 0);
+});
+
+test('DEFAULT: with ESPN down the context says WHY nothing was projected (fallback disabled), not a vague quota message', async () => {
+  unconfigure();
+  let n = 0; stub({ espn: () => (++n === 1 ? espnHealthy(10) : espnDown()) });
+  const pool = Array.from({ length: 10 }, (_, i) => ({ playerKey: `466.p.${i}`, name: `Player ${i + 1}`, teamAbbr: 'BOS' }));
+  const ctx = await buildProjectionContext({ season: '2026', players: pool, statCategories: [{ statId: 12, enabled: true, pointValue: 1 }], scoringSupported: true });
+  assert.equal(tankIds.length, 0);
+  assert.match(ctx.reason, /per-player paid-API fallback is disabled \(its budget is 0\)/);
+});
+
+test('the budget only governs Tank01: the free nba.com per-player path is not blocked by a budget of 0', async () => {
+  unconfigure();
+  delete process.env.RAPIDAPI_KEY; // no Tank01 at all
+  process.env.NBA_STATS_FALLBACK = 'true';
+  let nbaRequests = 0;
+  const inner = global.fetch;
+  global.fetch = async (url) => { if (String(url).includes('stats.nba.com')) { nbaRequests += 1; return reply({}); } return inner(url); };
+  try {
+    await providers.getSeasonStats('2025', ids(5));
+    assert.ok(nbaRequests > 0, 'the free provider was still attempted');
+    assert.equal(playerFallbackBudgetStatus().hourly.used, 0, 'and it spent no Tank01 budget');
+  } finally {
+    delete process.env.NBA_STATS_FALLBACK;
+  }
 });

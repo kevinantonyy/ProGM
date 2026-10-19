@@ -182,13 +182,14 @@ export async function getSeasonStats(season, externalIds) {
   // are free. Players beyond the budget get their last cached value if any, otherwise no stats (never fabricated); later
   // requests fill the rest in as the budget window resets, because every fetched player is cached.
   const uncached = ids.filter((externalId) => !cache.isFresh(statsKey(externalId)));
-  const granted = candidateProviders().some(perPlayerCapable) ? takePlayerFallbackBudget(uncached.length) : uncached.length;
+  // Only Tank01 (paid) is budgeted; a free per-player provider such as nba.com is never blocked by it.
+  const tankReachable = candidateProviders().some((p) => p.name === 'tank01' && perPlayerCapable(p));
+  const granted = tankReachable ? takePlayerFallbackBudget(uncached.length) : uncached.length;
   const allowed = new Set(uncached.slice(0, granted));
-  const skippedForBudget = uncached.length - allowed.size;
+  const skippedForBudget = tankReachable ? uncached.length - allowed.size : 0;
   if (skippedForBudget > 0) logBudgetLimited(skippedForBudget, uncached.length);
   // Bounded concurrency (not all at once) so the provider circuit breaker can stop a failing provider mid-flight.
   const results = await mapWithConcurrency(ids, PER_PLAYER_CONCURRENCY, (externalId) => {
-    if (!cache.isFresh(statsKey(externalId)) && !allowed.has(externalId)) return cache.get(statsKey(externalId));
     return withProvider(
       statsKey(externalId),
       cache.TTL.seasonStats,
@@ -199,7 +200,8 @@ export async function getSeasonStats(season, externalIds) {
         const arr = await p.getSeasonStats(season, [externalId]);
         return Array.isArray(arr) ? (arr[0] || null) : null;
       },
-      perPlayerCapable,
+      // Over budget: Tank01 is excluded, so the player gets a free provider, else the last cached value, else nothing.
+      (p) => perPlayerCapable(p) && (p.name !== 'tank01' || allowed.has(externalId)),
     );
   });
 

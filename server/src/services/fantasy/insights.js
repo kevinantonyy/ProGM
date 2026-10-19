@@ -350,7 +350,12 @@ export async function buildProjectionContext({ season, players, statCategories, 
       : bulkOnly && !statsResult?.value?.length
         ? 'The league-wide NBA stats feed was unavailable, and this view does not use slower per-player lookups, so no projections were built.'
         : statsResult?.meta?.budgetLimited
-          ? 'NBA stats are temporarily limited to protect the data-provider quota; projections fill in as the limit resets.'
+          ? (() => {
+            const budget = providers.providerStatus()?.tank01?.playerBudget;
+            return budget && (budget.hourly.limit === 0 || budget.daily.limit === 0)
+              ? 'The ESPN stats feed was unavailable and the per-player paid-API fallback is disabled (its budget is 0), so no projections were built.'
+              : 'NBA stats are temporarily limited to protect the data-provider quota; projections fill in as the limit resets.';
+          })()
           : matched.length === 0
           ? 'No Yahoo players could be matched to the NBA player directory, so no projections were built.'
           : 'Provider returned no usable stats for these players yet.',
