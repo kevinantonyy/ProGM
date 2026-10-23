@@ -1,21 +1,52 @@
 const DEFAULTS = Object.freeze({
   freshTtlMs: 8_000,
-  staleTtlMs: 6 * 60 * 60 * 1000,
+  staleTtlMs: 2 * 60 * 60 * 1000, // raw draft-results fallback; was 6 h (provisional until Yahoo clarifies retention)
   baseBackoffMs: 5_000,
   maxBackoffMs: 5 * 60 * 1000,
   circuitThreshold: 3,
   circuitOpenMs: 60_000,
+  controlIdleTtlMs: 24 * 60 * 60 * 1000, // retry metadata only, never raw picks
 });
 
 const states = new Map();
 
-function stateFor(leagueKey) {
+/**
+ * Expire raw picks independently of retry control state, even during backoff or an in-flight request.
+ * Consecutive denials survive the retry deadline: only success (or 24 hours of inactivity) resets them.
+ */
+export function purgeExpiredDraftStates({ now = Date.now, options = {} } = {}) {
+  const config = { ...DEFAULTS, ...options };
+  const nowMs = safeNow(now);
+  let removed = 0;
+  for (const [leagueKey, state] of states) {
+    staleSuccess(state, nowMs, { staleTtlMs: options.staleTtlMs ?? state.staleTtlMs });
+    if (state.inFlight || nowMs < state.nextAllowedAt) continue;
+    if (!state.lastSuccess && (state.consecutiveDenied === 0 || nowMs - state.lastActivityAt >= config.controlIdleTtlMs)) {
+      states.delete(leagueKey); removed += 1;
+    }
+  }
+  return removed;
+}
+
+let lastPurgeAt = 0;
+function maybePurge(nowMs, config) {
+  if (nowMs - lastPurgeAt < 60_000) return;
+  lastPurgeAt = nowMs;
+  purgeExpiredDraftStates({ now: () => nowMs, options: config });
+}
+
+const draftStateSweeper = setInterval(() => purgeExpiredDraftStates(), 60_000);
+draftStateSweeper.unref?.();
+
+function stateFor(leagueKey, nowMs, config) {
   if (!states.has(leagueKey)) {
     states.set(leagueKey, {
       inFlight: null,
       lastSuccess: null,
       consecutiveDenied: 0,
       nextAllowedAt: 0,
+      lastActivityAt: nowMs,
+      staleTtlMs: config.staleTtlMs,
     });
   }
   return states.get(leagueKey);
@@ -35,7 +66,7 @@ function retryDelay(failureCount, random, config) {
 }
 
 function staleSuccess(state, nowMs, config) {
-  if (!state.lastSuccess || nowMs - state.lastSuccess.fetchedAt > config.staleTtlMs) return null;
+  if (state.lastSuccess && nowMs - state.lastSuccess.fetchedAt > config.staleTtlMs) state.lastSuccess = null;
   return state.lastSuccess;
 }
 
@@ -72,8 +103,11 @@ export async function fetchYahooDraftResults({
   options = {},
 }) {
   const config = { ...DEFAULTS, ...options };
-  const state = stateFor(leagueKey);
   const nowMs = safeNow(now);
+  maybePurge(nowMs, config);
+  const state = stateFor(leagueKey, nowMs, config);
+  state.lastActivityAt = nowMs;
+  state.staleTtlMs = config.staleTtlMs;
   const stale = staleSuccess(state, nowMs, config);
 
   if (stale && nowMs - stale.fetchedAt <= config.freshTtlMs) {
@@ -98,6 +132,7 @@ export async function fetchYahooDraftResults({
       const value = await loader();
       const fetchedAt = safeNow(now);
       state.lastSuccess = { value, fetchedAt };
+      state.lastActivityAt = fetchedAt;
       state.consecutiveDenied = 0;
       state.nextAllowedAt = 0;
       return {
@@ -115,6 +150,7 @@ export async function fetchYahooDraftResults({
     } catch (error) {
       if (Number(error?.httpStatus) !== 999) throw error;
       const failedAt = safeNow(now);
+      state.lastActivityAt = failedAt;
       state.consecutiveDenied += 1;
       state.nextAllowedAt = failedAt + retryDelay(state.consecutiveDenied, random, config);
       return unavailableResult(state, failedAt, config, 'Yahoo temporarily denied draft-results access. Showing the last successful draft state when available.');
@@ -137,6 +173,12 @@ export function peekYahooDraftResults(leagueKey, { now = Date.now, options = {} 
 
 export function clearYahooDraftPollingState() {
   states.clear();
+  lastPurgeAt = 0;
+}
+
+/** Non-identifying counts for retention regression tests; never exposes league keys or picks. */
+export function draftPollingCacheStats() {
+  return { states: states.size, cachedResults: [...states.values()].filter((s) => s.lastSuccess != null).length };
 }
 
 export { DEFAULTS as YAHOO_DRAFT_POLLING_DEFAULTS };

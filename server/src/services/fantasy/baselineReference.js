@@ -35,5 +35,5 @@ export function loadBaselineReference(cache, key) {
 export function saveBaselineReference(cache, key, reference) {
   if (!cache?.set || !reference?.complete) return;
   if (loadBaselineReference(cache, key)) return; // first complete capture wins
-  cache.set(key, reference, { provider: 'progm', ttl: REFERENCE_TTL_MS });
+  cache.set(key, reference, { provider: 'progm', derivedFrom: 'yahoo', ttl: REFERENCE_TTL_MS }) // aggregate numbers only, but computed from a Yahoo league's pool, scoring and slots;
 }

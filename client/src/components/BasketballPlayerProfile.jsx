@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import YahooAttribution from './YahooAttribution.js';
 import { avatarSources, initialAvatarState, avatarStateReducer, imageIsSharpEnough } from './basketballPlayerAvatar.js';
 
 const PlayerProfileContext = createContext(null);
@@ -123,6 +124,8 @@ function PlayerProfile({ player, data, closeRef }) {
           <p className="mt-2 text-sm text-dark-400">Season averages and game logs are not exposed in the current basketball workspace.</p>
           <p className="mt-4 text-xs text-dark-500">{freshness}</p>
         </section>
+
+        <div className="border-t border-dark-700 px-4 py-3 sm:px-6"><YahooAttribution size="sm" /></div>
       </div>
     </div>
   );

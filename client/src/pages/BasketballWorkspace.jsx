@@ -7,6 +7,8 @@ import { DRAFT_POLL_MS, draftPollBackoffMs, shouldStopDraftPolling } from '../ut
 import { draftSortButtons, rankLabel, rankTitle, rankingsRankColumn } from '../utils/rankLabels';
 import { resolveDraftPhase } from '../utils/draftStatus';
 import EstimateBadge from '../components/EstimateBadge';
+import YahooAttribution from '../components/YahooAttribution';
+import AskProGMChat from '../components/AskProGMChat';
 import DraftPreviewBanner from '../components/DraftPreviewBanner';
 import DraftCompleted, { previewOpener } from '../components/DraftCompleted';
 import RankingsNotice from '../components/RankingsNotice';
@@ -17,7 +19,7 @@ import { leagueAvailabilityLabel } from '../utils/playerStatus';
 import { isEstimated, ESTIMATE_TOOLTIP } from '../utils/estimateBadge';
 
 // Fantasy Basketball workspace — powered by Yahoo + Tank01 + ProGM analytics,
-// rendered in the ProGM (.deploy-repo) design system. Yahoo is invisible
+// rendered in the ProGM (.deploy-repo) design system. Yahoo data carries the required attribution (YahooAttribution, below the tabs)
 // infrastructure; the product surface is "Fantasy Basketball".
 
 const SECTIONS = [
@@ -748,69 +750,6 @@ function LeagueHub({ data }) {
   );
 }
 
-// --- Tab: Ask ProGM (basketball context) ---
-function AskProGM({ data }) {
-  const [messages, setMessages] = useState([{ role: 'gm', text: `${data.connection.teamName} is loaded. Ask about a lineup, waiver, trade, or roster decision.` }]);
-  const [text, setText] = useState(''); const [sending, setSending] = useState(false); const [error, setError] = useState('');
-  async function send(value = text) {
-    const clean = value.trim().slice(0, 800); if (!clean || sending) return;
-    const next = [...messages, { role: 'user', text: clean }]; setMessages(next); setText(''); setError(''); setSending(true);
-    try { const r = await api.post('/gm/chat', { messages: next.slice(-10), league: basketballContext(data) }); setMessages((m) => [...m, { role: 'gm', text: r.data.message }]); }
-    catch (err) { setError(err.response?.data?.error || 'Ask ProGM could not respond.'); }
-    finally { setSending(false); }
-  }
-  return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <section className="card p-0"><div className="border-b border-dark-700 px-4 py-3"><p className="font-bold">ProGM Assistant</p><p className="text-xs text-green-400">● Explains ProGM basketball analytics</p></div>
-        <div className="h-[52vh] min-h-[340px] space-y-4 overflow-y-auto p-4">{messages.map((m, i) => <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6 ${m.role === 'user' ? 'rounded-br-sm bg-primary-600 text-white' : 'rounded-bl-sm border border-dark-700 bg-dark-900 text-dark-200'}`}>{m.text}</div></div>)}{sending && <div className="text-sm text-primary-400">Thinking…</div>}{error && <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-300">{error}</div>}</div>
-        <div className="border-t border-dark-700 p-4"><form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex gap-2"><input className="input-field" value={text} maxLength={800} onChange={(e) => setText(e.target.value)} placeholder="Ask about your lineup, waivers, or a trade…" /><button className="btn-primary shrink-0 disabled:opacity-50" disabled={!text.trim() || sending}>Send</button></form></div>
-      </section>
-    </div>
-  );
-}
-
-// Structured basketball analytics context for Gemini (explanation-only).
-// Gemini never invents trades, values, or stats — it only explains the
-// ProGM-computed recommendations packed into this context. Every field here is
-// produced by a ProGM engine (or is a Yahoo fact); nothing is fabricated.
-export function basketballContext(data) {
-  const slim = (p) => ({ name: p?.name, position: p?.position, team: p?.teamAbbr, projected: p?.projectedPoints, injury: p?.injuryStatus, ownedPct: p?.percentOwned, starting: p?.isStarting });
-  return {
-    sport: 'basketball', league: data.connection?.leagueName, season: data.connection?.season, myTeam: data.connection?.teamName,
-    settings: data.settings, analysis: data.analysis, rating: data.rating,
-    roster: (data.myTeam?.roster || []).map(slim),
-    standings: data.standings,
-    lineupRecommendation: data.lineup ? { projectedCurrent: data.lineup.projectedCurrentPoints, projectedOptimized: data.lineup.projectedOptimizedPoints, difference: data.lineup.projectedDifference, swaps: (data.lineup.swaps || []).map((s) => ({ start: s.in?.name, bench: s.out?.name, gain: s.projectedGain })) } : null,
-    // Schedule-aware start/sit calls (ProGM), when produced by the engine.
-    startSit: data.startSit?.benchOverStarter?.length
-      ? { scheduleAware: data.startSit.scheduleAware, calls: data.startSit.benchOverStarter.slice(0, 6).map((s) => ({ start: s.start?.name, sit: s.sit?.name, gain: s.gain, note: s.reason })) }
-      : null,
-    waivers: data.waivers?.projectionsAvailable ? {
-      bestAvailable: (data.waivers.bestAvailable || []).slice(0, 8).map(slim),
-      bestFit: (data.waivers.bestFit || []).slice(0, 8).map((p) => ({ ...slim(p), fitScore: p.fitScore })),
-      // Paired add/drop moves (ProGM), never an add without a considered drop.
-      addDrop: (data.waivers.addDrop || []).slice(0, 6).map((m) => ({ add: m.add?.name, drop: m.drop?.name || null, net: m.netImprovement, category: m.category })),
-    } : null,
-    // AI trade recommender candidates (ProGM-generated + scored, not Gemini).
-    recommendedTrades: (data.recommendedTrades?.recommendations || []).slice(0, 6).map((t) => ({
-      with: t.withTeam,
-      youSend: (t.send || []).map((p) => p.name),
-      youReceive: (t.receive || []).map((p) => p.name),
-      myImprovement: t.production?.net ?? null,
-      fairness: t.fairness,
-      confidence: t.confidence,
-    })),
-    // Player rankings (ProGM), top slice for reference.
-    rankingsTop: (data.rankings?.players || []).slice(0, 15).map((p) => ({ progmRank: p.overallRank ?? null, rankScope: data.rankings?.rankScope || null, name: p.name, projected: p.projected, period: p.periodProjected })),
-    // Draft Helper board top slice (ProGM value + fit + availability), for
-    // explanation only — Gemini must not invent rankings or values.
-    draftBoardTop: (data.draftBoard?.board || []).slice(0, 15).map((p) => ({ progmRank: p.overallRank ?? null, rosterFitNote: p.priorityNote ?? null, rankScope: data.draftBoard?.rankScope || null, name: p.name, value: p.value, tier: p.tier, fit: p.rosterFit, availability: p.availability })),
-    leagueHub: data.leagueHub ? { powerRankings: (data.leagueHub.powerRankings || []).map((t) => ({ rank: t.powerRank, name: t.name, score: t.powerScore })) } : null,
-    recommendations: data.intelligence?.recommendations,
-    dataAvailable: data.externalData?.available,
-  };
-}
-
 export default function BasketballWorkspace() {
   const { section = 'overview' } = useParams();
   const navigate = useNavigate();
@@ -912,7 +851,10 @@ export default function BasketballWorkspace() {
       {active === 'rankings' && <Rankings data={data} />}
       {active === 'draft' && <DraftHelper data={data} leagueKey={leagueKey} active={active === 'draft'} />}
       {active === 'league' && <LeagueHub data={data} />}
-      {active === 'gm' && <AskProGM data={data} />}
+      {active === 'gm' && <AskProGMChat leagueKey={leagueKey} teamKey={data.connection?.teamKey} />}
+
+      {/* Yahoo Fantasy API attribution: shown once for every tab of this Yahoo-powered view, never per row or card. */}
+      <YahooAttribution className="border-t border-dark-700 pt-4 w-full" />
     </div>
     </BasketballPlayerProfileProvider>
   );

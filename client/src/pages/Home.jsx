@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
+import YahooAttribution from '../components/YahooAttribution';
 
 // Daily front office. Surfaces REAL opportunities from ProGM's analytics for
 // whichever leagues the user has connected. Football uses the ESPN workspace;
@@ -121,6 +122,7 @@ export default function Home() {
               </Link>))}
             </div>
           ) : <p className="text-sm text-dark-400">No actionable opportunities right now — your team looks set.</p>}
+          {sec.sport === 'Fantasy Basketball' && <YahooAttribution size="sm" />}
         </section>
       ))}
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import YahooAttribution from '../components/YahooAttribution';
 
 export default function Login() {
   const [isRegister, setIsRegister] = useState(false);
@@ -128,9 +129,9 @@ export default function Login() {
 
           {!isRegister && (
             <div className="mb-6 rounded-lg border border-[#6b4ba1]/50 bg-[#3f2867]/20 p-4">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#6001d2] text-xl font-black text-white">Y!</div>
-                <div>
+              <div>
+                <YahooAttribution showText={false} size="sm" />
+                <div className="mt-3">
                   <p className="font-semibold text-dark-50">Bring in your Yahoo Fantasy team</p>
                   <p className="mt-1 text-xs leading-5 text-dark-300">Connect Yahoo first, then sign in or create an account to securely attach your fantasy leagues and teams.</p>
                 </div>
