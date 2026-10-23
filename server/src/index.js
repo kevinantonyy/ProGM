@@ -12,6 +12,7 @@ import diagnosticsRoutes from './routes/diagnostics.js';
 import pool, { initDatabase } from './db/connection.js';
 import { startYahooOAuthCleanup } from './services/yahooOauthCleanup.js';
 import { createConsentStore } from './services/ai/consent.js';
+import { DATA_SOURCES, sourceAllowed } from './services/dataSources/policy.js';
 import { createYahooLeagueBuilder } from './services/ai/yahooLeagueContext.js';
 
 // Personalized Ask ProGM: wired here, but usable only when PROGM_AI_YAHOO_DATA is exactly "allow" (unset by default) AND the user has consented.
@@ -64,6 +65,7 @@ async function start() {
   try {
     await initDatabase();
     startYahooOAuthCleanup(pool.execute);
+    console.log('External data sources:', Object.keys(DATA_SOURCES).map((source) => `${source}=${sourceAllowed(source) ? 'allowed' : 'disabled'}`).join(' '));
     app.listen(PORT, () => {
       console.log(`ProGM server running on port ${PORT}`);
     });

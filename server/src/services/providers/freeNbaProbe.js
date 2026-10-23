@@ -9,6 +9,7 @@
  * summary. No keys, no bodies, no secrets. Safe to expose behind an authed
  * admin route later, or to run once via `node -e` on Render.
  */
+import { assertUrlAllowed, guardedFetch, isSourceDisabledError } from '../dataSources/policy.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const ESPN_HEADERS = { 'User-Agent': UA, Accept: 'application/json' };
@@ -32,10 +33,12 @@ function classify(status) {
 /** Probe one target once. Returns a sanitized result (no body, no headers). */
 async function probeOne({ key, url, headers }, timeoutMs = 10000) {
   const t0 = Date.now();
+  // A disabled source (ESPN / NBA.com) is reported as such WITHOUT any request.
+  try { assertUrlAllowed(url); } catch (e) { if (isSourceDisabledError(e)) return { source: key, status: null, ok: false, kind: 'source_disabled', ms: 0 }; throw e; }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { headers, signal: controller.signal });
+    const res = await guardedFetch(url, { headers, signal: controller.signal });
     // Drain a little to confirm it's real JSON without holding the whole body.
     const ct = res.headers.get('content-type') || '';
     return { source: key, status: res.status, ok: res.ok, kind: classify(res.status), contentType: ct.slice(0, 40), ms: Date.now() - t0 };

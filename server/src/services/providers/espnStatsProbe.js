@@ -10,6 +10,7 @@
  * Tank01 or any other provider.
  */
 import { BYATHLETE_URL, ESPN_HEADERS, mapEspnSeasonStats, hasUsableLine, espnSeasonEndYear } from './freeNbaProvider.js';
+import { assertUrlAllowed, guardedFetch } from '../dataSources/policy.js';
 
 export const PROBE_TIMEOUT_MS = 12000; // same per-request budget the provider uses
 export const PROBE_MAX_BYTES = 12 * 1024 * 1024; // the real response is ~7.7 MB; stop reading (and never parse) beyond this
@@ -28,8 +29,9 @@ const safeContentType = (value) => String(value || '').toLowerCase().replace(/[^
 /**
  * @param {{leagueSeason?: number, fetchImpl?: typeof fetch, timeoutMs?: number, maxBytes?: number, memory?: () => NodeJS.MemoryUsage}} [options]
  */
-export async function probeEspnSeasonStats({ leagueSeason = currentLeagueSeason(), fetchImpl = globalThis.fetch, timeoutMs = PROBE_TIMEOUT_MS, maxBytes = PROBE_MAX_BYTES, memory = process.memoryUsage } = {}) {
+export async function probeEspnSeasonStats({ leagueSeason = currentLeagueSeason(), fetchImpl = (url, init) => guardedFetch(url, init), timeoutMs = PROBE_TIMEOUT_MS, maxBytes = PROBE_MAX_BYTES, memory = process.memoryUsage } = {}) {
   const projectionSeason = leagueSeason - 1; // exactly how buildProjectionContext chooses the stats season
+  assertUrlAllowed(BYATHLETE_URL(projectionSeason)); // ESPN disabled: throw before any timer or request, whichever fetchImpl is used
   const before = memory();
   const started = Date.now();
   const out = {

@@ -4,6 +4,7 @@
  * cannot move, partial-pool honesty, waiver isolation, request count, flag-off compatibility, and non-postdraft behaviour.
  */
 import { test, beforeEach, afterEach } from 'node:test';
+import '../dataSources/allowAllSourcesForTest.js'; // these tests run provider logic against mocked HTTP, so the sources are opted in
 import assert from 'node:assert/strict';
 import { buildBasketballWorkspace } from './basketballWorkspace.js';
 import { assembleLeaguePool } from './leaguePool.js';

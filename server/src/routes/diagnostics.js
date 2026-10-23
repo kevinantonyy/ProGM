@@ -18,6 +18,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { probeFreeNbaSources } from '../services/providers/freeNbaProbe.js';
 import { probeEspnSeasonStats } from '../services/providers/espnStatsProbe.js';
+import { sourceAllowed } from '../services/dataSources/policy.js';
 
 const router = Router();
 
@@ -51,11 +52,13 @@ export function resetEspnProbeGuard() { probeBusy = false; probeLastStartedAt = 
  * and flag gate. It does not touch provider caches, breakers or counters, and never calls Yahoo, Tank01 or anything else.
  */
 router.get('/free-nba', authenticate, async (req, res) => {
-  if (process.env.ENABLE_FREE_NBA_DIAG !== 'true') {
+  // These probes only contact ESPN and NBA.com, both default-deny (services/dataSources/policy.js): with neither allowed the route does not exist.
+  if (process.env.ENABLE_FREE_NBA_DIAG !== 'true' || (!sourceAllowed('espn') && !sourceAllowed('nba_com'))) {
     return res.status(404).json({ error: 'Diagnostic endpoint is disabled.' });
   }
   if (req.query.probe !== undefined) {
     if (req.query.probe !== 'espn-stats') return res.status(400).json({ error: 'Unknown probe.' });
+    if (!sourceAllowed('espn')) return res.status(404).json({ error: 'Diagnostic endpoint is disabled.' });
     let leagueSeason;
     if (req.query.season !== undefined) {
       if (!/^\d{4}$/.test(String(req.query.season)) || Number(req.query.season) < 2000 || Number(req.query.season) > 2100) {

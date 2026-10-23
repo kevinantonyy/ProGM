@@ -4,6 +4,7 @@
  * enable-flag gate, the safe response shape, and that nothing sensitive leaks.
  */
 import { test, before, after, beforeEach } from 'node:test';
+import '../services/dataSources/allowAllSourcesForTest.js'; // these tests run provider logic against mocked HTTP, so the sources are opted in
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';

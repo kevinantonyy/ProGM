@@ -19,6 +19,7 @@
  * tests). Missing data is null, never fabricated.
  */
 import { num, emptyStatLine } from './types.js';
+import { assertUrlAllowed, guardedFetch, sourceAllowed } from '../dataSources/policy.js';
 
 const ESPN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 export const ESPN_HEADERS = { 'User-Agent': ESPN_UA, Accept: 'application/json' };
@@ -29,7 +30,8 @@ const DEFAULT_TIMEOUT_MS = 12000;
 const RECENT_GAMES_PER_TEAM = 10;
 
 export function isConfigured() {
-  return true; // no key required
+  // No key is needed, but ESPN declined to permit use of its data: this provider is unusable unless PROGM_DATA_ESPN=allow.
+  return sourceAllowed('espn');
 }
 
 // --- Request instrumentation (per-endpoint, for API-budget visibility) ------
@@ -62,12 +64,13 @@ export function resetRequestCount() {
 }
 
 async function jsonFetch(url, headers, timeout = DEFAULT_TIMEOUT_MS) {
+  assertUrlAllowed(url); // disabled ESPN / NBA.com host: throw before any counter, timer or request
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   requestCount += 1; // counts every actual outbound request (cache misses only)
   endpointCounts[classifyEndpoint(url)] += 1;
   try {
-    const res = await fetch(url, { headers, signal: controller.signal });
+    const res = await guardedFetch(url, { headers, signal: controller.signal });
     if (!res.ok) {
       lastError = { status: res.status, kind: classifyStatus(res.status), at: new Date().toISOString() };
       const err = new Error(`free_nba HTTP ${res.status}`);

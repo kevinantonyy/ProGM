@@ -4,10 +4,10 @@ import { set, get, isFresh, remember, clearAll, freshnessFrom, inFlightCount } f
 
 test('set/get returns value with cacheHit metadata', () => {
   clearAll();
-  set('k1', { a: 1 }, { provider: 'tank01', ttl: 10000 });
+  set('k1', { a: 1 }, { provider: 'sample_provider', ttl: 10000 });
   const hit = get('k1');
   assert.deepEqual(hit.value, { a: 1 });
-  assert.equal(hit.meta.provider, 'tank01');
+  assert.equal(hit.meta.provider, 'sample_provider');
   assert.equal(hit.meta.cacheHit, true);
   assert.equal(hit.meta.stale, false);
 });

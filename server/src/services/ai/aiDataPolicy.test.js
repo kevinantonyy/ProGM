@@ -77,14 +77,10 @@ test('egress allowlist: every outbound HTTP call site in server code is a known,
     .sort();
   // A new entry here means new data can leave the server: review what it sends before adding it to this list.
   assert.deepEqual(sites, [
-    'routes/espn.js',                          // ESPN public league and news endpoints (inbound data)
     'routes/gm.js',                            // Gemini: the ONLY outbound path that carries user text; league context is gated by aiDataPolicy
     'routes/yahoo.js',                         // Yahoo OAuth token endpoint and Fantasy API (read-only GET)
-    'services/providers/espnStatsProbe.js',    // ESPN stats probe (diagnostics, inbound)
-    'services/providers/freeNbaProbe.js',      // ESPN / NBA CDN probes (diagnostics, inbound)
-    'services/providers/freeNbaProvider.js',   // ESPN / NBA CDN data (inbound)
-    'services/providers/nbaStatsProvider.js',  // stats.nba.com fallback (disabled by default)
-    'services/providers/tank01Provider.js',    // Tank01 (disabled by default)
+    'services/dataSources/policy.js',          // guardedFetch(): the ONLY route to ESPN, NBA.com and RapidAPI hosts, default-deny (inbound data)
+    'services/providers/espnStatsProbe.js',    // takes an injectable fetchImpl (defaults to guardedFetch); asserts the ESPN switch before any request
   ]);
 });
 

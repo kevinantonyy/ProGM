@@ -26,7 +26,7 @@ test('a Yahoo entry is served stale for a short grace after it expires, then del
 test('entries computed by ProGM from Yahoo data get the same retention when tagged derivedFrom: yahoo', (t) => withClock(t, (advance) => {
   clearAll();
   set('derived', { ranks: [1] }, { provider: 'progm', derivedFrom: 'yahoo', ttl: 10 * MIN });
-  set('independent', { stats: [1] }, { provider: 'espn', ttl: 10 * MIN });
+  set('independent', { stats: [1] }, { provider: 'independent_provider', ttl: 10 * MIN });
   advance(10 * MIN + RETENTION.yahooStaleGraceMs + MIN);
   assert.equal(get('derived'), null, 'Yahoo-derived entry is purged even though its provider label is progm');
   assert.ok(get('independent'), 'independent data keeps its longer stale window');
@@ -43,7 +43,7 @@ test('no Yahoo-derived entry can outlive 24 hours, whatever TTL or grace is requ
 
 test('independent provider data is no longer kept forever: purged after the default 24 h stale window', (t) => withClock(t, (advance) => {
   clearAll();
-  set('stats', 1, { provider: 'espn', ttl: HOUR });
+  set('stats', 1, { provider: 'independent_provider', ttl: HOUR });
   advance(HOUR + 23 * HOUR);
   assert.ok(get('stats'));
   advance(2 * HOUR);

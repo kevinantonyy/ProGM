@@ -12,6 +12,7 @@
  * All responses are validated defensively; missing fields become null.
  */
 import { num, emptyStatLine } from './types.js';
+import { assertUrlAllowed, guardedFetch, sourceAllowed } from '../dataSources/policy.js';
 
 const HOST = 'tank01-fantasy-stats.p.rapidapi.com';
 const BASE = `https://${HOST}`;
@@ -21,9 +22,13 @@ function apiKey() {
   return process.env.RAPIDAPI_KEY || null;
 }
 
-/** Tank01 is a paid API, so it is OFF unless PROGM_TANK01_ENABLED is exactly on/true/1. Having RAPIDAPI_KEY never enables it. */
+/**
+ * Tank01 is a paid API, so it is OFF unless PROGM_TANK01_ENABLED is exactly on/true/1. Having RAPIDAPI_KEY never enables it.
+ * It also needs PROGM_DATA_TANK01=allow (data-source policy): until the origin of its data and its terms are confirmed it must never
+ * quietly replace a disabled source.
+ */
 export function isEnabled(env = process.env) {
-  return ['on', 'true', '1'].includes(String(env?.PROGM_TANK01_ENABLED ?? '').trim().toLowerCase());
+  return ['on', 'true', '1'].includes(String(env?.PROGM_TANK01_ENABLED ?? '').trim().toLowerCase()) && sourceAllowed('tank01', env);
 }
 
 export function isConfigured() {
@@ -77,7 +82,8 @@ export function resetRequestCount() {
 
 async function tankFetch(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
   // The only place that talks to Tank01: if it is disabled nothing can leave the process, whoever calls this.
-  if (!isEnabled()) throw new Error('Tank01 is disabled (set PROGM_TANK01_ENABLED=true to enable it)');
+  if (!isEnabled()) throw new Error('Tank01 is disabled (set PROGM_TANK01_ENABLED=true and PROGM_DATA_TANK01=allow to enable it)');
+  assertUrlAllowed(BASE);
   const key = apiKey();
   if (!key) throw new Error('Tank01 not configured');
 
@@ -86,7 +92,7 @@ async function tankFetch(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await guardedFetch(`${BASE}${path}`, {
       headers: { 'x-rapidapi-key': key, 'x-rapidapi-host': HOST },
       signal: controller.signal,
     });

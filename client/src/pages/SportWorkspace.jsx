@@ -11,6 +11,8 @@ import Rankings from '../components/Rankings';
 import AIManager from '../components/AIManager';
 import WaiverWire from '../components/WaiverWire';
 import LoadingState from '../components/LoadingState';
+import EspnUnavailable from '../components/EspnUnavailable';
+import useEspnAvailability from '../services/useEspnAvailability';
 
 const SECTIONS = [
   ['overview', 'My Team'], ['league', 'League Hub'], ['gm', 'Ask ProGM'], ['start-sit', 'Start / Sit'], ['news', 'News'], ['rankings', 'Rankings'], ['trades', 'Trades'], ['waivers', 'Waiver Wire'], ['draft', 'Draft Helper'],
@@ -23,7 +25,7 @@ function PlayerRow({ player, detail }) {
   </div>;
 }
 
-export default function SportWorkspace() {
+function SportWorkspaceInner() {
   const { sport, section = 'overview', matchupId } = useParams();
   const navigate = useNavigate();
   const active = section === 'players' ? 'rankings' : SECTIONS.some(([key]) => key === section) ? section : 'overview';
@@ -59,4 +61,12 @@ export default function SportWorkspace() {
     {active === 'draft' && !data.draftAvailable && <div className="space-y-6"><section className="card text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-900/40 text-2xl">✓</div><h2 className="mt-4 text-2xl font-bold">Your league has already drafted</h2><p className="mx-auto mt-2 max-w-xl text-dark-400">Draft Help stays here for future seasons. Your current roster tools, waiver replacements, and balanced trade packages are ready to use.</p></section><section className="card"><h2 className="text-xl font-bold">Draft recap</h2><p className="mt-1 text-sm text-dark-400">Review the opening selections from your completed league draft.</p><div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{data.leagueHub.draftRecap.length ? data.leagueHub.draftRecap.slice(0, 30).map(pick => { const player = data.players.find(item => item.id === pick.playerId) || { id: pick.playerId, name: pick.playerName, position: pick.position }; const team = data.leagueHub.standings.find(item => item.id === pick.teamId) || { name: pick.teamName }; return <div key={`${pick.overallPick}-${pick.playerId}`} className="rounded-lg border border-dark-700 bg-dark-900 p-3"><p className="text-xs text-dark-400">#{pick.overallPick} · Round {pick.round}, Pick {pick.roundPick}</p><div className="mt-1"><PlayerButton player={player}>{pick.playerName}</PlayerButton> <span className="text-xs text-primary-400">{pick.position}</span></div><div className="mt-1"><TeamButton team={team} className="max-w-full truncate text-xs text-dark-400">{pick.teamName}</TeamButton></div></div>; }) : <p className="text-dark-400">Draft-pick details are not available from ESPN for this league.</p>}</div></section></div>}
     {active === 'draft' && data.draftAvailable && <div className="space-y-6"><section className="card border-primary-500/30"><div className="flex flex-wrap items-center justify-between gap-4"><div><div className="flex items-center gap-2"><h2 className="text-xl font-bold">Live Draft Mode</h2>{liveDraft && <span className="badge-green">Live · 15s refresh</span>}</div><p className="mt-1 text-sm text-dark-400">Tracks public ESPN draft picks and removes selected players from your personalized board.</p></div><div className="flex flex-wrap gap-2"><a href={espnDraftUrl} target="_blank" rel="noreferrer" className="btn-secondary text-center">Open ESPN Draft Room ↗</a><button onClick={() => { setLiveDraft(value => !value); if (!liveDraft) load(true, true); }} className={liveDraft ? 'btn-danger' : 'btn-primary'}>{liveDraft ? 'Stop live updates' : 'Start live draft mode'}</button></div></div>{data.draftStatus?.picks?.length > 0 && <div className="mt-5"><p className="stat-label">Latest picks</p><div className="mt-2 grid gap-2 md:grid-cols-3">{data.draftStatus.picks.slice(0, 6).map(pick => <div key={`${pick.overallPick}-${pick.playerId}`} className="rounded-lg bg-dark-900 p-3"><p className="text-xs text-dark-400">Pick #{pick.overallPick} · {pick.teamName}</p><p className="mt-1 font-semibold">{pick.playerName} <span className="text-xs text-primary-400">{pick.position}</span></p></div>)}</div></div>}</section><section className="card"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-bold">Personalized draft helper</h2><p className="mt-1 text-sm leading-6 text-dark-400">The board blends ESPN expert/pro ranks, projections, live availability, and your league scoring.</p></div><a href={espnDraftUrl} target="_blank" rel="noreferrer" className="btn-primary text-center text-sm">Draft in ESPN ↗</a></div><div className="mt-5 overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="border-b border-dark-600 text-dark-400"><tr><th className="pb-3">Pick</th><th className="pb-3">Player</th><th className="pb-3">Pro rank</th><th className="pb-3">Projection</th><th className="pb-3">Why this fits</th></tr></thead><tbody>{data.draftRecommendations.map((player, index) => <tr key={player.id} className="border-b border-dark-700"><td className="py-4 font-black text-primary-400">{index + 1}</td><td className="py-4"><p className="font-semibold">{player.name}</p><p className="text-xs text-dark-400">{player.position}</p></td><td className="py-4">{player.proRank ? `#${player.proRank}` : '—'}</td><td className="py-4">{player.projectedPoints.toFixed(1)}</td><td className="max-w-md py-4 text-dark-300">{player.reasoning}</td></tr>)}</tbody></table></div></section></div>}
   </div></EntityModalProvider>;
+}
+
+// ESPN has declined to permit use of its data: this workspace is built entirely from ESPN, so it is shown only when the server says ESPN is available.
+export default function SportWorkspace() {
+  const espn = useEspnAvailability();
+  if (espn.loading) return <LoadingState label="Checking data sources…" />;
+  if (!espn.available) return <EspnUnavailable title="Fantasy Football" message={espn.message} />;
+  return <SportWorkspaceInner />;
 }

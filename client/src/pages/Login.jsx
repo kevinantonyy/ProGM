@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import YahooAttribution from '../components/YahooAttribution';
+import useEspnAvailability from '../services/useEspnAvailability';
 
 export default function Login() {
   const [isRegister, setIsRegister] = useState(false);
+  const espn = useEspnAvailability(); // ESPN has declined to permit use of its data: the ESPN connect form is shown only when the server says it is available
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -83,7 +85,8 @@ export default function Login() {
         login(res.data.token, res.data.user);
       }
       const yahooClaim = sessionStorage.getItem('yahooClaim');
-      const espnPending = sessionStorage.getItem('espnPending');
+      const espnPending = espn.available ? sessionStorage.getItem('espnPending') : null;
+      if (!espn.available) sessionStorage.removeItem('espnPending'); // a half-finished ESPN connect from an earlier visit must not run
       if (yahooClaim) {
         await api.post('/yahoo/claim', { claim: yahooClaim }, { headers: { Authorization: `Bearer ${authResult.token}` } });
         sessionStorage.removeItem('yahooClaim');
@@ -143,7 +146,14 @@ export default function Login() {
             </div>
           )}
 
-          {!isRegister && (
+          {!isRegister && !espn.loading && !espn.available && (
+            <div className="mb-6 rounded-lg border border-dark-600 bg-dark-900 p-4" role="note" data-testid="espn-unavailable">
+              <p className="font-semibold text-dark-50">ESPN leagues are not available</p>
+              <p className="mt-1 text-xs leading-5 text-dark-300">{espn.message}</p>
+            </div>
+          )}
+
+          {!isRegister && espn.available && (
             <div className="mb-6 rounded-lg border border-red-700/40 bg-red-950/20 p-4">
               <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-600 text-xl font-black text-white">E</div><div><p className="font-semibold text-dark-50">Connect an ESPN public league</p><p className="mt-1 text-xs leading-5 text-dark-300">Paste a football or basketball team URL. ProGM uses the league settings and real player pool to personalize every tool.</p></div></div>
               <input className="input-field mt-4" value={espnLeagueId} onChange={e => { setEspnLeagueId(e.target.value); setEspnPreview(null); }} placeholder="Paste ESPN team URL or league ID" />
