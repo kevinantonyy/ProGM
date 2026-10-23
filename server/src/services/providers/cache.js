@@ -14,6 +14,8 @@
  * same get/set interface.
  */
 
+import { cacheEntryServable } from '../dataSources/policy.js';
+
 const store = new Map(); // key -> { value, provider, derivedFrom, fetchedAt, expiresAt, purgeAt }
 const inFlight = new Map(); // key -> Promise<{ value, meta }>  (single-flight de-dup)
 
@@ -56,6 +58,7 @@ export function get(key) {
   if (!entry) return null;
   const now = Date.now();
   if (now > entry.purgeAt) { store.delete(key); return null; } // past the stale-fallback window: gone
+  if (!cacheEntryServable(entry)) { store.delete(key); return null; } // its source is disabled: never served, not even as a stale fallback
   return {
     value: entry.value,
     meta: {
@@ -70,6 +73,7 @@ export function get(key) {
 
 export function set(key, value, { provider, ttl, derivedFrom = null, staleGraceMs } = {}) {
   const now = Date.now();
+  if (!cacheEntryServable({ provider, derivedFrom })) return; // a disabled source's data is never stored
   const yahoo = isYahooEntry(provider, derivedFrom);
   const grace = staleGraceMs ?? (yahoo ? RETENTION.yahooStaleGraceMs : RETENTION.defaultStaleGraceMs);
   let purgeAt = now + ttl + grace;
@@ -81,21 +85,21 @@ export function set(key, value, { provider, ttl, derivedFrom = null, staleGraceM
 export function has(key) {
   const entry = store.get(key);
   if (!entry) return false;
-  if (Date.now() > entry.purgeAt) { store.delete(key); return false; }
+  if (Date.now() > entry.purgeAt || !cacheEntryServable(entry)) { store.delete(key); return false; }
   return true;
 }
 
 /** True if a fresh (non-expired) entry exists. */
 export function isFresh(key) {
   const entry = store.get(key);
-  return Boolean(entry && Date.now() <= entry.expiresAt && Date.now() <= entry.purgeAt);
+  return Boolean(entry && Date.now() <= entry.expiresAt && Date.now() <= entry.purgeAt && cacheEntryServable(entry));
 }
 
 /** Delete every entry past its purge deadline. Returns how many were removed. `now` is injectable for tests. */
 export function purgeExpired(now = Date.now()) {
   let removed = 0;
   for (const [key, entry] of store) {
-    if (now > entry.purgeAt) { store.delete(key); removed += 1; }
+    if (now > entry.purgeAt || !cacheEntryServable(entry)) { store.delete(key); removed += 1; }
   }
   return removed;
 }

@@ -10,6 +10,7 @@
  * mapper divides by games played. It does not provide recent form or injuries.
  */
 import { num, emptyStatLine } from './types.js';
+import { assertUrlAllowed, guardedFetch, sourceAllowed } from '../dataSources/policy.js';
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
@@ -24,8 +25,8 @@ const LEAGUE_DASH_PARAMS = {
 };
 
 export function isConfigured() {
-  // No key needed; treated as always "configured" but gated by health + opt-in.
-  return true;
+  // No key needed, but NBA.com is default-deny (PROGM_DATA_NBA_COM=allow) and also gated by health + opt-in.
+  return sourceAllowed('nba_com');
 }
 
 /** Yahoo season "2025" -> stats.nba.com "2025-26". */
@@ -36,10 +37,11 @@ export function nbaSeason(season) {
 }
 
 async function nbaFetch(path, { timeout = DEFAULT_TIMEOUT_MS } = {}) {
+  assertUrlAllowed('https://stats.nba.com/'); // NBA.com is default-deny (PROGM_DATA_NBA_COM)
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(`https://stats.nba.com/stats/${path}`, {
+    const res = await guardedFetch(`https://stats.nba.com/stats/${path}`, {
       headers: {
         // Browser-like headers are required or stats.nba.com returns 403.
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',

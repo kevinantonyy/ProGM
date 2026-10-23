@@ -1,8 +1,18 @@
 import { Router } from 'express';
 import pool from '../db/connection.js';
 import { authenticate } from '../middleware/auth.js';
+import { guardedFetch, espnAvailability, sourceAllowed } from '../services/dataSources/policy.js';
 
 const router = Router();
+
+// ESPN declined to permit use of its data (services/dataSources/policy.js). Until PROGM_DATA_ESPN=allow, every route below answers 503
+// BEFORE authentication, database access or any outbound request, including the unauthenticated /preview. Stored ESPN connections and
+// league data are left untouched. /availability is static (no database, no request) so the client can show a clear explanation.
+router.get('/availability', (req, res) => res.json(espnAvailability()));
+router.use((req, res, next) => {
+  if (sourceAllowed('espn')) return next();
+  return res.status(503).json({ error: espnAvailability().message, code: 'espn_data_unavailable' });
+});
 const POSITIONS = { football: { 1: 'QB', 2: 'RB', 3: 'WR', 4: 'TE', 5: 'K', 16: 'D/ST' }, basketball: { 1: 'PG', 2: 'SG', 3: 'SF', 4: 'PF', 5: 'C' } };
 
 function parseLeagueInput(input, season, requestedSport) {
@@ -53,7 +63,7 @@ async function fetchLeague(input, season, requestedSport) {
   const parsed = parseLeagueInput(input, season, requestedSport);
   const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/${parsed.sportCode}/seasons/${parsed.season}/segments/0/leagues/${parsed.leagueId}?view=mTeam&view=mRoster&view=mSettings&view=mDraftDetail&view=mMatchup&view=mSchedule&view=mScoreboard&view=mTransactions2&view=kona_player_info`;
   const filter = { players: { filterStatus: { value: ['FREEAGENT', 'WAIVERS', 'ONTEAM'] }, sortPercOwned: { sortPriority: 1, sortAsc: false }, limit: 500 } };
-  const response = await fetch(url, { headers: { Accept: 'application/json', 'X-Fantasy-Filter': JSON.stringify(filter) } });
+  const response = await guardedFetch(url, { headers: { Accept: 'application/json', 'X-Fantasy-Filter': JSON.stringify(filter) } });
   if (response.status === 401 || response.status === 403) throw new Error('This ESPN league is private. ProGM can only sync leagues ESPN exposes publicly.');
   if (!response.ok) throw new Error(response.status === 404 ? 'ESPN league not found' : 'ESPN could not load this league');
   const data = await response.json();
@@ -191,7 +201,7 @@ router.get('/news/:sport', authenticate, async (req, res) => {
   try {
     const sport = req.params.sport === 'football' ? 'football/nfl' : req.params.sport === 'basketball' ? 'basketball/nba' : null;
     if (!sport) return res.status(400).json({ error: 'Choose football or basketball' });
-    const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/news?limit=30`);
+    const response = await guardedFetch(`https://site.api.espn.com/apis/site/v2/sports/${sport}/news?limit=30`);
     if (!response.ok) throw new Error('ESPN news is unavailable');
     const payload = await response.json();
     const articles = (payload.articles || []).map(article => ({ id: article.id || article.links?.web?.href, headline: article.headline, description: article.description || '', published: article.published, image: article.images?.[0]?.url || null, url: article.links?.web?.href || null, categories: (article.categories || []).map(category => category.description || category.type).filter(Boolean).slice(0, 3) })).filter(article => article.headline && article.url);

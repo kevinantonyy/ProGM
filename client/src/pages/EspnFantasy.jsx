@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import EspnUnavailable from '../components/EspnUnavailable';
+import useEspnAvailability from '../services/useEspnAvailability';
 
-export default function EspnFantasy() {
+function EspnFantasyInner() {
   const [status, setStatus] = useState(null);
   const [names, setNames] = useState('');
   const [message, setMessage] = useState('');
@@ -22,4 +24,12 @@ export default function EspnFantasy() {
     {status?.connected && <div className="mb-6 space-y-3">{(status.connections || [status.connection]).map(connection => <div key={connection.sport} className="card"><p className="text-xs uppercase tracking-wide text-dark-400">Connected public {connection.sport} league</p><h2 className="mt-2 text-xl font-semibold">{connection.league_name}</h2><p className="mt-1 text-dark-300">{connection.team_name} · {connection.season}</p><Link to={`/${connection.sport}`} className="btn-primary mt-4 inline-block">Open Fantasy {connection.sport}</Link></div>)}</div>}
     <form onSubmit={importRoster} className="card"><h2 className="text-xl font-semibold">Private league roster import</h2><p className="mt-2 text-sm leading-6 text-dark-300">ESPN does not offer third-party OAuth. Paste one player name per line; ProGM never asks for your ESPN password or session cookies.</p><textarea value={names} onChange={e => setNames(e.target.value)} rows="10" className="input-field mt-5" placeholder={'Luka Doncic\nJayson Tatum\nNikola Jokic'} required /><button className="btn-primary mt-4 px-6 py-3">Import roster</button></form>
   </div>;
+}
+
+// ESPN has declined to permit use of its data: league sync and roster import are shown only when the server says ESPN is available.
+export default function EspnFantasy() {
+  const espn = useEspnAvailability();
+  if (espn.loading) return <p className="text-sm text-dark-400">Checking data sources…</p>;
+  if (!espn.available) return <EspnUnavailable title="ESPN Fantasy" message={espn.message} compact />;
+  return <EspnFantasyInner />;
 }

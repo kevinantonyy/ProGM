@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import '../dataSources/allowAllSourcesForTest.js'; // these tests prove Tank01's own flag with the sources opted in; the policy gate is asserted with explicit env objects below
 import * as providers from './index.js';
 import { cache, health } from './index.js';
 import * as tank from './tank01Provider.js';
@@ -59,10 +60,12 @@ afterEach(() => {
 });
 
 test('flag parsing: only on / true / 1 (any case, trimmed) enable Tank01; everything else, including unset, is off', () => {
-  for (const v of ['true', 'TRUE', ' on ', '1', 'On']) assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: v }), true, v);
-  for (const v of [undefined, '', ' ', 'false', '0', 'off', 'no', 'yes', 'enabled', 'tru', '2']) assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: v }), false, String(v));
+  for (const v of ['true', 'TRUE', ' on ', '1', 'On']) assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: v, PROGM_DATA_TANK01: 'allow' }), true, v);
+  for (const v of [undefined, '', ' ', 'false', '0', 'off', 'no', 'yes', 'enabled', 'tru', '2']) assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: v, PROGM_DATA_TANK01: 'allow' }), false, String(v));
   assert.equal(tank.isEnabled({}), false);
   assert.equal(tank.isEnabled({ RAPIDAPI_KEY: 'x' }), false, 'a key alone is not consent');
+  assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: 'true' }), false, 'the flag alone is not enough: the data-source policy must also allow Tank01');
+  assert.equal(tank.isEnabled({ PROGM_TANK01_ENABLED: 'true', PROGM_DATA_TANK01: 'true' }), false, 'only the exact value allow counts');
 });
 
 test('DEFAULT: the provider is not configured even though a key is present, and status says so', () => {
@@ -213,6 +216,7 @@ test('tripwire: only tank01Provider.js references the Tank01 host, and it has a 
   const hostRefs = files.filter((file) => /rapidapi\.com/i.test(readFileSync(file, 'utf8'))).map((file) => relative(serverRoot, file).split(sep).join('/'));
   assert.deepEqual(hostRefs, ['src/services/providers/tank01Provider.js']);
   const source = readFileSync(join(serverRoot, 'src/services/providers/tank01Provider.js'), 'utf8');
-  assert.equal((source.match(/(?<![\w.])fetch\(/g) || []).length, 1, 'exactly one outbound HTTP call');
-  assert.ok(source.indexOf('if (!isEnabled()) throw') < source.indexOf('fetch('), 'the switch is checked before the request is built');
+  assert.equal((source.match(/(?<![\w.])fetch\(/g) || []).length, 0, 'no raw fetch(): every request goes through the data-source guard');
+  assert.equal((source.match(/guardedFetch\(/g) || []).length, 1, 'exactly one outbound HTTP call');
+  assert.ok(source.indexOf('if (!isEnabled()) throw') < source.indexOf('guardedFetch('), 'the switch is checked before the request is built');
 });

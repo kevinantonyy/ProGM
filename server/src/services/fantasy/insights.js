@@ -16,6 +16,9 @@
  * Yahoo-only deterministic behavior. Nothing is fabricated.
  */
 import * as providers from '../providers/index.js';
+import { sourceAllowed } from '../dataSources/policy.js';
+
+const NO_STATS_SOURCE_REASON = 'ProGM has no permitted player-statistics source right now (ESPN data is not available), so projections and rankings are unavailable. Your Yahoo league, roster, standings and ownership information is still shown.';
 import { buildCanonicalPlayers, yahooIdFromKeys } from '../identity/playerIdentity.js';
 import { projectPlayer, makeProjectionProvider } from './projection.js';
 import { applyMarketPriors } from './marketPrior.js';
@@ -145,6 +148,8 @@ export async function buildProjectionContext({ season, players, statCategories, 
     } else if (indexResult?.value && !indexResult.value.length) {
       reason = 'The NBA player directory came back empty, so no projections can be built.';
     }
+    // No statistics source is permitted (ESPN declined; Tank01 and NBA.com are off): say so plainly instead of blaming an outage.
+    if (!sourceAllowed('espn') && !tank.configured) reason = NO_STATS_SOURCE_REASON;
     return {
       ...base,
       reason,

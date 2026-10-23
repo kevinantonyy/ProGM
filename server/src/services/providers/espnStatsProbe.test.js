@@ -3,6 +3,7 @@
  * Mocked fetch only; nothing here touches the network, Yahoo, Tank01 or any credential.
  */
 import { test, beforeEach, afterEach } from 'node:test';
+import '../dataSources/allowAllSourcesForTest.js'; // these tests run provider logic against mocked HTTP, so the sources are opted in
 import assert from 'node:assert/strict';
 import { probeEspnSeasonStats, currentLeagueSeason, PROBE_MAX_BYTES, PROBE_TIMEOUT_MS } from './espnStatsProbe.js';
 import * as free from './freeNbaProvider.js';

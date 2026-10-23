@@ -4,6 +4,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import LoadingState from '../components/LoadingState';
 import YahooAttribution from '../components/YahooAttribution';
+import { loadEspnAvailability } from '../utils/espnAvailability';
 
 // Daily front office. Surfaces REAL opportunities from ProGM's analytics for
 // whichever leagues the user has connected. Football uses the ESPN workspace;
@@ -71,7 +72,9 @@ export default function Home() {
     async function load() {
       const found = [];
       // Football (ESPN) — optional.
-      try { const r = await api.get('/espn/workspace/football'); found.push(footballOpportunities(r.data)); } catch { /* not connected */ }
+      // ESPN has declined to permit use of its data: ask the (static) availability endpoint first and make no ESPN request unless it says yes.
+      const espn = await loadEspnAvailability(() => api.get('/espn/availability').then((response) => response.data));
+      if (espn.available) { try { const r = await api.get('/espn/workspace/football'); found.push(footballOpportunities(r.data)); } catch { /* not connected */ } }
       // Basketball (Yahoo) — use first league if connected.
       try {
         const lg = await api.get('/basketball/leagues');

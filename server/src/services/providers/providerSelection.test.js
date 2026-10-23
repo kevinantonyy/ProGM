@@ -11,6 +11,7 @@
  *   - a partial source failure (injuries) does not break season stats/schedule
  */
 import { test, beforeEach, afterEach } from 'node:test';
+import '../dataSources/allowAllSourcesForTest.js'; // these tests run provider logic against mocked HTTP, so the sources are opted in
 import assert from 'node:assert/strict';
 import * as providers from './index.js';
 import { cache, health } from './index.js';

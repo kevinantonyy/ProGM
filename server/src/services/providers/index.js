@@ -3,6 +3,9 @@
  * external NBA data. Handles provider selection, caching, health/circuit
  * breaking, and graceful degradation to Yahoo-only.
  *
+ * Every provider is also subject to the data-source policy (../dataSources/policy.js): ESPN (free_nba), NBA.com (nba_stats) and
+ * Tank01 are each OFF unless explicitly allowed, and a disabled source is never replaced by another one automatically.
+ *
  * Selection order per capability:
  *   1. Tank01 (if RAPIDAPI_KEY configured AND breaker closed)
  *   2. fresh/stale cached Tank01 data (handled inside cache.remember)
@@ -15,6 +18,7 @@
  */
 import * as cache from './cache.js';
 import * as health from './health.js';
+import { sourceAllowed, isSourceDisabledError, DATA_SOURCES } from '../dataSources/policy.js';
 import { takePlayerFallbackBudget, playerFallbackBudgetStatus } from './playerFallbackBudget.js';
 import tank01Provider, { isEnabled as tank01Enabled, getRequestCount, resetRequestCount, getRequestBreakdown, getLastError } from './tank01Provider.js';
 import nbaStatsProvider from './nbaStatsProvider.js';
@@ -30,6 +34,9 @@ import freeNbaProvider, {
 const FREE_PRIMARY = () => process.env.FREE_NBA_PRIMARY !== 'false';
 const FALLBACK_ENABLED = () => process.env.NBA_STATS_FALLBACK === 'true';
 
+// A provider switched off by the data-source policy is not a provider failure: it must never trip a circuit breaker.
+const recordFailure = (name, error) => { if (!isSourceDisabledError(error)) health.recordFailure(name, error); };
+
 /**
  * Ordered list of candidate providers that are currently usable.
  * Order defines priority: the first provider that satisfies a capability wins,
@@ -40,7 +47,7 @@ function candidateProviders() {
   const list = [];
   if (FREE_PRIMARY() && freeNbaProvider.isConfigured() && health.canAttempt('free_nba')) list.push(freeNbaProvider);
   if (tank01Provider.isConfigured() && health.canAttempt('tank01')) list.push(tank01Provider);
-  if (FALLBACK_ENABLED() && health.canAttempt('nba_stats')) list.push(nbaStatsProvider);
+  if (FALLBACK_ENABLED() && sourceAllowed('nba_com') && health.canAttempt('nba_stats')) list.push(nbaStatsProvider);
   // If free_nba is explicitly de-prioritized, still allow it as a last resort.
   if (!FREE_PRIMARY() && freeNbaProvider.isConfigured() && health.canAttempt('free_nba')) list.push(freeNbaProvider);
   return list;
@@ -53,6 +60,7 @@ export function externalDataAvailable() {
 
 export function providerStatus() {
   return {
+    dataSources: Object.fromEntries(Object.keys(DATA_SOURCES).map((source) => [source, { allowed: sourceAllowed(source) }])),
     free_nba: { primary: FREE_PRIMARY(), configured: freeNbaProvider.isConfigured(), requestCount: freeRequestCount(), requestBreakdown: freeRequestBreakdown(), lastError: freeLastError(), ...health.status('free_nba') },
     tank01: { enabled: tank01Enabled(), playerBudget: playerFallbackBudgetStatus(), configured: tank01Provider.isConfigured(), requestCount: getRequestCount(), requestBreakdown: getRequestBreakdown(), lastError: getLastError(), ...health.status('tank01') },
     nba_stats: { enabled: FALLBACK_ENABLED(), ...health.status('nba_stats') },
@@ -100,7 +108,7 @@ async function withProvider(cacheKey, ttl, op, supports = () => true, usable = (
       if (!result.meta.cacheHit) health.recordSuccess(provider.name);
       return result;
     } catch (error) {
-      health.recordFailure(provider.name, error);
+      recordFailure(provider.name, error);
       // Try the next candidate provider.
     }
   }
@@ -167,7 +175,7 @@ export async function getSeasonStats(season, externalIds) {
       }
       // Empty bulk result -> fall through to the next provider / per-player path.
     } catch (error) {
-      health.recordFailure(provider.name, error);
+      recordFailure(provider.name, error);
       // Fall through to per-player path (e.g. Tank01).
     }
   }
@@ -251,7 +259,7 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
         return { value: all.filter((s) => wanted.has(String(s.externalId))), meta: result.meta };
       }
     } catch (error) {
-      health.recordFailure(provider.name, error);
+      recordFailure(provider.name, error);
     }
   }
   return null;
@@ -263,6 +271,7 @@ export async function getSeasonStatsBulkOnly(season, externalIds) {
  * the general nba.com fallback flag because ESPN's bulk feed omits the splits.
  */
 export async function getSeasonReboundSplits(season) {
+  if (!sourceAllowed('nba_com')) return null; // stats.nba.com is default-deny; this call ignores the general fallback flag, so gate it here
   const cacheKey = `seasonReboundSplits:${season}:nba_stats`;
   if (cache.isFresh(cacheKey)) return cache.get(cacheKey);
   if (!health.canAttempt('nba_stats')) return cache.get(cacheKey) || null;
@@ -275,7 +284,7 @@ export async function getSeasonReboundSplits(season) {
     if (!result.meta.cacheHit) health.recordSuccess('nba_stats');
     return result;
   } catch (error) {
-    health.recordFailure('nba_stats', error);
+    recordFailure('nba_stats', error);
     return cache.get(cacheKey) || null;
   }
 }
@@ -324,7 +333,7 @@ export async function getRecentForm(season) {
       if (!result.meta.cacheHit) health.recordSuccess(provider.name);
       return result; // { value: { externalId -> {recent, recentGameCount} }, meta }
     } catch (error) {
-      health.recordFailure(provider.name, error);
+      recordFailure(provider.name, error);
     }
   }
   return null;
@@ -406,7 +415,7 @@ export async function getHistoricalAvailability(currentSeason, count = 3) {
       return { season, gameTotal, gamesByPlayer: result.value || {} };
     } catch (error) {
       // A failed season is omitted; never breaks projections or penalizes.
-      health.recordFailure(provider.name, error);
+      recordFailure(provider.name, error);
       return null;
     }
   });
