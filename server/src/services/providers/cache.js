@@ -14,8 +14,29 @@
  * same get/set interface.
  */
 
-const store = new Map(); // key -> { value, provider, fetchedAt, expiresAt }
+const store = new Map(); // key -> { value, provider, derivedFrom, fetchedAt, expiresAt, purgeAt }
 const inFlight = new Map(); // key -> Promise<{ value, meta }>  (single-flight de-dup)
+
+/**
+ * Retention. `expiresAt` is when an entry stops being FRESH; it may still be served as a stale fallback when its loader fails
+ * (better slightly-old real data than none), but only until `purgeAt`, after which it is deleted and the memory is released.
+ *
+ * Yahoo-derived entries (provider 'yahoo', or any entry tagged derivedFrom: 'yahoo' even though another component computed it)
+ * get a SHORT stale grace and a 24-hour hard cap, in line with Yahoo's documented rule that data not listed as storable
+ * indefinitely must be deleted within 24 hours. Everything else keeps a 24-hour grace so independent providers still serve a
+ * stale fallback through a long outage, but is no longer retained forever.
+ *
+ * The grace is a trade-off, not just a safety margin: during an HTTP 999 block (backoff 5 s to 5 min, circuit open for at least
+ * 60 s) a stale workspace is served instead of an error, which avoids extra Yahoo requests. 15 minutes covers that comfortably.
+ */
+export const RETENTION = Object.freeze({
+  yahooStaleGraceMs: 15 * 60 * 1000,
+  defaultStaleGraceMs: 24 * 60 * 60 * 1000,
+  yahooHardCapMs: 24 * 60 * 60 * 1000,
+  sweepIntervalMs: 60 * 1000,
+});
+
+const isYahooEntry = (provider, derivedFrom) => provider === 'yahoo' || derivedFrom === 'yahoo';
 
 // Per-dataset TTLs (ms), tuned to how fast each dataset changes.
 export const TTL = {
@@ -34,6 +55,7 @@ export function get(key) {
   const entry = store.get(key);
   if (!entry) return null;
   const now = Date.now();
+  if (now > entry.purgeAt) { store.delete(key); return null; } // past the stale-fallback window: gone
   return {
     value: entry.value,
     meta: {
@@ -46,19 +68,55 @@ export function get(key) {
   };
 }
 
-export function set(key, value, { provider, ttl }) {
+export function set(key, value, { provider, ttl, derivedFrom = null, staleGraceMs } = {}) {
   const now = Date.now();
-  store.set(key, { value, provider, fetchedAt: now, expiresAt: now + ttl });
+  const yahoo = isYahooEntry(provider, derivedFrom);
+  const grace = staleGraceMs ?? (yahoo ? RETENTION.yahooStaleGraceMs : RETENTION.defaultStaleGraceMs);
+  let purgeAt = now + ttl + grace;
+  if (yahoo) purgeAt = Math.min(purgeAt, now + RETENTION.yahooHardCapMs); // never beyond 24 h, whatever the caller asked
+  store.set(key, { value, provider, derivedFrom, fetchedAt: now, expiresAt: now + ttl, purgeAt });
+  maybeSweep(now);
 }
 
 export function has(key) {
-  return store.has(key);
+  const entry = store.get(key);
+  if (!entry) return false;
+  if (Date.now() > entry.purgeAt) { store.delete(key); return false; }
+  return true;
 }
 
 /** True if a fresh (non-expired) entry exists. */
 export function isFresh(key) {
   const entry = store.get(key);
-  return Boolean(entry && Date.now() <= entry.expiresAt);
+  return Boolean(entry && Date.now() <= entry.expiresAt && Date.now() <= entry.purgeAt);
+}
+
+/** Delete every entry past its purge deadline. Returns how many were removed. `now` is injectable for tests. */
+export function purgeExpired(now = Date.now()) {
+  let removed = 0;
+  for (const [key, entry] of store) {
+    if (now > entry.purgeAt) { store.delete(key); removed += 1; }
+  }
+  return removed;
+}
+
+let lastSweepAt = Date.now();
+function maybeSweep(now) {
+  if (now - lastSweepAt < RETENTION.sweepIntervalMs) return;
+  lastSweepAt = now;
+  purgeExpired(now);
+}
+
+/** Number of entries currently held (fresh or within their stale window). */
+export function size() {
+  return store.size;
+}
+
+// Idle servers get swept too (no traffic means no opportunistic sweeps). unref(): never keeps the process alive.
+const sweeper = setInterval(() => purgeExpired(), RETENTION.sweepIntervalMs);
+sweeper.unref?.();
+export function stopSweeper() {
+  clearInterval(sweeper);
 }
 
 export function del(key) {

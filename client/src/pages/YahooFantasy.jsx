@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../services/api';
+import YahooAttribution from '../components/YahooAttribution';
 
 export default function YahooFantasy() {
   const [status, setStatus] = useState(null);
@@ -44,7 +45,7 @@ export default function YahooFantasy() {
           <h1 className="text-3xl font-bold text-dark-50">Yahoo Fantasy</h1>
           <p className="mt-2 text-dark-400">Your linked NBA leagues and teams.</p>
         </div>
-        <div className="rounded-xl bg-[#6001d2] px-4 py-2 font-black text-white">Y!</div>
+        <YahooAttribution className="max-w-xs" />
       </div>
 
       {error && <div className="mb-6 rounded-lg border border-red-700/50 bg-red-900/30 p-4 text-red-400">{error}</div>}
@@ -58,7 +59,6 @@ export default function YahooFantasy() {
 
       {status?.configured && !status.connected && (
         <div className="card max-w-2xl text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-[#6001d2] text-2xl font-black">Y!</div>
           <h2 className="text-xl font-semibold">Connect Yahoo Fantasy</h2>
           <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-dark-300">Authorize read access so ProGM can display your basketball leagues and teams.</p>
           <button onClick={connect} className="mt-5 rounded-lg bg-[#6001d2] px-6 py-3 font-semibold text-white hover:bg-[#7b20e8]">Continue with Yahoo</button>

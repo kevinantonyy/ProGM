@@ -35,6 +35,21 @@ import { resolveDraftStatusDisplay, withPlayerStatus } from '../services/fantasy
 import { resolveDraftPreview, fetchDraftPreviewPool, PREVIEW_CACHE_PREFIX } from '../services/fantasy/draftPreview.js';
 import { resolveRankingsFullPool } from '../services/fantasy/leaguePool.js';
 
+// The per-user workspace cache key: it contains the authenticated user id, so an entry exists only if THAT user's own Yahoo token built it.
+function workspaceCacheKey(profile, userId, leagueKey, teamKey) {
+  const flags = `${resolveDraftStatusDisplay() ? '.status' : ''}${resolveRankingsFullPool() ? '.pool' : ''}${resolveDraftPreview() ? '.preview' : ''}`;
+  return `bball:workspace:${profile}${flags}:${userId}:${leagueKey}:${teamKey}`;
+}
+
+/**
+ * Cache-ONLY read of a user's own assembled workspace (used by the consented Ask ProGM context). Never calls Yahoo and never writes:
+ * a cold or purged cache returns null and the caller asks the user to reload the league.
+ */
+export function readCachedWorkspace({ userId, leagueKey, teamKey }, store = cache) {
+  const hit = store.get(workspaceCacheKey(rankingProfileForUser(userId), userId, leagueKey, teamKey));
+  return hit ? { value: hit.value, fetchedAt: hit.meta?.fetchedAt ?? null, stale: Boolean(hit.meta?.stale) } : null;
+}
+
 const routeDependencies = { authenticate, accessTokenFor, yahooFantasy, buildProjectionContext, buildBasketballWorkspace, cache, fetchYahooDraftResults, peekYahooDraftResults, fetchYahooDraftPool, fetchDraftPreviewPool };
 
 // Injectable I/O keeps endpoint regressions testable without Yahoo or a database.
@@ -46,10 +61,6 @@ const router = Router();
 // the authenticated user id, Yahoo league key (whose game key identifies the season), team key and every flag that changes the
 // payload, so two users, leagues or flag sets can never share a build. Entries are removed when the build settles, success or failure.
 const inFlightWorkspaces = new Map();
-function workspaceCacheKey(profile, userId, leagueKey, teamKey) {
-  const flags = `${resolveDraftStatusDisplay() ? '.status' : ''}${resolveRankingsFullPool() ? '.pool' : ''}${resolveDraftPreview() ? '.preview' : ''}`;
-  return `bball:workspace:${profile}${flags}:${userId}:${leagueKey}:${teamKey}`;
-}
 const LEAGUE_KEY_RE = /^\d+\.l\.\d+$/;
 const TEAM_KEY_RE = /^\d+\.l\.\d+\.t\.\d+$/;
 
@@ -166,7 +177,7 @@ router.get('/workspace', authenticate, async (req, res) => {
       if (cached && !cached.meta.stale) return res.json({ ...cached.value, cache: { hit: true, fetchedAt: cached.meta.fetchedAt } });
     }
 
-    const shadowSink = resolveRankingShadow(process.env, req.userId) && rankingDiagnosticsEnabled() ? (result) => cache.set(`bball:ranking-shadow:${req.userId}:${leagueKey}:${teamKey}`, result, { provider: 'progm', ttl: WORKSPACE_TTL }) : null;
+    const shadowSink = resolveRankingShadow(process.env, req.userId) && rankingDiagnosticsEnabled() ? (result) => cache.set(`bball:ranking-shadow:${req.userId}:${leagueKey}:${teamKey}`, result, { provider: 'progm', derivedFrom: 'yahoo', ttl: WORKSPACE_TTL }) : null;
     const joined = inFlightWorkspaces.get(cacheKey);
     if (joined) {
       // Same user, league, team and flags are already building: wait for that build instead of repeating ~100 Yahoo requests.
@@ -598,7 +609,7 @@ router.get('/draft-preview', (req, res, next) => (resolveDraftPreview() ? next()
       draftBoard, completeness, projection, externalData: { available: ctx.externalAvailable },
     };
     // An all-unprojected board is retried soon (the data provider may recover); the verified Yahoo pool stays cached.
-    cache.set(resultKey, body, { provider: 'progm', ttl: degraded || projectedCount === 0 ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
+    cache.set(resultKey, body, { provider: 'progm', derivedFrom: 'yahoo', ttl: degraded || projectedCount === 0 ? PREVIEW_DEGRADED_TTL : PREVIEW_TTL });
     return res.json({ ...body, cache: { hit: false, fetchedAt: new Date().toISOString() } });
   } catch (error) {
     if (Number(error?.httpStatus) === 999) {

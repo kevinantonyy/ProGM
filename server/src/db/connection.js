@@ -51,6 +51,11 @@ export async function initDatabase() {
     claim_hash CHAR(64) PRIMARY KEY, access_token TEXT NOT NULL, refresh_token TEXT NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL, yahoo_guid VARCHAR(100),
     claim_expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
+  // Server-recorded consent to send part of a Yahoo league to an AI provider: date, disclosure version, revocation. No IP or device data.
+  await postgres.query(`CREATE TABLE IF NOT EXISTS ai_data_consents (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, scope VARCHAR(40) NOT NULL,
+    disclosure_version INTEGER NOT NULL, granted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, revoked_at TIMESTAMPTZ,
+    PRIMARY KEY (user_id, scope))`);
   await postgres.query(`CREATE TABLE IF NOT EXISTS espn_connections (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     league_id VARCHAR(30) NOT NULL, season INTEGER NOT NULL, team_id INTEGER NOT NULL,
